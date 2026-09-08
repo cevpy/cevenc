@@ -5318,6 +5318,37 @@ class TwofishEncryptor:
         return z[0] | (z[1] << 8) | (z[2] << 16) | (z[3] << 24)
 
     @classmethod
+    def _keyed_sbox(cls, i, b, l, k):
+        """h-cascade'in MDS ÖNCESİ anahtar-bağımlı S-box'u (tek byte, pozisyon i)."""
+        Q0, Q1 = cls._qtables()
+        y = b
+        if k == 4:
+            y = (Q1[y] if i in (0, 3) else Q0[y]) ^ l[3][i]
+        if k >= 3:
+            y = (Q1[y] if i in (0, 1) else Q0[y]) ^ l[2][i]
+        if i == 0:   y = Q1[Q0[Q0[y] ^ l[1][0]] ^ l[0][0]]
+        elif i == 1: y = Q0[Q0[Q1[y] ^ l[1][1]] ^ l[0][1]]
+        elif i == 2: y = Q1[Q1[Q0[y] ^ l[1][2]] ^ l[0][2]]
+        else:        y = Q0[Q1[Q1[y] ^ l[1][3]] ^ l[0][3]]
+        return y
+
+    @classmethod
+    def _g_tables(cls, S, k):
+        """4 anahtar-bağımlı 256×32-bit tablo: g(X)=MK[0][x0]^MK[1][x1]^MK[2][x2]^MK[3][x3].
+        _h ile BİT-AYNI sonuç verir ama ~25× hızlı (round başına 4 arama + XOR)."""
+        gf = cls._gf; MP = cls._MDS_POLY; MDS = cls._MDS
+        l = [[(w >> (8 * j)) & 0xFF for j in range(4)] for w in S]
+        MK = []
+        for i in range(4):
+            col = []
+            for b in range(256):
+                s = cls._keyed_sbox(i, b, l, k)
+                col.append(gf(MDS[0][i], s, MP) | (gf(MDS[1][i], s, MP) << 8)
+                           | (gf(MDS[2][i], s, MP) << 16) | (gf(MDS[3][i], s, MP) << 24))
+            MK.append(col)
+        return MK
+
+    @classmethod
     def _key_schedule(cls, key):
         k = len(key) // 8
         words = [int.from_bytes(key[4 * i:4 * i + 4], 'little') for i in range(2 * k)]
@@ -5337,14 +5368,18 @@ class TwofishEncryptor:
             K.append((A + B) & 0xFFFFFFFF)
             k1 = (A + 2 * B) & 0xFFFFFFFF
             K.append(((k1 << 9) | (k1 >> 23)) & 0xFFFFFFFF)
-        return K, S, k
+        MK = cls._g_tables(S, k)   # g için precomputed keyed tablolar (hız)
+        return K, MK, k
 
     @classmethod
-    def _enc_block(cls, pt, K, S, k):
+    def _enc_block(cls, pt, K, MK):
+        m0, m1, m2, m3 = MK
         R = [int.from_bytes(pt[4 * i:4 * i + 4], 'little') ^ K[i] for i in range(4)]
         for r in range(16):
-            t0 = cls._h(R[0], S, k)
-            t1 = cls._h(((R[1] << 8) | (R[1] >> 24)) & 0xFFFFFFFF, S, k)
+            x = R[0]
+            t0 = m0[x & 0xFF] ^ m1[(x >> 8) & 0xFF] ^ m2[(x >> 16) & 0xFF] ^ m3[(x >> 24) & 0xFF]
+            x = ((R[1] << 8) | (R[1] >> 24)) & 0xFFFFFFFF
+            t1 = m0[x & 0xFF] ^ m1[(x >> 8) & 0xFF] ^ m2[(x >> 16) & 0xFF] ^ m3[(x >> 24) & 0xFF]
             f0 = (t0 + t1 + K[2 * r + 8]) & 0xFFFFFFFF
             f1 = (t0 + 2 * t1 + K[2 * r + 9]) & 0xFFFFFFFF
             r2 = R[2] ^ f0; r2 = ((r2 >> 1) | (r2 << 31)) & 0xFFFFFFFF
@@ -5355,13 +5390,16 @@ class TwofishEncryptor:
         return b''.join(w.to_bytes(4, 'little') for w in out)
 
     @classmethod
-    def _dec_block(cls, ct, K, S, k):
+    def _dec_block(cls, ct, K, MK):
+        m0, m1, m2, m3 = MK
         R = [int.from_bytes(ct[4 * i:4 * i + 4], 'little') ^ K[i + 4] for i in range(4)]
         R = [R[2], R[3], R[0], R[1]]
         for r in range(15, -1, -1):
             R = [R[2], R[3], R[0], R[1]]
-            t0 = cls._h(R[0], S, k)
-            t1 = cls._h(((R[1] << 8) | (R[1] >> 24)) & 0xFFFFFFFF, S, k)
+            x = R[0]
+            t0 = m0[x & 0xFF] ^ m1[(x >> 8) & 0xFF] ^ m2[(x >> 16) & 0xFF] ^ m3[(x >> 24) & 0xFF]
+            x = ((R[1] << 8) | (R[1] >> 24)) & 0xFFFFFFFF
+            t1 = m0[x & 0xFF] ^ m1[(x >> 8) & 0xFF] ^ m2[(x >> 16) & 0xFF] ^ m3[(x >> 24) & 0xFF]
             f0 = (t0 + t1 + K[2 * r + 8]) & 0xFFFFFFFF
             f1 = (t0 + 2 * t1 + K[2 * r + 9]) & 0xFFFFFFFF
             r2 = ((R[2] << 1) | (R[2] >> 31)) & 0xFFFFFFFF; r2 ^= f0
@@ -5376,13 +5414,13 @@ class TwofishEncryptor:
         if isinstance(data, str): data = data.encode()
         pad = 16 - len(data) % 16
         data = data + bytes([pad] * pad)
-        K, S, k = cls._key_schedule(key)
+        K, MK, k = cls._key_schedule(key)
         iv = os.urandom(16)
         ct = bytearray()
         prev = iv
         for bi in range(0, len(data), 16):
             blk = bytes(data[bi + j] ^ prev[j] for j in range(16))
-            enc = cls._enc_block(blk, K, S, k)
+            enc = cls._enc_block(blk, K, MK)
             ct.extend(enc)
             prev = enc
         return cls.MAGIC + iv + bytes(ct), key
@@ -5391,12 +5429,12 @@ class TwofishEncryptor:
     def decrypt(cls, data, key):
         if data[:4] != cls.MAGIC: return data
         iv = data[4:20]; ct = data[20:]
-        K, S, k = cls._key_schedule(key)
+        K, MK, k = cls._key_schedule(key)
         pt = bytearray()
         prev = iv
         for bi in range(0, len(ct), 16):
             blk = ct[bi:bi + 16]
-            dec = cls._dec_block(blk, K, S, k)
+            dec = cls._dec_block(blk, K, MK)
             pt.extend(bytes(dec[j] ^ prev[j] for j in range(16)))
             prev = blk
         p = pt[-1] if pt else 0
@@ -5411,8 +5449,8 @@ class TwofishEncryptor:
             (bytes(32), '57FF739D4DC92C1BD7FC01700CC8216F'),
         ]
         for key, want in kats:
-            K, S, k = cls._key_schedule(key)
-            if cls._enc_block(bytes(16), K, S, k).hex().upper() != want:
+            K, MK, k = cls._key_schedule(key)
+            if cls._enc_block(bytes(16), K, MK).hex().upper() != want:
                 return False
         # CBC round-trip + üretilen inline decrypt round-trip
         blob = os.urandom(200)
@@ -5473,12 +5511,32 @@ if {var_in}[:4]==b"NJTF":
     for _i in range(20):
         _A=_tfh((2*_i)*0x01010101,_tfMe,_tfkk);_B=_tfh((2*_i+1)*0x01010101,_tfMo,_tfkk);_B=((_B<<8)|(_B>>24))&0xFFFFFFFF
         _tfK.append((_A+_B)&0xFFFFFFFF);_k1=(_A+2*_B)&0xFFFFFFFF;_tfK.append(((_k1<<9)|(_k1>>23))&0xFFFFFFFF)
+    # (v18.1) g() için precomputed anahtar-bağımlı tablolar → ~25× hız (donma fix)
+    _tfl=[[(_w>>(8*_j))&0xFF for _j in range(4)] for _w in _tfS]
+    def _tfks(_i,_b):
+        _y=_b
+        if _tfkk==4:_y=(_tfQ1[_y] if _i in(0,3) else _tfQ0[_y])^_tfl[3][_i]
+        if _tfkk>=3:_y=(_tfQ1[_y] if _i in(0,1) else _tfQ0[_y])^_tfl[2][_i]
+        if _i==0:_y=_tfQ1[_tfQ0[_tfQ0[_y]^_tfl[1][0]]^_tfl[0][0]]
+        elif _i==1:_y=_tfQ0[_tfQ0[_tfQ1[_y]^_tfl[1][1]]^_tfl[0][1]]
+        elif _i==2:_y=_tfQ1[_tfQ1[_tfQ0[_y]^_tfl[1][2]]^_tfl[0][2]]
+        else:_y=_tfQ0[_tfQ1[_tfQ1[_y]^_tfl[1][3]]^_tfl[0][3]]
+        return _y
+    _tfMK=[]
+    for _i in range(4):
+        _col=[]
+        for _b in range(256):
+            _s=_tfks(_i,_b)
+            _col.append(_tfgf(_tfMDS[0][_i],_s,0x69)|(_tfgf(_tfMDS[1][_i],_s,0x69)<<8)|(_tfgf(_tfMDS[2][_i],_s,0x69)<<16)|(_tfgf(_tfMDS[3][_i],_s,0x69)<<24))
+        _tfMK.append(_col)
+    _m0,_m1,_m2,_m3=_tfMK
     def _tfdec(_ct):
         _R=[int.from_bytes(_ct[4*_i:4*_i+4],"little")^_tfK[_i+4] for _i in range(4)]
         _R=[_R[2],_R[3],_R[0],_R[1]]
         for _r in range(15,-1,-1):
             _R=[_R[2],_R[3],_R[0],_R[1]]
-            _t0=_tfh(_R[0],_tfS,_tfkk);_t1=_tfh(((_R[1]<<8)|(_R[1]>>24))&0xFFFFFFFF,_tfS,_tfkk)
+            _x=_R[0];_t0=_m0[_x&0xFF]^_m1[(_x>>8)&0xFF]^_m2[(_x>>16)&0xFF]^_m3[(_x>>24)&0xFF]
+            _x=((_R[1]<<8)|(_R[1]>>24))&0xFFFFFFFF;_t1=_m0[_x&0xFF]^_m1[(_x>>8)&0xFF]^_m2[(_x>>16)&0xFF]^_m3[(_x>>24)&0xFF]
             _f0=(_t0+_t1+_tfK[2*_r+8])&0xFFFFFFFF;_f1=(_t0+2*_t1+_tfK[2*_r+9])&0xFFFFFFFF
             _r2=((_R[2]<<1)|(_R[2]>>31))&0xFFFFFFFF;_r2^=_f0
             _r3=_R[3]^_f1;_r3=((_r3>>1)|(_r3<<31))&0xFFFFFFFF
