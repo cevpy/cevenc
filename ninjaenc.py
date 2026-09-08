@@ -6372,7 +6372,6 @@ class WhiteBoxAES:
         return iv + ct
 
     @classmethod
-    @classmethod
     def _lin_bijection(cls, rng):
         """Rastgele tersinir 8x8 GF(2) matrisi → (F, Finv) 256-byte lookup çifti.
         F(x)=M·x (bit-matris çarpımı). Doğrusal olduğu için XOR ile değişmeli:
