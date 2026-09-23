@@ -67,6 +67,20 @@ sistemi ve MySQL'dir. Bu yüzden başlat/durdur/kur gibi süreç işlemleri web 
 Yerel geliştirme: `.env`'de `DB_BACKEND=sqlite` yapıp `python calisan_bot.py polling` ve
 ayrı bir terminalde `python supervisor.py`.
 
+## Otomatik dağıtım (PythonAnywhere API)
+
+1. PythonAnywhere'de **Databases** sekmesinde MySQL şifresini belirleyip `botyonetici`
+   veritabanını oluşturun (bu adım API ile yapılamıyor).
+2. Ortam değişkenleri: `PA_USERNAME`, `PA_API_TOKEN` (Account → API token), `PA_HOST`
+   (`www.pythonanywhere.com` veya `eu.pythonanywhere.com`), `MAIN_BOT_TOKEN`, `OWNER_IDS`,
+   `MYSQL_PASSWORD`.
+3. `python yonetici/deploy/pa_deploy.py` (mevcut web app'i silip kurmak için `--recreate`).
+
+Betik dosyaları yükler, `.env` yazar (mevcut `WEBHOOK_SECRET` korunur), `deploy/pa_bootstrap.sh`
+komutuyla always-on task oluşturur. Bootstrap venv'i ve kütüphaneleri kurar, `setup` çalıştırır,
+sonra supervisor'ı başlatır. Betik ardından web app'i, virtualenv'i ve WSGI dosyasını ayarlar,
+web app'i yeniden yükler, siteyi ve webhook'u doğrular.
+
 ## Alt bot yapısı
 
 ```
