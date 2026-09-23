@@ -1,0 +1,6 @@
+flask>=3.0
+pyTelegramBotAPI>=4.20
+pymysql>=1.1
+cryptography>=41   # MySQL 8 caching_sha2_password kimlik doğrulaması için
+psutil>=5.9
+requests>=2.31

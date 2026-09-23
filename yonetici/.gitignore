@@ -1,0 +1,8 @@
+# Çalışma zamanı verileri
+.env
+bots/
+backups/
+uploads/
+*.sqlite3*
+supervisor.log*
+supervisor.lock

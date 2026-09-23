@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Bot Yöneticisi</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --bg2: var(--tg-theme-secondary-bg-color, #f1f2f6);
+    --section: var(--tg-theme-section-bg-color, var(--bg));
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #8a8f98);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --btn: var(--tg-theme-button-color, #2481cc);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --danger: var(--tg-theme-destructive-text-color, #e53935);
+    --ok: #2ea043; --warn: #d29922;
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg2); color: var(--text);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { padding: 12px 12px calc(24px + env(safe-area-inset-bottom)); max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 4px 4px 10px; }
+  h2 { font-size: 13px; font-weight: 600; color: var(--hint); text-transform: uppercase; letter-spacing: .04em;
+    margin: 18px 6px 6px; }
+  .card { background: var(--section); border-radius: var(--radius); padding: 12px 14px; margin-bottom: 10px; }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .grow { flex: 1; min-width: 0; }
+  .hint { color: var(--hint); font-size: 13px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 3px 10px;
+    border-radius: 99px; background: var(--bg2); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--hint); flex: none; }
+  .dot.ok { background: var(--ok); } .dot.bad { background: var(--danger); } .dot.warn { background: var(--warn); }
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 10px; }
+  .tile { background: var(--section); border-radius: var(--radius); padding: 12px 14px; }
+  .tile .v { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .tile .l { color: var(--hint); font-size: 12px; }
+  .meter { height: 6px; border-radius: 3px; background: var(--bg2); overflow: hidden; margin-top: 8px; }
+  .meter > i { display: block; height: 100%; background: var(--btn); border-radius: 3px; transition: width .4s; }
+  .meter.hot > i { background: var(--warn); } .meter.crit > i { background: var(--danger); }
+  .list .item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--section);
+    border-bottom: 1px solid var(--bg2); cursor: pointer; }
+  .list .item:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+  .list .item:last-child { border-radius: 0 0 var(--radius) var(--radius); border-bottom: 0; }
+  .list .item:only-child { border-radius: var(--radius); }
+  .item .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .meta { color: var(--hint); font-size: 13px; }
+  .num { font-variant-numeric: tabular-nums; }
+  button { font: inherit; border: 0; border-radius: 10px; padding: 10px 14px; background: var(--btn);
+    color: var(--btn-text); cursor: pointer; font-weight: 500; }
+  button.sec { background: color-mix(in srgb, var(--btn) 13%, var(--section)); color: var(--link); }
+  button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+  button:disabled { opacity: .5; }
+  .btns { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+  .tabs { display: flex; gap: 4px; background: var(--bg2); padding: 3px; border-radius: 10px; margin: 14px 0 10px;
+    overflow-x: auto; }
+  .tabs button { flex: 1; background: transparent; color: var(--text); padding: 7px 8px; font-size: 14px;
+    white-space: nowrap; }
+  .tabs button.on { background: var(--section); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  pre.log { margin: 0; padding: 10px; background: #0d1117; color: #c9d1d9; border-radius: 10px; font-size: 12px;
+    line-height: 1.45; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+  pre.log .e { color: #ff7b72; }
+  .err { background: color-mix(in srgb, var(--danger) 10%, var(--section)); border-left: 3px solid var(--danger); }
+  .err pre { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 180px;
+    overflow: auto; }
+  input, select { font: inherit; width: 100%; padding: 9px 10px; border-radius: 8px; border: 1px solid var(--bg2);
+    background: var(--bg); color: var(--text); }
+  .kv { display: grid; grid-template-columns: 38% 1fr auto; gap: 6px; margin-bottom: 6px; }
+  .kv input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .kv button { padding: 6px 10px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips button { background: var(--bg2); color: var(--text); padding: 8px 12px; }
+  .chips button.on { background: var(--btn); color: var(--btn-text); }
+  .switch { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; }
+  .switch + .switch { border-top: 1px solid var(--bg2); }
+  .switch input { width: auto; transform: scale(1.3); }
+  .empty { text-align: center; color: var(--hint); padding: 28px 8px; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: rgba(0,0,0,.82);
+    color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s;
+    pointer-events: none; max-width: 90vw; z-index: 9; }
+  #toast.show { opacity: 1; }
+  .hist { font-size: 13px; padding: 8px 0; border-bottom: 1px solid var(--bg2); }
+  .hist:last-child { border-bottom: 0; }
+</style>
+</head>
+<body>
+<main id="app"><div class="empty">Yükleniyor…</div></main>
+<div id="toast"></div>
+<script>
+const tg = window.Telegram && window.Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+const app = document.getElementById("app");
+const state = { view: "home", bot: null, tab: "log", logMode: "a", timer: null, editing: false };
+
+const ICON = { running: "ok", restarting: "warn", starting: "warn", crashed: "bad", crashloop: "bad", error: "bad" };
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtBytes = n => { n = +n || 0; for (const u of ["B","KB","MB","GB","TB"]) { if (n < 1024 || u === "TB") return (u === "B" ? n.toFixed(0) : n.toFixed(1)) + " " + u; n /= 1024; } };
+const fmtDur = s => { s = Math.floor(+s || 0); const d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60);
+  return d ? `${d}g ${h}sa` : h ? `${h}sa ${m}dk` : m ? `${m}dk ${s%60}sn` : `${s}sn`; };
+const fmtTime = t => t ? new Date(t*1000).toLocaleString("tr-TR", {day:"2-digit", month:"2-digit", hour:"2-digit", minute:"2-digit"}) : "-";
+const meter = (pct) => `<div class="meter ${pct >= 90 ? "crit" : pct >= 70 ? "hot" : ""}"><i style="width:${Math.min(100, Math.max(0, pct||0)).toFixed(0)}%"></i></div>`;
+
+function toast(msg) {
+  const t = document.getElementById("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600);
+}
+function haptic(kind) { try { tg.HapticFeedback.notificationOccurred(kind); } catch (e) {} }
+function confirmBox(msg) {
+  return new Promise(res => tg && tg.showConfirm ? tg.showConfirm(msg, res) : res(window.confirm(msg)));
+}
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { "Content-Type": "application/json",
+    "X-Telegram-Init-Data": tg ? tg.initData : "", ...(opts.headers || {}) } });
+  const data = await r.json().catch(() => ({ error: "Sunucu hatası (" + r.status + ")" }));
+  if (!r.ok) throw new Error(data.error || "Hata " + r.status);
+  return data;
+}
+
+function go(view, bot) {
+  state.view = view; state.bot = bot || null; state.editing = false;
+  if (view === "bot" && !bot) state.view = "home";
+  if (tg) { state.view === "home" ? tg.BackButton.hide() : tg.BackButton.show(); }
+  render(true);
+}
+if (tg) tg.BackButton.onClick(() => go("home"));
+
+async function render(first) {
+  clearTimeout(state.timer);
+  try {
+    if (state.view === "home") await renderHome();
+    else if (state.view === "bot") await renderBot(first);
+    else if (state.view === "settings") await renderSettings();
+  } catch (e) {
+    app.innerHTML = `<div class="card"><b>⚠️ ${esc(e.message)}</b><p class="hint">Paneli bottaki “Panel” düğmesinden açın.</p></div>`;
+    return;
+  }
+  if (state.view !== "settings") state.timer = setTimeout(() => render(false), 5000);
+}
+
+// ------------------------------------------------------------------ ana ekran
+async function renderHome() {
+  const d = await api("/api/overview");
+  const s = d.system || {};
+  const disk = s.quota ? 100 * (s.project_bytes || 0) / s.quota : null;
+  const bots = d.bots.map(b => `
+    <div class="item" data-bot="${esc(b.name)}">
+      <span class="dot ${b.busy ? "warn" : ICON[b.status] || ""}"></span>
+      <div class="grow"><div class="name">${esc(b.name)}</div>
+        <div class="meta">${esc(b.busy ? "⏳ " + b.busy : b.status_text)}${b.uptime ? " · " + fmtDur(b.uptime) : ""}</div></div>
+      <div class="meta num" style="text-align:right">${b.rss_mb != null ? b.rss_mb.toFixed(0) + " / " : ""}${b.ram_limit_mb} MB
+        ${b.cpu_percent != null ? "<br>CPU " + b.cpu_percent.toFixed(0) + "%" : ""}</div>
+    </div>`).join("");
+  app.innerHTML = `
+    <div class="row" style="margin:4px 4px 12px"><h1 class="grow" style="margin:0">Bot Yöneticisi</h1>
+      <span class="pill"><span class="dot ${d.supervisor_ok ? "ok" : "bad"}"></span>Supervisor</span></div>
+    ${d.supervisor_ok ? "" : `<div class="card err">Supervisor yanıt vermiyor. Always-on task'ı kontrol edin. Komutlar kuyrukta bekler.</div>`}
+    <div class="tiles">
+      <div class="tile"><div class="l">CPU</div><div class="v num">${(s.cpu || 0).toFixed(0)}%</div>${meter(s.cpu)}</div>
+      <div class="tile"><div class="l">RAM</div><div class="v num">${(s.ram_pct || 0).toFixed(0)}%</div>${meter(s.ram_pct)}
+        <div class="l num" style="margin-top:4px">${fmtBytes(s.ram_used)} / ${fmtBytes(s.ram_total)}</div></div>
+      <div class="tile"><div class="l">Disk (proje)</div><div class="v num">${fmtBytes(s.project_bytes)}</div>
+        ${disk != null ? meter(disk) + `<div class="l">kota ${fmtBytes(s.quota)}</div>` : `<div class="l">boş ${fmtBytes(s.disk_free)}</div>`}</div>
+      <div class="tile"><div class="l">Uptime</div><div class="v num">${fmtDur(s.sup_uptime)}</div>
+        <div class="l">sunucu ${fmtDur(s.host_uptime)}</div></div>
+    </div>
+    <div class="card row" style="justify-content:space-around;text-align:center">
+      <div><div class="v num" style="font-size:20px;font-weight:600">${d.counts.running}</div><div class="hint">çalışıyor</div></div>
+      <div><div class="v num" style="font-size:20px;font-weight:600">${d.counts.stopped}</div><div class="hint">durdu</div></div>
+      <div><div class="v num" style="font-size:20px;font-weight:600;color:${d.counts.problem ? "var(--danger)" : "inherit"}">${d.counts.problem}</div><div class="hint">sorunlu</div></div>
+      <div><div class="v num" style="font-size:20px;font-weight:600">${fmtBytes(s.bots_rss)}</div><div class="hint">bot RAM</div></div>
+    </div>
+    <h2>Botlar (${d.bots.length})</h2>
+    <div class="list">${bots || `<div class="card empty">Henüz bot yok. Yeni botu sohbetten /yeni ile ekleyin.</div>`}</div>
+    <div style="margin-top:14px"><button class="sec" style="width:100%" id="toSettings">⚙️ Ayarlar ve işlem geçmişi</button></div>`;
+  app.querySelectorAll("[data-bot]").forEach(el => el.onclick = () => go("bot", el.dataset.bot));
+  document.getElementById("toSettings").onclick = () => go("settings");
+}
+
+// ------------------------------------------------------------------ bot detayı
+async function renderBot(first) {
+  const name = state.bot;
+  const d = await api(`/api/bots/${encodeURIComponent(name)}`);
+  const b = d.bot;
+  const running = ["running", "starting", "restarting"].includes(b.status);
+  const pct = b.rss_mb != null ? 100 * b.rss_mb / b.ram_limit_mb : 0;
+  const head = `
+    <div class="row" style="margin:4px 4px 10px"><span class="dot ${b.busy ? "warn" : ICON[b.status] || ""}" style="width:12px;height:12px"></span>
+      <div class="grow"><h1 style="margin:0">${esc(b.name)}</h1>
+      <div class="hint">${b.username ? "@" + esc(b.username) + " · " : ""}${esc(b.busy ? "⏳ " + b.busy : b.status_text)}${b.uptime ? " · " + fmtDur(b.uptime) : ""}</div></div></div>
+    ${d.pending.length ? `<div class="card hint">⏳ Kuyrukta: ${d.pending.map(esc).join(", ")}</div>` : ""}
+    <div class="tiles">
+      <div class="tile"><div class="l">RAM</div><div class="v num">${b.rss_mb != null ? b.rss_mb.toFixed(0) : "–"}<span class="hint"> / ${b.ram_limit_mb} MB</span></div>${meter(pct)}</div>
+      <div class="tile"><div class="l">CPU</div><div class="v num">${b.cpu_percent != null ? b.cpu_percent.toFixed(1) + "%" : "–"}</div>${meter(b.cpu_percent)}</div>
+      <div class="tile"><div class="l">Çökme</div><div class="v num">${b.crash_count}</div><div class="l">son: ${fmtTime(b.last_crash_at)}</div></div>
+      <div class="tile"><div class="l">Yeniden başlatma</div><div class="v num">${b.restart_count}</div><div class="l">${d.packages} paket kurulu</div></div>
+    </div>
+    <div class="btns" style="margin-bottom:10px">
+      ${running ? `<button data-act="stop" class="sec">⏹ Durdur</button><button data-act="restart">🔄 Yeniden başlat</button>`
+                : `<button data-act="start">▶️ Başlat</button>`}
+      <button data-act="install" class="sec">📥 Kütüphaneleri kur</button>
+    </div>
+    ${b.last_error ? `<div class="card err"><div class="row"><b class="grow">Son hata ${b.last_exit_code != null ? "(kod " + b.last_exit_code + ")" : ""}</b>
+      <button class="sec" id="copyErr" style="padding:4px 10px">Kopyala</button></div><pre>${esc(b.last_error)}</pre></div>` : ""}
+    <div class="tabs">${[["log","Loglar"],["env",".env"],["res","Kaynaklar"],["bak","Yedekler"]].map(([k, l]) =>
+      `<button data-tab="${k}" class="${state.tab === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    <div id="tab"></div>`;
+  // .env düzenlenirken sayfayı yeniden çizme (yazılanlar kaybolmasın) — sadece üst kısmı güncelle
+  if (!first && state.editing) return;
+  app.innerHTML = head;
+  app.querySelectorAll("[data-act]").forEach(el => el.onclick = () => doAction(name, el.dataset.act));
+  app.querySelectorAll("[data-tab]").forEach(el => el.onclick = () => { state.tab = el.dataset.tab; state.editing = false; render(true); });
+  const ce = document.getElementById("copyErr");
+  if (ce) ce.onclick = () => navigator.clipboard.writeText(b.last_error).then(() => toast("Kopyalandı"), () => toast("Kopyalanamadı"));
+  const tab = document.getElementById("tab");
+  if (state.tab === "log") await tabLog(name, tab);
+  else if (state.tab === "env") await tabEnv(name, tab);
+  else if (state.tab === "res") tabRes(name, tab, d);
+  else tabBak(name, tab, d);
+}
+
+async function doAction(name, act, extra = {}) {
+  if (["stop", "delete", "rollback"].includes(act)) {
+    const msg = { stop: `${name} durdurulsun mu?`, delete: `${name} silinsin mi? (son yedek alınır)`,
+                  rollback: `${extra.file} geri yüklensin mi?` }[act];
+    if (!await confirmBox(msg)) return;
+  }
+  try {
+    const r = await api(`/api/bots/${encodeURIComponent(name)}/action`, { method: "POST", body: JSON.stringify({ action: act, ...extra }) });
+    haptic("success"); toast(r.message);
+    if (act === "delete") return go("home");
+  } catch (e) { haptic("error"); toast(e.message); }
+  render(true);
+}
+
+async function tabLog(name, el) {
+  const d = await api(`/api/bots/${encodeURIComponent(name)}/logs?mode=${state.logMode}&n=300`);
+  const isErr = l => /Traceback|Error|Exception|CRITICAL|FATAL|\bERROR\b/i.test(l);
+  el.innerHTML = `
+    <div class="chips" style="margin-bottom:8px">${[["a","Tümü"],["e","Sadece hatalar"],["i","Kurulum (pip)"]].map(([k, l]) =>
+      `<button data-mode="${k}" class="${state.logMode === k ? "on" : ""}">${l}</button>`).join("")}</div>
+    <pre class="log" id="logbox">${d.lines.length ? d.lines.map(l => isErr(l) ? `<span class="e">${esc(l)}</span>` : esc(l)).join("\n") : "(boş)"}</pre>`;
+  el.querySelectorAll("[data-mode]").forEach(b => b.onclick = () => { state.logMode = b.dataset.mode; render(true); });
+  const box = document.getElementById("logbox"); box.scrollTop = box.scrollHeight;
+}
+
+async function tabEnv(name, el) {
+  const d = await api(`/api/bots/${encodeURIComponent(name)}/env`);
+  const rows = Object.entries(d.env);
+  const rowHtml = ([k, v]) => `<div class="kv"><input class="k" value="${esc(k)}" placeholder="ANAHTAR" autocapitalize="off">
+    <input class="v" type="password" value="${esc(v)}" placeholder="değer" autocapitalize="off"><button class="sec del">✕</button></div>`;
+  el.innerHTML = `<div class="card"><div id="kvs">${rows.map(rowHtml).join("")}</div>
+    <div class="btns" style="margin-top:8px"><button class="sec" id="addKv">＋ Satır</button><button class="sec" id="showKv">👁 Göster</button>
+    <button id="saveKv">💾 Kaydet</button></div>
+    <p class="hint">Değişiklikler bot yeniden başlatılınca geçerli olur. Token değişirse çakışma kontrolü yapılır.</p></div>`;
+  const kvs = document.getElementById("kvs");
+  const bind = () => kvs.querySelectorAll(".del").forEach(b => b.onclick = () => { b.parentElement.remove(); state.editing = true; });
+  bind();
+  kvs.oninput = () => state.editing = true;
+  document.getElementById("addKv").onclick = () => { kvs.insertAdjacentHTML("beforeend", rowHtml(["", ""])); bind(); state.editing = true; };
+  document.getElementById("showKv").onclick = () => kvs.querySelectorAll(".v").forEach(i => i.type = i.type === "password" ? "text" : "password");
+  document.getElementById("saveKv").onclick = async () => {
+    const env = {};
+    kvs.querySelectorAll(".kv").forEach(r => { const k = r.querySelector(".k").value.trim(); if (k) env[k] = r.querySelector(".v").value; });
+    try {
+      const r = await api(`/api/bots/${encodeURIComponent(name)}/env`, { method: "PUT", body: JSON.stringify({ env }) });
+      haptic("success"); state.editing = false;
+      toast(r.warnings.length ? "Kaydedildi. ⚠️ " + r.warnings.join(" ") : "Kaydedildi");
+      if (await confirmBox("Değişikliklerin geçerli olması için bot yeniden başlatılsın mı?")) doAction(name, "restart");
+    } catch (e) { haptic("error"); toast(e.message); }
+  };
+}
+
+function tabRes(name, el, d) {
+  const b = d.bot;
+  const custom = !d.ram_choices.includes(b.ram_limit_mb);
+  el.innerHTML = `<div class="card">
+    <div class="hint" style="margin-bottom:8px">RAM limiti (setrlimit) — bir sonraki başlatmada uygulanır</div>
+    <div class="chips">${d.ram_choices.map(mb => `<button data-ram="${mb}" class="${b.ram_limit_mb === mb ? "on" : ""}">${mb < 1024 ? mb + " MB" : mb / 1024 + " GB"}</button>`).join("")}</div>
+    <div class="row" style="margin-top:8px"><input id="ramCustom" type="number" min="64" max="${d.max_ram}" placeholder="Özel (MB)" value="${custom ? b.ram_limit_mb : ""}">
+      <button id="ramSave" class="sec">Kaydet</button></div></div>
+    <div class="card">
+      <label class="switch"><span>Otomatik başlat<br><span class="hint">Supervisor açılınca başlat</span></span><input type="checkbox" id="autostart" ${b.autostart ? "checked" : ""}></label>
+      <label class="switch"><span>Çökünce yeniden aç<br><span class="hint">Artan bekleme ile</span></span><input type="checkbox" id="auto_restart" ${b.auto_restart ? "checked" : ""}></label>
+    </div>
+    ${b.status === "running" ? `<button style="width:100%" data-apply>🔄 Şimdi uygula (yeniden başlat)</button>` : ""}`;
+  const put = async body => {
+    state.editing = false;
+    try { await api(`/api/bots/${encodeURIComponent(name)}/resources`, { method: "PUT", body: JSON.stringify(body) }); haptic("success"); toast("Kaydedildi"); }
+    catch (e) { haptic("error"); toast(e.message); }
+    render(true);
+  };
+  document.getElementById("ramCustom").onfocus = () => state.editing = true;
+  el.querySelectorAll("[data-ram]").forEach(x => x.onclick = () => put({ ram_limit_mb: +x.dataset.ram }));
+  document.getElementById("ramSave").onclick = () => put({ ram_limit_mb: +document.getElementById("ramCustom").value });
+  ["autostart", "auto_restart"].forEach(f => document.getElementById(f).onchange = e => put({ [f]: e.target.checked }));
+  const ap = el.querySelector("[data-apply]"); if (ap) ap.onclick = () => doAction(name, "restart");
+}
+
+function tabBak(name, el, d) {
+  el.innerHTML = `<div class="list">${d.backups.map(bk => `
+      <div class="item" style="cursor:default"><div class="grow"><div class="name num">${esc(bk.file.replace(/\.zip$/, ""))}</div>
+      <div class="meta">${fmtBytes(bk.size)} · ${fmtTime(bk.mtime)}</div></div>
+      <button class="sec" data-restore="${esc(bk.file)}">⏪ Geri yükle</button></div>`).join("") ||
+      `<div class="card empty">Yedek yok</div>`}</div>
+    <div class="btns" style="margin-top:10px"><button class="sec" id="mkBackup">💾 Şimdi yedekle</button>
+      <button class="danger" id="delBot">🗑 Botu sil</button></div>
+    <p class="hint">Yedek: kod + .env + requirements (venv/, logs/, data/ hariç). Geri yüklemede data/ korunur.</p>`;
+  el.querySelectorAll("[data-restore]").forEach(x => x.onclick = () => doAction(name, "rollback", { file: x.dataset.restore }));
+  document.getElementById("mkBackup").onclick = () => doAction(name, "backup");
+  document.getElementById("delBot").onclick = () => doAction(name, "delete");
+}
+
+// ------------------------------------------------------------------ ayarlar
+async function renderSettings() {
+  const [s, h] = await Promise.all([api("/api/settings"), api("/api/history")]);
+  app.innerHTML = `<h1>Ayarlar</h1><h2>Bildirim eşikleri</h2><div class="card">
+    ${Object.entries(s.labels).map(([k, l]) => `<div class="switch"><span class="grow">${esc(l)}<br>
+      <span class="hint">${s.ranges[k][0]} – ${s.ranges[k][1]}</span></span>
+      <input style="width:90px" type="number" data-set="${k}" value="${esc(s.settings[k])}"></div>`).join("")}
+    <button style="width:100%;margin-top:8px" id="saveSet">💾 Kaydet</button></div>
+    <h2>İşlem geçmişi (${h.total})</h2><div class="card">
+    ${h.rows.map(r => `<div class="hist"><span class="hint num">${fmtTime(r.created_at)}</span> <b>${esc(r.action)}</b>
+      ${r.target ? esc(r.target) : ""} ${r.detail ? `<span class="hint">— ${esc(r.detail)}</span>` : ""}
+      <span class="hint">(${r.user_id || "sistem"})</span></div>`).join("") || `<div class="empty">Kayıt yok</div>`}</div>`;
+  document.getElementById("saveSet").onclick = async () => {
+    const body = {};
+    app.querySelectorAll("[data-set]").forEach(i => body[i.dataset.set] = +i.value);
+    try { await api("/api/settings", { method: "PUT", body: JSON.stringify(body) }); haptic("success"); toast("Kaydedildi"); }
+    catch (e) { haptic("error"); toast(e.message); }
+  };
+}
+
+render(true);
+</script>
+</body>
+</html>
