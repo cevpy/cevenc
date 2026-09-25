@@ -1,5 +1,5 @@
 """
-ANKA Security Bot — Kanal / Grup koruma botu
+ULUS Security Bot — Kanal / Grup koruma botu
 Ayarlar .env dosyasından okunur (bkz. .env).
 """
 from telegram.ext import (
@@ -72,7 +72,7 @@ BACKUP_CHAT_ID = int(os.getenv("BACKUP_CHAT_ID", "0") or 0) or FOUNDER_ID
 # Not: Bot token ile giriş yapar; gerçek kullanıcı hesabı (userbot) değildir.
 USERBOT_API_ID = int(os.getenv("API_ID", "0") or 0)
 USERBOT_API_HASH = os.getenv("API_HASH", "").strip()
-USERBOT_SESSION = _env_path("TELETHON_SESSION", "anka_userbot")
+USERBOT_SESSION = _env_path("TELETHON_SESSION", "ulus_userbot")
 
 TZ_TR = timezone(timedelta(hours=3))
 TELEGRAM_SERVICE_ID = 777000        # Bağlı kanaldan otomatik iletilen gönderiler
@@ -5402,7 +5402,7 @@ async def cmd_panel(update: Update, context):
         ],
     ])
     await update.message.reply_text(
-        f"🤖 ANKA Security Bot Paneli\n\n"
+        f"🤖 ULUS Security Bot Paneli\n\n"
         f"📊 İstatistikler:\n"
         f"├ Toplam Grup: {total_groups}\n"
         f"├ Toplam Kanal: {total_channels}\n"
@@ -5550,7 +5550,7 @@ async def panel_callback(update: Update, context):
             ],
         ])
         await query.message.edit_text(
-            f"🤖 ANKA Security Bot Paneli\n\n"
+            f"🤖 ULUS Security Bot Paneli\n\n"
             f"📊 İstatistikler:\n"
             f"├ Toplam Grup: {total_groups}\n"
             f"├ Toplam Kanal: {total_channels}\n"
@@ -5786,7 +5786,7 @@ async def help_command(update: Update, context):
             )
         else:
             await update.message.reply_text(
-                "ANKA Security Bot\n\n"
+                "ULUS Security Bot\n\n"
                 "/start — Baslat\n"
                 "/help — Yardim\n"
                 "/id — ID goster\n"
