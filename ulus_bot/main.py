@@ -14,8 +14,13 @@ from telegram.ext import (
     ChatJoinRequestHandler,
     TypeHandler,
 )
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, Bot, MessageEntity
-from telegram.constants import ParseMode
+from telegram import (
+    Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, Bot, MessageEntity,
+    ReplyKeyboardMarkup, KeyboardButton, KeyboardButtonRequestChat, ForceReply, BotCommand,
+    BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators,
+    BotCommandScopeChat,
+)
+from telegram.constants import ParseMode, KeyboardButtonStyle
 from telegram.ext import ContextTypes
 from telegram.error import TelegramError, Forbidden, BadRequest
 from telegram.helpers import mention_html
@@ -81,6 +86,19 @@ CHANNEL_BOT_ID = 136817688          # "Kanal olarak" yazan kullanıcılar
 
 userbot: TelegramClient = None
 BOT_ID: int = 0
+
+
+class UlusRateLimiter(AIORateLimiter):
+    """Telegram'ın grup başına dakikada ~20 mesaj sınırı yalnızca mesaj GÖNDERMEYE uygulanır.
+    Varsayılan AIORateLimiter bu sınırı grup chat_id'li her isteğe (silme, ban, mute...) uyguladığı
+    için spam saldırısında moderasyon işlemleri 3 sn arayla sıraya giriyordu. Burada gönderim dışı
+    istekler yalnızca genel (saniyede 30) sınıra tabidir; 429 gelirse yine max_retries kadar denenir."""
+    _GROUP_LIMITED = ("send", "copy", "forward")
+
+    async def process_request(self, callback, args, kwargs, endpoint, data, rate_limit_args):
+        if data.get("chat_id") is not None and not endpoint.startswith(self._GROUP_LIMITED):
+            data = {**data, "chat_id": 0}  # genel sınır uygulanır, grup sınırı uygulanmaz
+        return await super().process_request(callback, args, kwargs, endpoint, data, rate_limit_args)
 
 async def get_userbot() -> TelegramClient:
     global userbot
@@ -430,6 +448,16 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_appeals ON appeals(chat_id, user_id, created_at);
 
+            CREATE TABLE IF NOT EXISTS join_captcha (
+                chat_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                answer TEXT NOT NULL,
+                message_id INTEGER,
+                created_at REAL NOT NULL,
+                passed INTEGER DEFAULT 0,
+                PRIMARY KEY (chat_id, user_id)
+            );
+
             CREATE TABLE IF NOT EXISTS notes (
                 chat_id TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -620,12 +648,13 @@ def save_channel_settings(chat_id: str, data: dict):
         conn.commit()
     _settings_cache[chat_id] = (time.time(), copy.deepcopy(data))
 
-async def send_log(chat_id: str, message: str, parse_mode: str | None = None):
+async def send_log(chat_id: str, message: str, parse_mode: str | None = None, reply_markup=None):
     channel = get_channel_settings(chat_id)
     log_id = channel.get('log_chat_id') if channel else None
     if log_id:
         try:
-            await bot.send_message(log_id, message, parse_mode=parse_mode, disable_web_page_preview=True)
+            await bot.send_message(log_id, message, parse_mode=parse_mode, disable_web_page_preview=True,
+                                   reply_markup=reply_markup)
         except Exception as e:
             logger.debug(f"Log gönderilemedi ({chat_id}): {e}")
 
@@ -637,6 +666,30 @@ def mention(user) -> str:
         return "bilinmeyen"
     name = (getattr(user, 'first_name', None) or getattr(user, 'username', None) or str(user.id))
     return mention_html(user.id, name)
+
+GREEN = KeyboardButtonStyle.SUCCESS   # açık / onay
+RED = KeyboardButtonStyle.DANGER      # kapalı / ban / sil
+BLUE = KeyboardButtonStyle.PRIMARY    # menü / geçiş
+
+def ibtn(text: str, data: str | None = None, style: str | None = None, url: str | None = None) -> InlineKeyboardButton:
+    """Renkli inline buton (Telegram'ın Şubat 2026 sonrası sürümlerinde renkli, eskilerde normal görünür)."""
+    return InlineKeyboardButton(text, callback_data=data, url=url, style=style)
+
+def toggle_btn(label: str, on, data: str) -> InlineKeyboardButton:
+    return ibtn(f"{'✅' if on else '❌'} {label}", data, GREEN if on else RED)
+
+def thread_kw(msg, chat_id=None) -> dict:
+    """Konulara (topic) bölünmüş gruplarda bot mesajının aynı konuya gitmesi için send_message parametresi."""
+    if msg is None or not getattr(msg, 'is_topic_message', False) or not msg.message_thread_id:
+        return {}
+    if chat_id is not None and str(msg.chat_id) != str(chat_id):
+        return {}
+    return {'message_thread_id': msg.message_thread_id}
+
+def fold(section: str) -> str:
+    """İlk satır kalın başlık, gövde açılır alıntı (<blockquote expandable>) olarak döner. Girdi düz metindir."""
+    head, _, body = section.strip().partition("\n")
+    return f"<b>{html.escape(head)}</b>\n<blockquote expandable>{html.escape(body.strip())}</blockquote>"
 
 def parse_duration(s: str) -> int | None:
     """30m / 2h / 7d / 45s → saniye"""
@@ -758,6 +811,14 @@ def _default_channel_settings():
         'link_whitelist': [],
         # Kullanıcı adı olmayan yeni üyeleri sustur (varsayılan kapalı; çok sayıda gerçek kullanıcıyı etkiler)
         'restrict_no_username': False,
+        # Koruma başına ceza (panel): delete / warn / mute / kick / ban
+        'action_link': 'warn', 'action_word': 'warn', 'action_spam': 'warn',
+        'action_flood': 'mute', 'action_forward': 'mute', 'action_media': 'mute',
+        # "Sustur" cezası süresi (dk) — flood/forward/medya kademeli süre kullanır
+        'mute_minutes': 60,
+        # Katılım isteği gönderene özelden captcha
+        'join_captcha': False,
+        'welcome_enabled': True,
     }
 
 async def _register_chat(chat_id: str, owner_id: int, chat_type: str):
@@ -919,10 +980,13 @@ async def log_mod_action(chat_id: str, action: str, target_id: int, target_uname
             """, (chat_id, action, target_id, target_uname, by_id, by_uname, reason, time.time()))
             conn.commit()
 
-async def apply_punishment(chat_id: str, user_id: int, username: str, reason: str, channel: dict, user=None):
-    """Uyarı verir; limit dolunca ayarlanan cezayı (ban/tempban/kick/mute) uygular."""
+async def apply_punishment(chat_id: str, user_id: int, username: str, reason: str, channel: dict, user=None,
+                           thread: dict | None = None):
+    """Uyarı verir; limit dolunca ayarlanan cezayı (ban/tempban/kick/mute) uygular.
+    Mesajların altına yetkililer için moderasyon butonları eklenir; thread = konu (topic) parametresi."""
     if await is_staff_user(chat_id, user_id, channel):
         return
+    thread = thread or {}
     async with _db_lock:
         with get_db() as conn:
             row = conn.execute(
@@ -942,12 +1006,14 @@ async def apply_punishment(chat_id: str, user_id: int, username: str, reason: st
     reason_h = html.escape(reason)
 
     if warn_count < warn_limit:
+        markup = mod_markup(chat_id, user_id, 'warn')
         try:
             await bot.send_message(chat_id, f"⚠️ {who} {reason_h} → <b>{warn_count}/{warn_limit}</b> uyarı",
-                                   parse_mode=ParseMode.HTML)
+                                   parse_mode=ParseMode.HTML, reply_markup=markup, **thread)
         except Exception as e:
             logger.debug(f"Uyarı mesajı gönderilemedi: {e}")
-        await send_log(chat_id, f"⚠️ {who} {reason_h} | Uyarı: {warn_count}/{warn_limit} | {chat_id}", ParseMode.HTML)
+        await send_log(chat_id, f"⚠️ {who} {reason_h} | Uyarı: {warn_count}/{warn_limit} | {chat_id}", ParseMode.HTML,
+                       reply_markup=markup)
         return
 
     action = settings.get('warn_action', 'ban')
@@ -992,13 +1058,189 @@ async def apply_punishment(chat_id: str, user_id: int, username: str, reason: st
                     """, (chat_id, user_id, username, now + duration, now, BOT_ID))
                 conn.commit()
 
+        kind = 'mute' if action == 'mute' else (None if action == 'kick' else 'ban')
+        markup = mod_markup(chat_id, user_id, kind) if kind else None
         extra = "\n📨 İtiraz için bota özelden /itiraz yazabilir." if action in ('ban', 'tempban') else ""
         await bot.send_message(chat_id, f"🚫 {who} {warn_limit} uyarıya ulaştı → <b>{label}</b> ({reason_h}){extra}",
-                               parse_mode=ParseMode.HTML)
-        await send_log(chat_id, f"🚫 {who} {label} | Sebep: {reason_h} | {chat_id}", ParseMode.HTML)
+                               parse_mode=ParseMode.HTML, reply_markup=markup, **thread)
+        await send_log(chat_id, f"🚫 {who} {label} | Sebep: {reason_h} | {chat_id}", ParseMode.HTML, reply_markup=markup)
         await log_mod_action(chat_id, label, user_id, username or '', BOT_ID, 'bot', reason)
     except Exception as e:
         logger.error(f"Ceza uygulanamadı ({chat_id}/{user_id}): {e}")
+
+# ─────────────────────────── KORUMA CEZALARI + MODERASYON BUTONLARI ───────────────────────────
+
+async def enforce_action(chat_id: str, msg, channel: dict, prot: str, reason: str, bot_data: dict,
+                         mute_minutes: int | None = None):
+    """Korumanın panelden seçilen cezasını uygular (ihlal mesajı önceden silinmiş olmalı).
+    delete: sadece sil · warn: uyarı (limitte warn_action) · mute · kick · ban.
+    mute_minutes verilirse (flood/forward/medya kademeli süre) ayar yerine o kullanılır."""
+    user = msg.from_user
+    action = channel['settings'].get(f'action_{prot}') or PROTECTIONS[prot][2]
+    tkw = thread_kw(msg, chat_id)
+    username = user.username or user.first_name
+    if action == 'warn':
+        await apply_punishment(chat_id, user.id, username, reason, channel, user=user, thread=tkw)
+        return
+    who = mention(user)
+    reason_h = html.escape(reason)
+    if action == 'delete':
+        await send_log(chat_id, f"🗑 {reason_h} → {who} mesajı silindi | {chat_id}", ParseMode.HTML)
+        return
+    if await is_staff_user(chat_id, user.id, channel):
+        return
+    now = time.time()
+    markup = None
+    try:
+        if action == 'mute':
+            minutes = mute_minutes or int(channel['settings'].get('mute_minutes', 60) or 60)
+            until = now + minutes * 60
+            await bot.restrict_chat_member(chat_id, user.id, permissions=ChatPermissions.no_permissions(),
+                                           until_date=int(until))
+            async with _db_lock:
+                with get_db() as conn:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO mute_list (chat_id, user_id, username, until_date, muted_at, muted_by)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (chat_id, user.id, username, until, now, BOT_ID))
+                    conn.commit()
+            text = f"🔇 {who} {reason_h} → {human_duration(minutes * 60)} susturuldu"
+            stat, markup = 'mutes', mod_markup(chat_id, user.id, 'mute')
+        elif action == 'kick':
+            await bot.ban_chat_member(chat_id, user.id)
+            await bot.unban_chat_member(chat_id, user.id, only_if_banned=True)
+            text, stat = f"👢 {who} {reason_h} → gruptan atıldı", 'kicks'
+        else:
+            await bot.ban_chat_member(chat_id, user.id)
+            async with _db_lock:
+                with get_db() as conn:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO ban_list (chat_id, user_id, username, reason, banned_at, banned_by)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (chat_id, user.id, username, reason, now, BOT_ID))
+                    conn.commit()
+            text = f"🚫 {who} {reason_h} → banlandı\n📨 İtiraz için bota özelden /itiraz yazabilir."
+            stat, markup = 'bans', mod_markup(chat_id, user.id, 'ban')
+    except Exception as e:
+        logger.error(f"Koruma cezası uygulanamadı ({prot}/{action}, {chat_id}/{user.id}): {e}")
+        return
+    channel['stats'][stat] = channel['stats'].get(stat, 0) + 1
+    save_channel_settings(chat_id, channel)
+    key = f"flood_notice_{chat_id}_{user.id}"  # aynı kullanıcı için 30 sn'de tek grup duyurusu
+    if now - bot_data.get(key, 0) > 30:
+        bot_data[key] = now
+        try:
+            await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup, **tkw)
+        except Exception as e:
+            logger.debug(f"Ceza duyurusu gönderilemedi: {e}")
+    await send_log(chat_id, f"{text} | {chat_id}", ParseMode.HTML, reply_markup=markup)
+    await log_mod_action(chat_id, f"{prot}:{action}", user.id, username, BOT_ID, 'bot', reason)
+
+def mod_markup(chat_id, user_id: int, kind: str) -> InlineKeyboardMarkup:
+    """Bot mesajlarının altındaki yetkili butonları. kind: warn / mute / ban"""
+    p = f"{chat_id}|{user_id}"
+    if kind == 'warn':
+        rows = [[ibtn("↩️ Uyarıyı geri al", f"m|uw|{p}", BLUE), ibtn("🔇 Sustur 1s", f"m|mu|{p}"),
+                 ibtn("🚫 Banla", f"m|bn|{p}", RED)]]
+    elif kind == 'mute':
+        rows = [[ibtn("🔊 Susturmayı kaldır", f"m|um|{p}", GREEN), ibtn("🚫 Banla", f"m|bn|{p}", RED)]]
+    else:
+        rows = [[ibtn("✅ Banı kaldır", f"m|ub|{p}", GREEN)]]
+    return InlineKeyboardMarkup(rows)
+
+MOD_BUTTON_PERMS = {'uw': 'can_warn', 'mu': 'can_mute', 'um': 'can_mute', 'bn': 'can_ban', 'ub': 'can_ban'}
+
+async def mod_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """m|<işlem>|<chat_id>|<user_id> — uyarı/ban/mute mesajlarının altındaki butonlar."""
+    query = update.callback_query
+    try:
+        _, act, cid, uid_s = query.data.split('|')
+        target = int(uid_s)
+    except ValueError:
+        await query.answer("Hata.", show_alert=True)
+        return
+    clicker = query.from_user
+    channel = get_channel_settings(cid)
+    if act not in MOD_BUTTON_PERMS or not channel:
+        await query.answer("Geçersiz işlem.", show_alert=True)
+        return
+    if not has_specific_permission(cid, clicker.id, MOD_BUTTON_PERMS[act]):
+        await query.answer("Yetkin yok!", show_alert=True)
+        return
+    if act in ('mu', 'bn') and await is_staff_user(cid, target, channel):
+        await query.answer("Yetkililere uygulanamaz.", show_alert=True)
+        return
+    try:
+        tuser = (await bot.get_chat_member(cid, target)).user
+    except Exception:
+        tuser = None
+    who = mention(tuser) if tuser else mention_html(target, str(target))
+    uname = (tuser.username or tuser.first_name) if tuser else ''
+    now = time.time()
+    new_markup = None
+    try:
+        if act == 'uw':
+            async with _db_lock:
+                with get_db() as conn:
+                    row = conn.execute("SELECT warn_count FROM warnings WHERE chat_id = ? AND user_id = ?",
+                                       (cid, target)).fetchone()
+                    n = max(0, (row['warn_count'] if row else 0) - 1)
+                    if n:
+                        conn.execute("UPDATE warnings SET warn_count = ? WHERE chat_id = ? AND user_id = ?", (n, cid, target))
+                    else:
+                        conn.execute("DELETE FROM warnings WHERE chat_id = ? AND user_id = ?", (cid, target))
+                    conn.commit()
+            result = f"↩️ Uyarı geri alındı ({n}/{channel['settings'].get('warn_limit', 5)})"
+        elif act == 'mu':
+            await bot.restrict_chat_member(cid, target, permissions=ChatPermissions.no_permissions(),
+                                           until_date=int(now + 3600))
+            async with _db_lock:
+                with get_db() as conn:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO mute_list (chat_id, user_id, username, until_date, muted_at, muted_by)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (cid, target, uname, now + 3600, now, clicker.id))
+                    conn.commit()
+            result, new_markup = "🔇 1 saat susturuldu", mod_markup(cid, target, 'mute')
+        elif act == 'um':
+            await bot.restrict_chat_member(cid, target, permissions=await _default_member_permissions(cid))
+            async with _db_lock:
+                with get_db() as conn:
+                    conn.execute("DELETE FROM mute_list WHERE chat_id = ? AND user_id = ?", (cid, target))
+                    conn.commit()
+            result = "🔊 Susturma kaldırıldı"
+        elif act == 'bn':
+            await bot.ban_chat_member(cid, target)
+            async with _db_lock:
+                with get_db() as conn:
+                    conn.execute("""
+                        INSERT OR REPLACE INTO ban_list (chat_id, user_id, username, reason, banned_at, banned_by)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (cid, target, uname, "moderasyon butonu", now, clicker.id))
+                    conn.commit()
+            channel['stats']['bans'] = channel['stats'].get('bans', 0) + 1
+            save_channel_settings(cid, channel)
+            result, new_markup = "🚫 Banlandı", mod_markup(cid, target, 'ban')
+        else:
+            await bot.unban_chat_member(cid, target, only_if_banned=True)
+            async with _db_lock:
+                with get_db() as conn:
+                    conn.execute("DELETE FROM ban_list WHERE chat_id = ? AND user_id = ?", (cid, target))
+                    conn.execute("DELETE FROM temp_bans WHERE chat_id = ? AND user_id = ?", (cid, target))
+                    conn.commit()
+            result = "✅ Ban kaldırıldı"
+    except Exception as e:
+        await query.answer(f"Hata: {e}"[:190], show_alert=True)
+        return
+    await query.answer(result)
+    try:
+        await query.edit_message_text(f"{query.message.text_html}\n\n— {result} · {mention(clicker)}",
+                                      parse_mode=ParseMode.HTML, reply_markup=new_markup,
+                                      disable_web_page_preview=True)
+    except Exception as e:
+        logger.debug(f"Moderasyon mesajı güncellenemedi: {e}")
+    await log_mod_action(cid, f"buton:{act}", target, uname, clicker.id, clicker.username or '', result)
+    await send_log(cid, f"{result}: {who} | {mention(clicker)}", ParseMode.HTML)
 
 # ─────────────────────────── CAPTCHA ───────────────────────────
 
@@ -1055,7 +1297,7 @@ async def send_captcha(chat_id: str, user_id: int, username: str, context: Conte
     random.shuffle(options)
 
     # Doğru cevap butona YAZILMAZ; sadece veritabanında tutulur.
-    keyboard = [[InlineKeyboardButton(str(opt), callback_data=f"captcha|{chat_id}|{user_id}|{opt}") for opt in options]]
+    keyboard = [[ibtn(str(opt), f"captcha|{chat_id}|{user_id}|{opt}", BLUE) for opt in options]]
 
     try:
         await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id,
@@ -1210,7 +1452,8 @@ async def newbie_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             chat_id,
             f"🆕 {mention(msg.from_user)}, yeni üyeler ilk {minutes} dakika link/medya/forward gönderemez. "
             f"(~{left} dk kaldı)",
-            parse_mode=ParseMode.HTML
+            parse_mode=ParseMode.HTML,
+            **thread_kw(msg, chat_id)
         )
         if context.job_queue:
             context.job_queue.run_once(_delete_message_job, 20, data={'chat_id': chat_id, 'message_id': notice.message_id})
@@ -1245,17 +1488,12 @@ async def anti_forward_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                          (chat_id, user_id, now))
             conn.commit()
 
-    mute_minutes = [10, 30, 300][min(count, 2)]
     try:
         await msg.delete()
-        await bot.restrict_chat_member(
-            chat_id=chat_id, user_id=user_id,
-            permissions=ChatPermissions.no_permissions(),
-            until_date=int(now + mute_minutes * 60)
-        )
-        await send_log(chat_id, f"🚫 Forward ({count+1}. kez) → {mention(msg.from_user)} {mute_minutes} dk mute", ParseMode.HTML)
     except Exception as e:
-        logger.error(f"Anti-forward hata: {e}")
+        logger.debug(f"Forward silinemedi: {e}")
+    await enforce_action(chat_id, msg, channel, 'forward', f"forward ({count + 1}. kez)", context.bot_data,
+                         mute_minutes=[10, 30, 300][min(count, 2)])
 
 MEDIA_FIELDS = ['photo', 'video', 'animation', 'document', 'voice', 'sticker', 'video_note', 'audio']
 
@@ -1287,17 +1525,12 @@ async def anti_media_flood_handler(update: Update, context: ContextTypes.DEFAULT
 
     if count + 1 >= limit:
         level = min(max(0, (count + 1 - limit) // 3), 2)
-        mute_minutes = [10, 30, 300][level]
         try:
             await msg.delete()
-            await bot.restrict_chat_member(
-                chat_id=chat_id, user_id=user_id,
-                permissions=ChatPermissions.no_permissions(),
-                until_date=int(now + mute_minutes * 60)
-            )
-            await send_log(chat_id, f"📸 Media flood ({count+1}) → {mention(msg.from_user)} {mute_minutes} dk mute", ParseMode.HTML)
         except Exception as e:
-            logger.error(f"Anti-media hata: {e}")
+            logger.debug(f"Medya silinemedi: {e}")
+        await enforce_action(chat_id, msg, channel, 'media', f"medya flood ({count + 1}/{timeframe} sn)",
+                             context.bot_data, mute_minutes=[10, 30, 300][level])
 
 async def anti_spam_flood_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -1327,23 +1560,12 @@ async def anti_spam_flood_handler(update: Update, context: ContextTypes.DEFAULT_
 
     if count + 1 >= limit:
         level = min(max(0, (count + 1 - limit) // 5), 2)
-        mute_minutes = [10, 30, 300][level]
         try:
             await msg.delete()
-            await bot.restrict_chat_member(
-                chat_id=chat_id, user_id=user_id,
-                permissions=ChatPermissions.no_permissions(),
-                until_date=int(now + mute_minutes * 60)
-            )
-            # Aynı flood için tek duyuru
-            key = f"flood_notice_{chat_id}_{user_id}"
-            if now - context.bot_data.get(key, 0) > 30:
-                context.bot_data[key] = now
-                await bot.send_message(chat_id, f"🌊 {mention(msg.from_user)} flood yaptı → {mute_minutes} dk mute",
-                                       parse_mode=ParseMode.HTML)
-            await send_log(chat_id, f"🌊 Flood ({count+1} mesaj/{timeframe}sn) → {mention(msg.from_user)} {mute_minutes} dk mute", ParseMode.HTML)
         except Exception as e:
-            logger.error(f"Anti-flood hata: {e}")
+            logger.debug(f"Flood mesajı silinemedi: {e}")
+        await enforce_action(chat_id, msg, channel, 'flood', f"flood ({count + 1} mesaj/{timeframe} sn)",
+                             context.bot_data, mute_minutes=[10, 30, 300][level])
 
 LINK_PATTERN = re.compile(
     r'((?:https?://|www\.)\S+'
@@ -1403,13 +1625,12 @@ async def anti_link_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _sender_chat_violation(msg, chat_id, "Link")
         raise ApplicationHandlerStop
 
-    user = msg.from_user
     try:
         await msg.delete()
-        await send_log(chat_id, f"🔗 Link silindi → {mention(user)} | {chat_id}", ParseMode.HTML)
-        await apply_punishment(chat_id, user.id, user.username or user.first_name, "link gönderme", channel, user=user)
     except Exception as e:
-        logger.error(f"Anti-link hata: {e}")
+        logger.debug(f"Link mesajı silinemedi: {e}")
+    await send_log(chat_id, f"🔗 Link silindi → {mention(msg.from_user)} | {chat_id}", ParseMode.HTML)
+    await enforce_action(chat_id, msg, channel, 'link', "link gönderme", context.bot_data)
     raise ApplicationHandlerStop  # silinen mesaj için diğer filtreler çalışmasın
 
 # ── Kelime filtresi: Türkçe karakter, büyük/küçük harf, leetspeak ve harf tekrarına dayanıklı ──
@@ -1487,23 +1708,21 @@ async def check_message(update: Update, context):
     if await is_exempt_message(chat_id, message, channel):
         return
 
-    user = message.from_user
-    user_id = user.id
-    username = user.username or user.first_name
+    user_id = message.from_user.id
 
     if settings.get('word_ban_enabled'):
         hit = find_banned_word(text_raw, settings.get('banned_words', []))
         if hit:
             try:
                 await message.delete()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Yasaklı kelime mesajı silinemedi: {e}")
             if message.sender_chat:
                 await _sender_chat_violation(message, chat_id, "Yasaklı kelime")
                 return
             channel['stats']['spams'] = channel['stats'].get('spams', 0) + 1
             save_channel_settings(chat_id, channel)
-            await apply_punishment(chat_id, user_id, username, "yasaklı kelime", channel, user=user)
+            await enforce_action(chat_id, message, channel, 'word', "yasaklı kelime", context.bot_data)
             return
 
     if settings.get('spam_protection') and update.message and not message.sender_chat:
@@ -1519,11 +1738,11 @@ async def check_message(update: Update, context):
                 context.bot_data.pop(key, None)
                 try:
                     await message.delete()
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Spam mesajı silinemedi: {e}")
                 channel['stats']['spams'] = channel['stats'].get('spams', 0) + 1
                 save_channel_settings(chat_id, channel)
-                await apply_punishment(chat_id, user_id, username, "spam", channel, user=user)
+                await enforce_action(chat_id, message, channel, 'spam', "tekrar spam", context.bot_data)
 
 async def spam_memory_cleanup(context: ContextTypes.DEFAULT_TYPE):
     """bot_data içindeki eski spam/flood kayıtlarını temizler (bellek sızıntısını önler)."""
@@ -1693,7 +1912,7 @@ async def add_admin(update: Update, context):
         who = mention(member.user)
         keyboard = [[
             InlineKeyboardButton("Yetkiler", url=f"https://t.me/{context.bot.username}?start=aup_{chat_id}_{user_id}"),
-            InlineKeyboardButton("Kaldir", callback_data=f"removeadmin|{chat_id}|{user_id}")
+            ibtn("Kaldir", f"removeadmin|{chat_id}|{user_id}", RED)
         ]]
         await update.message.reply_text(f"✅ {who} admin yapıldı!", reply_markup=InlineKeyboardMarkup(keyboard),
                                         parse_mode=ParseMode.HTML)
@@ -1869,7 +2088,7 @@ async def ban(update: Update, context):
         reason_h = html.escape(reason)
         await update.message.reply_text(
             f"🚫 {who} {ban_type} aldı! Sebep: {reason_h}\n📨 İtiraz için bota özelden /itiraz yazabilir.",
-            parse_mode=ParseMode.HTML)
+            parse_mode=ParseMode.HTML, reply_markup=mod_markup(chat_id, user_id, 'ban'))
         await send_log(chat_id, f"🚫 {who} {ban_type} | Sebep: {reason_h} | {chat_id}", ParseMode.HTML)
         await log_mod_action(chat_id, ban_type, user_id, username, update.effective_user.id, update.effective_user.username or '', reason)
     except Exception as e:
@@ -2006,7 +2225,8 @@ async def mute(update: Update, context):
         channel['stats']['mutes'] = channel['stats'].get('mutes', 0) + 1
         save_channel_settings(chat_id, channel)
         who = mention(member.user)
-        await update.message.reply_text(f"🔇 {who} {duration_str} mute edildi!", parse_mode=ParseMode.HTML)
+        await update.message.reply_text(f"🔇 {who} {duration_str} mute edildi!", parse_mode=ParseMode.HTML,
+                                        reply_markup=mod_markup(chat_id, user_id, 'mute'))
         await send_log(chat_id, f"🔇 {who} {duration_str} mute | {chat_id}", ParseMode.HTML)
         await log_mod_action(chat_id, 'mute', user_id, username, update.effective_user.id, update.effective_user.username or '', duration_str)
     except Exception as e:
@@ -2098,13 +2318,13 @@ async def warn(update: Update, context):
                     conn.execute("DELETE FROM warnings WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
                     conn.commit()
             await update.message.reply_text(f"🚫 {who} {warn_limit} uyarıya ulaştı → banlandı!\nSebep: {reason_h}",
-                                            parse_mode=ParseMode.HTML)
+                                            parse_mode=ParseMode.HTML, reply_markup=mod_markup(chat_id, user_id, 'ban'))
             await send_log(chat_id, f"🚫 {who} {warn_limit} uyarı → ban | Sebep: {reason_h} | {chat_id}", ParseMode.HTML)
         except Exception as e:
             await update.message.reply_text(f"Hata: {e}")
     else:
         await update.message.reply_text(f"⚠️ {who} uyarıldı! Sebep: {reason_h} | Uyarı: {warn_count}/{warn_limit}",
-                                        parse_mode=ParseMode.HTML)
+                                        parse_mode=ParseMode.HTML, reply_markup=mod_markup(chat_id, user_id, 'warn'))
         await send_log(chat_id, f"⚠️ {who} uyarıldı ({warn_count}/{warn_limit}) | Sebep: {reason_h} | {chat_id}", ParseMode.HTML)
         await log_mod_action(chat_id, 'warn', user_id, username, update.effective_user.id, update.effective_user.username or '', reason)
 
@@ -2225,7 +2445,7 @@ async def slowmode(update: Update, context):
         await update.message.reply_text(f"Hata: {e}")
 
 async def temizle(update: Update, context):
-    
+    """/temizle <sayı> veya /temizle all — toplu silme (deleteMessages) arka planda çalışır, bot beklemez."""
     chat_id = _get_effective_chat_id(update, context)
     if not chat_id or not get_channel_settings(chat_id):
         await update.message.reply_text("Once /kanal ile sec!")
@@ -2233,151 +2453,58 @@ async def temizle(update: Update, context):
     if not has_permission(chat_id, update.effective_user.id, 70):
         await update.message.reply_text("Yetkin yok!")
         return
-    if not context.args:
+    if update.effective_chat.type == 'private':
+        await update.message.reply_text("Bu komutu temizlenecek grubun içinde kullan.")
+        return
+    arg = context.args[0].lower() if context.args else ''
+    if arg != 'all' and not arg.isdigit():
         await update.message.reply_text("Kullanim: /temizle <sayi> veya /temizle all")
         return
 
-    arg = context.args[0].lower()
-    delete_all = (arg == 'all')
-
-    if not delete_all and not arg.isdigit():
-        await update.message.reply_text("Kullanim: /temizle <sayi> veya /temizle all")
-        return
-
+    count = 20000 if arg == 'all' else max(1, min(int(arg), 1000))
     cmd_msg_id = update.message.message_id
-    by_who = mention(update.effective_user)
+    ids = list(range(cmd_msg_id, max(0, cmd_msg_id - count - 1), -1))  # komut mesajı dahil
+    label = "Son 20.000 mesaj" if arg == 'all' else f"Son {count} mesaj"
+    context.application.create_task(
+        _run_cleanup(chat_id, ids, label, mention(update.effective_user), thread_kw(update.message), context.job_queue),
+        update=update)
 
+async def _bulk_delete(chat_id: str, message_ids) -> int:
+    """deleteMessages ile 100'erli toplu silme; bulunamayan mesajlar Telegram tarafından atlanır.
+    Toplu istek hata verirse o parti tek tek denenir. Dönüş: işlenen parti sayısı."""
+    ids = [m for m in message_ids if m and m > 0]
+    batches = fails_in_row = 0
+    for i in range(0, len(ids), 100):
+        chunk = ids[i:i + 100]
+        try:
+            await bot.delete_messages(chat_id, chunk)
+            fails_in_row = 0
+        except Exception as e:
+            logger.debug(f"Toplu silme hatası ({chat_id}): {e}")
+            results = await asyncio.gather(*[bot.delete_message(chat_id, m) for m in chunk], return_exceptions=True)
+            fails_in_row = fails_in_row + 1 if all(isinstance(r, Exception) for r in results) else 0
+            if fails_in_row >= 3:
+                break
+        batches += 1
+    return batches
+
+async def _run_cleanup(chat_id: str, ids: list, label: str, by: str, tkw: dict, job_queue):
+    """Arka plan temizliği: büyük silmelerde önce durum mesajı, sonunda 5 sn görünen sonuç mesajı."""
+    status = None
     try:
-        await update.message.delete()
+        if len(ids) > 1000:
+            status = await bot.send_message(chat_id, "🧹 Mesajlar siliniyor, lütfen bekle...", **tkw)
+        await _bulk_delete(chat_id, ids)
+        text = f"🧹 {label} temizlendi."
+        if status:
+            await status.edit_text(text)
+        else:
+            status = await bot.send_message(chat_id, text, **tkw)
     except Exception as e:
-        logger.debug(f"temizle: {e}")
-
-    if delete_all:
-        status_msg = await bot.send_message(chat_id, "Tum mesajlar siliniyor, lutfen bekle...")
-        deleted_users = 0
-        skipped = 0
-
-        try:
-            admins = await bot.get_chat_administrators(chat_id)
-            admin_ids = {a.user.id for a in admins}
-            admin_ids.add(BOT_ID or 0)
-
-            members_to_clean = []
-            async for member in bot.get_chat_members(chat_id):
-                if member.user.id not in admin_ids and not member.user.is_bot:
-                    members_to_clean.append(member.user.id)
-
-            total = len(members_to_clean)
-            for i, user_id in enumerate(members_to_clean):
-                try:
-                    await bot.ban_chat_member(chat_id, user_id, revoke_messages=True)
-                    await asyncio.sleep(0.1)
-                    await bot.unban_chat_member(chat_id, user_id)
-                    deleted_users += 1
-                except Exception:
-                    skipped += 1
-                await asyncio.sleep(0.2)
-
-                if (i + 1) % 20 == 0:
-                    try:
-                        await status_msg.edit_text(
-                            f"Siliniyor... {i+1}/{total} uye islendi."
-                        )
-                    except Exception as e:
-                        logger.debug(f"temizle: {e}")
-
-        except Exception as e:
-            logger.error(f"temizle all hata: {e}")
-            deleted = 0
-            consecutive_errors = 0
-            i_id = cmd_msg_id - 1
-            batch = []
-            while i_id > max(1, cmd_msg_id - 20000):
-                batch.append(i_id)
-                i_id -= 1
-                if len(batch) == 100:
-                    results = await asyncio.gather(
-                        *[bot.delete_message(chat_id, mid) for mid in batch],
-                        return_exceptions=True
-                    )
-                    ok = sum(1 for r in results if not isinstance(r, Exception))
-                    err = len(results) - ok
-                    deleted += ok
-                    consecutive_errors = 0 if ok > 0 else consecutive_errors + err
-                    batch = []
-                    if consecutive_errors > 200:
-                        break
-                    await asyncio.sleep(0.3)
-            if batch:
-                results = await asyncio.gather(
-                    *[bot.delete_message(chat_id, mid) for mid in batch],
-                    return_exceptions=True
-                )
-                deleted += sum(1 for r in results if not isinstance(r, Exception))
-            try:
-                await status_msg.edit_text(f"{deleted} mesaj silindi.")
-            except Exception as e2:
-                logger.debug(f"temizle: {e2}")
-            await asyncio.sleep(4)
-            try:
-                await status_msg.delete()
-            except Exception as e2:
-                logger.debug(f"temizle: {e2}")
-            await send_log(chat_id, f"Temizle all (fallback): {deleted} mesaj | {by_who}", ParseMode.HTML)
-            return
-
-        try:
-            await status_msg.edit_text(
-                f"Tamamlandi! {deleted_users} uyenin mesajlari silindi."
-                + (f" ({skipped} uye atlandi)" if skipped else "")
-            )
-        except Exception as e:
-            logger.debug(f"temizle: {e}")
-        await asyncio.sleep(5)
-        try:
-            await status_msg.delete()
-        except Exception as e:
-            logger.debug(f"temizle: {e}")
-        await send_log(chat_id, f"Temizle all: {deleted_users} uye | {by_who}", ParseMode.HTML)
-
-    else:
-        count = min(int(arg), 500)
-        deleted = 0
-        consecutive_errors = 0
-        i_id = cmd_msg_id - 1
-        batch = []
-
-        while i_id > max(1, cmd_msg_id - count * 5) and deleted < count:
-            batch.append(i_id)
-            i_id -= 1
-            if len(batch) == 100:
-                results = await asyncio.gather(
-                    *[bot.delete_message(chat_id, mid) for mid in batch],
-                    return_exceptions=True
-                )
-                ok = sum(1 for r in results if not isinstance(r, Exception))
-                err = len(results) - ok
-                deleted += ok
-                consecutive_errors = 0 if ok > 0 else consecutive_errors + err
-                batch = []
-                if consecutive_errors > 100:
-                    break
-                await asyncio.sleep(0.3)
-
-        if batch and deleted < count:
-            results = await asyncio.gather(
-                *[bot.delete_message(chat_id, mid) for mid in batch],
-                return_exceptions=True
-            )
-            deleted += sum(1 for r in results if not isinstance(r, Exception))
-
-        confirm = await bot.send_message(chat_id, f"{deleted} mesaj silindi.")
-        await asyncio.sleep(4)
-        try:
-            await confirm.delete()
-        except Exception as e:
-            logger.debug(f"temizle: {e}")
-        await send_log(chat_id, f"Temizle {count}: {deleted} mesaj | {by_who}", ParseMode.HTML)
+        logger.error(f"Temizleme hatası ({chat_id}): {e}")
+    if status and job_queue:
+        job_queue.run_once(_delete_message_job, 5, data={'chat_id': chat_id, 'message_id': status.message_id})
+    await send_log(chat_id, f"🧹 {html.escape(label)} temizlendi | {by}", ParseMode.HTML)
 
 async def banlist(update: Update, context):
     
@@ -2396,12 +2523,12 @@ async def banlist(update: Update, context):
     if not rows:
         await update.message.reply_text("📋 Ban listesi boş.")
         return
-    msg = "🚫 <b>Ban Listesi</b> (son 20):\n\n"
+    msg = "🚫 <b>Ban Listesi</b> (son 20):\n<blockquote expandable>"
     for row in rows:
         who = mention_html(row['user_id'], row['username'] or str(row['user_id']))
         dt = datetime.fromtimestamp(row['banned_at'], TZ_TR).strftime('%d.%m.%Y')
         msg += f"• {who} — {html.escape(row['reason'] or '?')} ({dt})\n"
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    await update.message.reply_text(msg.rstrip() + "</blockquote>", parse_mode=ParseMode.HTML)
 
 async def mutelist(update: Update, context):
     
@@ -2421,7 +2548,7 @@ async def mutelist(update: Update, context):
     if not rows:
         await update.message.reply_text("📋 Mute listesi boş.")
         return
-    msg = "🔇 <b>Mute Listesi</b> (son 20):\n\n"
+    msg = "🔇 <b>Mute Listesi</b> (son 20):\n<blockquote expandable>"
     for row in rows:
         who = mention_html(row['user_id'], row['username'] or str(row['user_id']))
         if row['until_date'] and row['until_date'] > now:
@@ -2430,7 +2557,7 @@ async def mutelist(update: Update, context):
         else:
             time_str = "süresi dolmuş"
         msg += f"• {who} — {time_str}\n"
-    await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+    await update.message.reply_text(msg.rstrip() + "</blockquote>", parse_mode=ParseMode.HTML)
 
 async def spam_koruma(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -2642,8 +2769,9 @@ async def cekilis(update: Update, context):
     if not has_permission(chat_id, update.effective_user.id, 50):
         await update.message.reply_text("Yetkin yok!")
         return
-    keyboard = [[InlineKeyboardButton("🎉 Katil", callback_data=f"giveaway|{chat_id}")]]
-    message = await bot.send_message(chat_id, "🎉 Çekiliş başladı! Katılımcı: 0", reply_markup=InlineKeyboardMarkup(keyboard))
+    keyboard = [[ibtn("🎉 Katil", f"giveaway|{chat_id}", GREEN)]]
+    message = await bot.send_message(chat_id, "🎉 Çekiliş başladı! Katılımcı: 0", reply_markup=InlineKeyboardMarkup(keyboard),
+                                     **thread_kw(update.effective_message, chat_id))
     async with _db_lock:
         with get_db() as conn:
             conn.execute("""
@@ -2707,7 +2835,7 @@ async def giveaway_end(update: Update, context):
     except Exception:
         pass
     if not participants:
-        await bot.send_message(chat_id, "🎉 Çekiliş sona erdi! Katılımcı yoktu.")
+        await bot.send_message(chat_id, "🎉 Çekiliş sona erdi! Katılımcı yoktu.", **thread_kw(message, chat_id))
         return
     winners = random.sample(participants, min(winners_count, len(participants)))
     names = []
@@ -2719,7 +2847,7 @@ async def giveaway_end(update: Update, context):
             names.append(mention_html(wid, str(wid)))
     text = "🎉 Çekiliş sona erdi!\n🏆 Kazanan" + ("lar" if len(names) > 1 else "") + ": " + ", ".join(names)
     text += f"\n👥 Katılımcı: {len(participants)}"
-    await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML)
+    await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, **thread_kw(message, chat_id))
     if message.chat.type == 'private':
         await message.reply_text("✅ Çekiliş bitirildi.")
     await send_log(chat_id, f"🏆 Çekiliş bitti: {', '.join(names)} | {chat_id}", ParseMode.HTML)
@@ -2992,11 +3120,8 @@ async def wordlist(update: Update, context):
 
     keyboard = []
     for i, word in enumerate(words):
-        keyboard.append([InlineKeyboardButton(
-            f"Sil: {word}",
-            callback_data=f"wdel|{chat_id}|{i}"
-        )])
-    keyboard.append([InlineKeyboardButton("Tumunu Sil", callback_data=f"wdel_all|{chat_id}")])
+        keyboard.append([ibtn(f"Sil: {word}", f"wdel|{chat_id}|{i}", RED)])
+    keyboard.append([ibtn("Tumunu Sil", f"wdel_all|{chat_id}", RED)])
     keyboard.append([InlineKeyboardButton("Kapat", callback_data=f"wdel_close|{chat_id}")])
 
     await update.message.reply_text(
@@ -3050,8 +3175,8 @@ async def wordlist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kelimeler = "\n".join([f"  {i+1}. {w}" for i, w in enumerate(words)])
         keyboard = []
         for i, word in enumerate(words):
-            keyboard.append([InlineKeyboardButton(f"Sil: {word}", callback_data=f"wdel|{chat_id}|{i}")])
-        keyboard.append([InlineKeyboardButton("Tumunu Sil", callback_data=f"wdel_all|{chat_id}")])
+            keyboard.append([ibtn(f"Sil: {word}", f"wdel|{chat_id}|{i}", RED)])
+        keyboard.append([ibtn("Tumunu Sil", f"wdel_all|{chat_id}", RED)])
         keyboard.append([InlineKeyboardButton("Kapat", callback_data=f"wdel_close|{chat_id}")])
 
         await query.edit_message_text(
@@ -3083,7 +3208,8 @@ def save_nightmod(chat_id: str, data: dict):
             data.get('end_hour', 7),
             data.get('end_minute', 0),
             json.dumps(data.get('restrictions', {})),
-            json.dumps(data.get('saved_permissions')) if data.get('saved_permissions') else None,
+            (data['saved_permissions'] if isinstance(data.get('saved_permissions'), str)
+             else json.dumps(data['saved_permissions'])) if data.get('saved_permissions') else None,
             data.get('is_active', 0),
             data.get('configured', 0),
         ))
@@ -3093,7 +3219,7 @@ def _nightmod_keyboard(chat_id: str, restrictions: dict) -> InlineKeyboardMarkup
     def btn(label, key):
         state = "ON" if restrictions.get(key, False) else "OFF"
         icon = "✅" if restrictions.get(key, False) else "❌"
-        return InlineKeyboardButton(f"{icon} {label}", callback_data=f"nm_toggle|{chat_id}|{key}")
+        return ibtn(f"{icon} {label}", f"nm_toggle|{chat_id}|{key}", GREEN if restrictions.get(key, False) else RED)
     keyboard = [
         [btn("Mesaj Gonderme", "block_messages"),
          btn("Medya Gonderme", "block_media")],
@@ -3101,8 +3227,8 @@ def _nightmod_keyboard(chat_id: str, restrictions: dict) -> InlineKeyboardMarkup
          btn("Sticker/GIF", "block_sticker")],
         [btn("Link Gonderme", "block_links"),
          btn("Dosya Gonderme", "block_files")],
-        [InlineKeyboardButton("Kaydet", callback_data=f"nm_save|{chat_id}"),
-         InlineKeyboardButton("Iptal", callback_data=f"nm_cancel|{chat_id}")]
+        [ibtn("Kaydet", f"nm_save|{chat_id}", GREEN),
+         ibtn("Iptal", f"nm_cancel|{chat_id}", RED)]
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -3195,85 +3321,78 @@ async def cmd_nightmod(update: Update, context):
     )
 
 async def nightmod_activate(chat_id: str):
-    
+    """Gece modunu başlatır: mevcut izinleri tam olarak saklar, seçili kısıtlamaları ayrı ayrı uygular."""
     nm = get_nightmod(chat_id)
     if not nm:
         return
-
     try:
         chat = await bot.get_chat(chat_id)
-        perms = chat.permissions
-        if perms:
-            saved = {
-                'can_send_messages': getattr(perms, 'can_send_messages', True),
-                'can_send_other_messages': getattr(perms, 'can_send_other_messages', True),
-                'can_add_web_page_previews': getattr(perms, 'can_add_web_page_previews', True),
-                'can_invite_users': getattr(perms, 'can_invite_users', True),
-            }
-        else:
-            saved = {
-                'can_send_messages': True,
-                'can_send_other_messages': True,
-                'can_add_web_page_previews': True,
-                'can_invite_users': True,
-            }
+        base = chat.permissions or await _default_member_permissions(chat_id)
+        saved = base.to_dict()
+        r = json.loads(nm['restrictions']) if isinstance(nm['restrictions'], str) else (nm['restrictions'] or {})
 
-        restrictions = json.loads(nm['restrictions']) if isinstance(nm['restrictions'], str) else nm['restrictions']
+        def keep(attr: str, block_key: str) -> bool:
+            return bool(getattr(base, attr, True)) and not r.get('block_messages') and not r.get(block_key)
 
         new_perms = ChatPermissions(
-            can_send_messages=not restrictions.get('block_messages', False),
-            can_send_other_messages=not restrictions.get('block_sticker', False),
-            can_add_web_page_previews=not restrictions.get('block_links', False),
-            can_invite_users=perms.can_invite_users,
+            can_send_messages=bool(base.can_send_messages) and not r.get('block_messages'),
+            can_send_photos=keep('can_send_photos', 'block_media'),
+            can_send_videos=keep('can_send_videos', 'block_media'),
+            can_send_voice_notes=keep('can_send_voice_notes', 'block_voice'),
+            can_send_video_notes=keep('can_send_video_notes', 'block_voice'),
+            can_send_documents=keep('can_send_documents', 'block_files'),
+            can_send_audios=keep('can_send_audios', 'block_files'),
+            can_send_other_messages=keep('can_send_other_messages', 'block_sticker'),
+            can_add_web_page_previews=keep('can_add_web_page_previews', 'block_links'),
+            can_send_polls=keep('can_send_polls', 'block_messages'),
+            can_invite_users=bool(base.can_invite_users),
+            can_pin_messages=bool(base.can_pin_messages),
+            can_change_info=bool(base.can_change_info),
+            can_manage_topics=bool(base.can_manage_topics),
         )
-
-        await bot.set_chat_permissions(chat_id, new_perms)
+        await bot.set_chat_permissions(chat_id, new_perms, use_independent_chat_permissions=True)
 
         nm_data = dict(nm)
         nm_data['is_active'] = 1
         nm_data['saved_permissions'] = saved
-        nm_data['restrictions'] = restrictions
+        nm_data['restrictions'] = r
         save_nightmod(chat_id, nm_data)
-
-        sh = nm['start_hour']
-        sm = nm['start_minute']
-        eh = nm['end_hour']
-        em = nm['end_minute']
         await bot.send_message(
             chat_id,
-            f"Night mode basladi. Sabah {eh:02d}:{em:02d}'e kadar kisitlamalar aktif."
+            f"🌙 Gece modu başladı. Sabah {nm['end_hour']:02d}:{nm['end_minute']:02d}'e kadar kısıtlamalar aktif."
         )
         await send_log(chat_id, f"Night mode aktif oldu | {chat_id}")
     except Exception as e:
         logger.error(f"Night mode activate hata: {e}")
 
 async def nightmod_deactivate(chat_id: str):
-    
+    """Gece modunu bitirir ve saklanan izinleri geri yükler."""
     nm = get_nightmod(chat_id)
     if not nm or not nm['is_active']:
         return
-
     try:
         saved_raw = nm['saved_permissions']
         if saved_raw:
             saved = json.loads(saved_raw) if isinstance(saved_raw, str) else saved_raw
-            restore_perms = ChatPermissions(
-                can_send_messages=saved.get('can_send_messages', True),
-                can_send_other_messages=saved.get('can_send_other_messages', True),
-                can_add_web_page_previews=saved.get('can_add_web_page_previews', True),
-                can_invite_users=saved.get('can_invite_users', True),
-            )
-            await bot.set_chat_permissions(chat_id, restore_perms)
+            if isinstance(saved, str):  # eski sürümün çift kodladığı kayıt
+                saved = json.loads(saved)
+            if 'can_send_photos' in saved:
+                await bot.set_chat_permissions(chat_id, ChatPermissions.de_json(saved, bot),
+                                               use_independent_chat_permissions=True)
+            else:  # eski biçim (4 alan)
+                await bot.set_chat_permissions(chat_id, ChatPermissions(
+                    can_send_messages=saved.get('can_send_messages', True),
+                    can_send_other_messages=saved.get('can_send_other_messages', True),
+                    can_add_web_page_previews=saved.get('can_add_web_page_previews', True),
+                    can_invite_users=saved.get('can_invite_users', True),
+                ))
 
         nm_data = dict(nm)
         nm_data['is_active'] = 0
         nm_data['saved_permissions'] = None
         nm_data['restrictions'] = json.loads(nm_data['restrictions']) if isinstance(nm_data['restrictions'], str) else nm_data['restrictions']
         save_nightmod(chat_id, nm_data)
-
-        eh = nm['end_hour']
-        em = nm['end_minute']
-        await bot.send_message(chat_id, f"Night mode sona erdi. Normal izinler geri yuklendi.")
+        await bot.send_message(chat_id, "☀️ Gece modu sona erdi. Normal izinler geri yüklendi.")
         await send_log(chat_id, f"Night mode sona erdi | {chat_id}")
     except Exception as e:
         logger.error(f"Night mode deactivate hata: {e}")
@@ -3419,164 +3538,594 @@ async def check_temp_bans(context: ContextTypes.DEFAULT_TYPE):
 
     logger.info(f"[TEMP BAN] {len(rows)} geçici ban temizlendi.")
 
-def _build_settings_keyboard(chat_id: str, settings: dict) -> InlineKeyboardMarkup:
-    
-    def btn(label: str, key: str, page: str) -> InlineKeyboardButton:
-        state = "✅" if settings.get(key, False) else "❌"
-        return InlineKeyboardButton(f"{state} {label}", callback_data=f"stg_{page}|{key}|{chat_id}")
+# ═══════════════════════════ BUTONLU AYAR PANELİ ═══════════════════════════
+# Callback biçimi: s|<chat_id>|<işlem>|<argümanlar...>
+#   p <sayfa>              sayfa aç          t <anahtar> <sayfa>      aç/kapa
+#   n <anahtar> u|d <sayfa> sayı artır/azalt a <koruma> <ceza>         koruma cezası
+#   wa <ceza>              uyarı limiti cezası   i <tür>              metin girişi (ForceReply)
+#   wd/ld <sıra> <sayfa>   kelime/link sil   nd <isim>                not sil
+#   wc kelimeleri temizle · ne/nt/nh gece modu · lx log kaldır · rx kuralları sil · ru raid kilidi aç · x kapat
 
+PROTECTIONS = {
+    # anahtar: (etiket, ayar anahtarı, varsayılan ceza, açıklama)
+    'link':    ("🔗 Link", 'anti_link', 'warn', "Link, gizli (yazıya gömülü) link ve link butonlu mesajlar silinir."),
+    'word':    ("🔤 Yasaklı kelime", 'word_ban_enabled', 'warn', "Listedeki kelimeler; Türkçe karakter, büyük/küçük harf ve leetspeak dahil yakalanır."),
+    'spam':    ("🔁 Tekrar spam", 'spam_protection', 'warn', "60 sn içindeki son 10 mesajın çoğu aynıysa spam sayılır."),
+    'flood':   ("🌊 Flood", 'anti_spam_flood', 'mute', "Kısa sürede limitten fazla mesaj."),
+    'forward': ("↪️ Forward", 'anti_forward', 'mute', "Başka sohbetten iletilen mesajlar."),
+    'media':   ("🖼 Medya flood", 'anti_media_flood', 'mute', "Kısa sürede limitten fazla fotoğraf/video/sticker."),
+}
+ACTION_LABELS = {'delete': 'Sil', 'warn': 'Uyar', 'mute': 'Sustur', 'kick': 'At', 'ban': 'Banla'}
+WARN_ACTION_LABELS = {'ban': 'Banla', 'tempban': 'Geçici ban', 'kick': 'At', 'mute': 'Sustur'}
+ESCALATING = ('flood', 'forward', 'media')  # susturma kademeli: 10 dk → 30 dk → 5 sa
+
+# Sayısal ayarlar: (en az, en çok, adım veya hazır değerler, biçim; None = süre olarak göster)
+NUMERIC = {
+    'flood_limit':           (2, 30, 1, "{} mesaj"),
+    'flood_timeframe':       (2, 60, 1, "{} sn"),
+    'media_flood_limit':     (2, 30, 1, "{} medya"),
+    'media_flood_timeframe': (2, 120, 2, "{} sn"),
+    'raid_limit':            (3, 200, [3, 5, 8, 10, 15, 20, 30, 50, 100, 200], "{} üye"),
+    'raid_timeframe':        (10, 600, [10, 20, 30, 60, 120, 300, 600], "{} sn"),
+    'warn_limit':            (2, 20, 1, "{}"),
+    'captcha_timeout':       (30, 600, 30, None),
+    'newbie_minutes':        (0, 1440, [0, 5, 10, 15, 30, 60, 120, 360, 720, 1440], "{} dk"),
+    'mute_minutes':          (1, 10080, [5, 10, 15, 30, 60, 120, 360, 720, 1440, 4320, 10080], "{} dk"),
+    'warn_action_duration':  (3600, 30 * 86400, [3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 3 * 86400,
+                                                 7 * 86400, 30 * 86400], None),
+}
+TOGGLE_KEYS = {v[1] for v in PROTECTIONS.values()} | {
+    'anti_raid', 'captcha_enabled', 'join_captcha', 'auto_accept', 'auto_reject', 'auto_reject_bot',
+    'restrict_no_username', 'welcome_enabled'}
+NIGHT_RESTRICTIONS = [('block_messages', "Mesaj"), ('block_media', "Foto/Video"), ('block_voice', "Ses/Video not"),
+                      ('block_sticker', "Sticker/GIF"), ('block_links', "Link önizleme"), ('block_files', "Dosya/Müzik")]
+PAGE_SIZE = 8
+
+INPUT_PROMPTS = {
+    'welcome': ("✏️ Yeni hoş geldin mesajını yaz.\nDeğişkenler: {kullanıcı} {username} {id} {kanal} {uye_sayisi}",
+                "Hoş geldin {kullanıcı}!"),
+    'rules': ("📜 Grup kurallarını yaz.", "1) Saygılı ol  2) Reklam yok"),
+    'word': ("🔤 Yasaklanacak kelimeleri yaz (her satıra bir tane). Regex için başına re: koy.", "kelime"),
+    'link': ("🔗 İzin verilecek alan adlarını yaz (boşlukla ayır). Örn: youtube.com t.me/kanalim", "youtube.com"),
+    'note': ("📝 Notu şu biçimde yaz: isim içerik", "kurallar Grup kuralları..."),
+    'log': ("🧾 Log kanalı/grubu ID'sini yaz (örn. -1001234567890). Bot orada mesaj atabilmeli.", "-1001234567890"),
+}
+
+def _can_edit_settings(chat_id: str, user_id: int) -> bool:
+    return has_permission(chat_id, user_id, 70) or has_specific_permission(chat_id, user_id, 'can_manage_settings')
+
+def _can_manage_log(chat_id: str, user_id: int, channel: dict) -> bool:
+    return user_id == channel.get('owner') or has_permission(chat_id, user_id, 90)
+
+def _step_value(key: str, cur: int, up: bool) -> int:
+    lo, hi, step, _ = NUMERIC[key]
+    if isinstance(step, list):
+        if up:
+            return next((v for v in step if v > cur), step[-1])
+        return next((v for v in reversed(step) if v < cur), step[0])
+    return max(lo, min(hi, cur + (step if up else -step)))
+
+def _fmt_numeric(key: str, val: int) -> str:
+    if key == 'newbie_minutes' and val == 0:
+        return "Kapalı"
+    fmt = NUMERIC[key][3]
+    return human_duration(val) if fmt is None else fmt.format(val)
+
+def _num_row(cid: str, key: str, s: dict, page: str, label: str) -> list:
+    val = int(s.get(key, _default_channel_settings().get(key, 0)) or 0)
+    return [ibtn("➖", f"s|{cid}|n|{key}|d|{page}"),
+            ibtn(f"{label}: {_fmt_numeric(key, val)}", f"s|{cid}|p|{page}"),
+            ibtn("➕", f"s|{cid}|n|{key}|u|{page}")]
+
+def _back(cid: str, page: str = 'main') -> list:
+    return [ibtn("⬅️ Geri", f"s|{cid}|p|{page}")]
+
+def _paged(items: list, pg: int):
+    pages = max(1, (len(items) + PAGE_SIZE - 1) // PAGE_SIZE)
+    pg = max(0, min(pg, pages - 1))
+    return pg, pages, items[pg * PAGE_SIZE:(pg + 1) * PAGE_SIZE]
+
+def _nav_rows(cid: str, base: str, pg: int, pages: int) -> list:
+    if pages <= 1:
+        return []
+    return [[ibtn("◀️", f"s|{cid}|p|{base}.{(pg - 1) % pages}"), ibtn(f"{pg + 1}/{pages}", f"s|{cid}|p|{base}.{pg}"),
+             ibtn("▶️", f"s|{cid}|p|{base}.{(pg + 1) % pages}")]]
+
+def _nm_data(chat_id: str) -> dict:
     nm = get_nightmod(chat_id)
-    nm_enabled = nm['enabled'] if nm else False
-    nm_icon = "✅" if nm_enabled else "❌"
+    d = dict(nm) if nm else {'enabled': 0, 'start_hour': 23, 'start_minute': 0, 'end_hour': 7, 'end_minute': 0,
+                             'is_active': 0, 'configured': 0, 'restrictions': {}, 'saved_permissions': None}
+    if isinstance(d.get('restrictions'), str):
+        d['restrictions'] = json.loads(d['restrictions'] or '{}')
+    if isinstance(d.get('saved_permissions'), str):
+        d['saved_permissions'] = json.loads(d['saved_permissions'])
+    d['restrictions'] = d.get('restrictions') or {}
+    return d
 
-    keyboard = [
-        [btn("Spam Koruma", "spam_protection", "toggle"),
-         btn("Anti-Flood", "anti_spam_flood", "toggle")],
-        [btn("Anti-Link", "anti_link", "toggle"),
-         btn("Anti-Forward", "anti_forward", "toggle")],
-        [btn("Anti-Media Flood", "anti_media_flood", "toggle"),
-         btn("Anti-Raid", "anti_raid", "toggle")],
-        [btn("Kelime Yasaklama", "word_ban_enabled", "toggle"),
-         btn("Captcha", "captcha_enabled", "toggle")],
-        [btn("Oto Kabul", "auto_accept", "toggle"),
-         btn("Oto Red", "auto_reject", "toggle")],
-        [btn("Bot Red", "auto_reject_bot", "toggle"),
-         InlineKeyboardButton(f"{nm_icon} Night Mode", callback_data=f"nm_settings|{chat_id}")],
-        [InlineKeyboardButton("ℹ️ Limitler", callback_data=f"stg_limits|{chat_id}"),
-         InlineKeyboardButton("❌ Kapat", callback_data=f"stg_close|{chat_id}")]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+_title_cache: dict = {}
 
-def _build_settings_text(chat_id: str, settings: dict) -> str:
-    def s(key): return "✅" if settings.get(key, False) else "❌"
+async def _chat_title(chat_id: str) -> str:
+    cached = _title_cache.get(chat_id)
+    if cached and time.time() - cached[0] < 600:
+        return cached[1]
+    try:
+        title = (await bot.get_chat(chat_id)).title or chat_id
+    except Exception as e:
+        logger.debug(f"Sohbet adı alınamadı {chat_id}: {e}")
+        title = chat_id
+    _title_cache[chat_id] = (time.time(), title)
+    return title
 
-    flood_lim = settings.get('flood_limit', 7)
-    flood_tf = settings.get('flood_timeframe', 5)
-    media_lim = settings.get('media_flood_limit', 5)
-    raid_lim = settings.get('raid_limit', 10)
-    raid_tf = settings.get('raid_timeframe', 30)
+async def render_settings(cid: str, page: str = 'main'):
+    """Panel sayfasının (metin, klavye) çiftini üretir."""
+    channel = get_channel_settings(cid)
+    s = channel['settings']
+    base, _, sub = page.partition('.')
+    title = html.escape(await _chat_title(cid))
+    rows: list = []
 
-    return (
-        f"⚙️ Ayarlar Paneli\n"
-        f"Kanal: {chat_id}\n\n"
-        f"Butona basarak ac/kapat:\n\n"
-        f"{s('spam_protection')} Spam Koruma\n"
-        f"{s('anti_spam_flood')} Anti-Flood ({flood_lim} mesaj/{flood_tf}sn)\n"
-        f"{s('anti_link')} Anti-Link\n"
-        f"{s('anti_forward')} Anti-Forward\n"
-        f"{s('anti_media_flood')} Anti-Media Flood ({media_lim} medya)\n"
-        f"{s('anti_raid')} Anti-Raid ({raid_lim} üye/{raid_tf}sn)\n"
-        f"{s('word_ban_enabled')} Kelime Yasaklama ({len(settings.get('banned_words', []))} kelime)\n"
-        f"{s('captcha_enabled')} Captcha\n"
-        f"{s('auto_accept')} Otomatik Kabul\n"
-        f"{s('auto_reject')} Otomatik Red\n"
-        f"{s('auto_reject_bot')} Bot Red\n"
-        + (f"Night Mode: ACIK\n" if get_nightmod(chat_id) and get_nightmod(chat_id)['enabled'] else f"Night Mode: KAPALI\n")
-    )
+    if base == 'prot':
+        text = f"🛡 <b>Koruma</b> — {title}\n\nBir korumaya dokunarak aç/kapat, cezasını ve limitlerini ayarla."
+        for key, (label, skey, default, _) in PROTECTIONS.items():
+            on = s.get(skey, False)
+            act = ACTION_LABELS.get(s.get(f'action_{key}') or default, '?')
+            rows.append([ibtn(f"{'🟢' if on else '🔴'} {label} · {act}", f"s|{cid}|p|pr.{key}", GREEN if on else RED)])
+        rows.append(_back(cid))
 
-async def cmd_settings(update: Update, context):
-    
-    chat_id = _get_effective_chat_id(update, context)
-    if not chat_id or not get_channel_settings(chat_id):
-        await update.message.reply_text("Önce /kanal ile seç!")
-        return
-    if not has_permission(chat_id, update.effective_user.id, 50):
-        await update.message.reply_text("Yetkin yok!")
-        return
+    elif base == 'pr' and sub in PROTECTIONS:
+        label, skey, default, desc = PROTECTIONS[sub]
+        act = s.get(f'action_{sub}') or default
+        on = s.get(skey, False)
+        text = (f"{label} <b>koruması</b> — {title}\n<i>{html.escape(desc)}</i>\n\n"
+                f"Durum: <b>{'Açık' if on else 'Kapalı'}</b>\nCeza: <b>{ACTION_LABELS[act]}</b>")
+        if act == 'warn':
+            text += f" (limit {s.get('warn_limit', 5)} → {WARN_ACTION_LABELS.get(s.get('warn_action', 'ban'))})"
+        if act == 'mute' and sub in ESCALATING:
+            text += "\nSusturma kademeli: 10 dk → 30 dk → 5 saat"
+        page_id = f"pr.{sub}"
+        rows.append([toggle_btn("Koruma " + ("açık" if on else "kapalı"), on, f"s|{cid}|t|{skey}|{page_id}")])
+        rows.append([ibtn(f"• {lbl} •" if a == act else lbl, f"s|{cid}|a|{sub}|{a}", BLUE if a == act else None)
+                     for a, lbl in ACTION_LABELS.items()])
+        if sub == 'flood':
+            rows += [_num_row(cid, 'flood_limit', s, page_id, "Limit"), _num_row(cid, 'flood_timeframe', s, page_id, "Süre")]
+        elif sub == 'media':
+            rows += [_num_row(cid, 'media_flood_limit', s, page_id, "Limit"),
+                     _num_row(cid, 'media_flood_timeframe', s, page_id, "Süre")]
+        if act == 'mute' and sub not in ESCALATING:
+            rows.append(_num_row(cid, 'mute_minutes', s, page_id, "Susturma"))
+        if sub == 'link':
+            rows.append([ibtn("🔗 İzinli linkler ›", f"s|{cid}|p|links.0", BLUE)])
+        elif sub == 'word':
+            rows.append([ibtn("🔤 Kelime listesi ›", f"s|{cid}|p|words.0", BLUE)])
+        rows.append(_back(cid, 'prot'))
+
+    elif base == 'join':
+        text = (f"🚪 <b>Katılım</b> — {title}\n\n"
+                "• <b>Captcha</b>: yeni üye grupta matematik sorusunu çözene kadar yazamaz.\n"
+                "• <b>Özelden doğrulama</b>: katılım isteği gönderene bot özelden soru sorar; doğru cevaplayan "
+                "otomatik kabul edilir. Grupta \"yeni üyeleri onayla\" açık olmalı ve botun davet yetkisi olmalı.")
+        rows += [
+            [toggle_btn("Captcha (grupta)", s.get('captcha_enabled'), f"s|{cid}|t|captcha_enabled|join")],
+            [toggle_btn("Özelden doğrulama", s.get('join_captcha'), f"s|{cid}|t|join_captcha|join")],
+            _num_row(cid, 'captcha_timeout', s, 'join', "Süre"),
+            [toggle_btn("Oto kabul", s.get('auto_accept'), f"s|{cid}|t|auto_accept|join"),
+             toggle_btn("Oto red", s.get('auto_reject'), f"s|{cid}|t|auto_reject|join")],
+            [toggle_btn("Bot / kullanıcı adsız isteği reddet", s.get('auto_reject_bot'), f"s|{cid}|t|auto_reject_bot|join")],
+            [toggle_btn("Kullanıcı adsız yeni üyeyi sustur", s.get('restrict_no_username'),
+                        f"s|{cid}|t|restrict_no_username|join")],
+            [ibtn("🚨 Anti-Raid ›", f"s|{cid}|p|raid", BLUE), ibtn("🆕 Yeni üye kısıtı ›", f"s|{cid}|p|newbie", BLUE)],
+            _back(cid),
+        ]
+
+    elif base == 'raid':
+        locked = cid in _raid_locked or bool(s.get('raid_lock'))
+        text = (f"🚨 <b>Anti-Raid</b> — {title}\n\nBelirtilen sürede limitten fazla üye katılırsa grup "
+                f"{RAID_LOCK_SECONDS // 60} dk kilitlenir, sonra eski izinler geri yüklenir.\n"
+                f"Durum: <b>{'🔒 Kilitli' if locked else '🔓 Açık'}</b>")
+        rows += [[toggle_btn("Anti-Raid", s.get('anti_raid'), f"s|{cid}|t|anti_raid|raid")],
+                 _num_row(cid, 'raid_limit', s, 'raid', "Limit"), _num_row(cid, 'raid_timeframe', s, 'raid', "Süre")]
+        if locked:
+            rows.append([ibtn("🔓 Kilidi şimdi aç", f"s|{cid}|ru", GREEN)])
+        rows.append(_back(cid, 'join'))
+
+    elif base == 'newbie':
+        text = (f"🆕 <b>Yeni üye kısıtı</b> — {title}\n\nYeni katılanlar belirtilen süre boyunca link, medya ve "
+                "forward gönderemez (mesajı silinir, uyarı gösterilir).")
+        rows += [_num_row(cid, 'newbie_minutes', s, 'newbie', "Süre"), _back(cid, 'join')]
+
+    elif base == 'welcome':
+        welcome = s.get('welcome_msg') or ''
+        rules = (s.get('rules') or '').strip()
+        text = (f"👋 <b>Karşılama</b> — {title}\n\nHoş geldin mesajı: <b>{'Açık' if s.get('welcome_enabled', True) else 'Kapalı'}</b>\n"
+                f"<blockquote>{html.escape(welcome[:500]) or '—'}</blockquote>\n"
+                "Değişkenler: <code>{kullanıcı}</code> <code>{username}</code> <code>{id}</code> "
+                "<code>{kanal}</code> <code>{uye_sayisi}</code>\n\n📜 Kurallar:\n"
+                f"<blockquote expandable>{html.escape(rules[:1500]) or 'Henüz yok'}</blockquote>")
+        rows += [[toggle_btn("Hoş geldin mesajı", s.get('welcome_enabled', True), f"s|{cid}|t|welcome_enabled|welcome")],
+                 [ibtn("✏️ Mesajı değiştir", f"s|{cid}|i|welcome", BLUE), ibtn("📜 Kuralları yaz", f"s|{cid}|i|rules", BLUE)]]
+        if rules:
+            rows.append([ibtn("🗑 Kuralları sil", f"s|{cid}|rx", RED)])
+        rows.append(_back(cid))
+
+    elif base == 'warn':
+        wa = s.get('warn_action', 'ban')
+        text = (f"⚠️ <b>Uyarılar</b> — {title}\n\n\"Uyar\" cezalı korumalar ve /warn uyarı verir; limit dolunca "
+                f"seçili ceza uygulanır.\nŞu an: <b>{s.get('warn_limit', 5)}</b> uyarı → <b>{WARN_ACTION_LABELS.get(wa, wa)}</b>")
+        rows += [_num_row(cid, 'warn_limit', s, 'warn', "Uyarı limiti"),
+                 [ibtn(f"• {lbl} •" if a == wa else lbl, f"s|{cid}|wa|{a}", BLUE if a == wa else None)
+                  for a, lbl in WARN_ACTION_LABELS.items()]]
+        if wa in ('tempban', 'mute'):
+            rows.append(_num_row(cid, 'warn_action_duration', s, 'warn', "Ceza süresi"))
+        rows += [_num_row(cid, 'mute_minutes', s, 'warn', "Koruma susturması"), _back(cid)]
+
+    elif base == 'night':
+        nm = _nm_data(cid)
+        r = nm['restrictions']
+        text = (f"🌙 <b>Gece Modu</b> — {title}\n\nDurum: <b>{'Açık' if nm['enabled'] else 'Kapalı'}</b>"
+                f"{' (şu an aktif)' if nm['is_active'] else ''}\n"
+                f"Saat: <b>{nm['start_hour']:02d}:{nm['start_minute']:02d} – {nm['end_hour']:02d}:{nm['end_minute']:02d}</b> (UTC+3)\n"
+                "Seçili izinler bu saatlerde kapatılır, bitince eski izinler geri yüklenir.")
+        rows += [[toggle_btn("Gece modu", nm['enabled'], f"s|{cid}|ne")],
+                 [ibtn("➖", f"s|{cid}|nh|s|d"), ibtn(f"Başlangıç {nm['start_hour']:02d}:{nm['start_minute']:02d}", f"s|{cid}|p|night"),
+                  ibtn("➕", f"s|{cid}|nh|s|u")],
+                 [ibtn("➖", f"s|{cid}|nh|e|d"), ibtn(f"Bitiş {nm['end_hour']:02d}:{nm['end_minute']:02d}", f"s|{cid}|p|night"),
+                  ibtn("➕", f"s|{cid}|nh|e|u")]]
+        for i in range(0, len(NIGHT_RESTRICTIONS), 2):
+            rows.append([ibtn(f"{'🚫' if r.get(k) else '✅'} {lbl}", f"s|{cid}|nt|{k}", RED if r.get(k) else GREEN)
+                         for k, lbl in NIGHT_RESTRICTIONS[i:i + 2]])
+        rows.append(_back(cid))
+
+    elif base == 'links':
+        wl = s.get('link_whitelist', [])
+        pg, pages, part = _paged(wl, int(sub or 0) if (sub or '0').isdigit() else 0)
+        text = (f"🔗 <b>İzinli linkler</b> — {title}\n\nBu alan adları link korumasından muaftır "
+                f"(alt alan adları dahil). Toplam: {len(wl)}\nSilmek için dokun.")
+        rows += [[ibtn(f"🗑 {d[:40]}", f"s|{cid}|ld|{pg * PAGE_SIZE + i}|{pg}", RED)] for i, d in enumerate(part)]
+        rows += _nav_rows(cid, 'links', pg, pages)
+        rows += [[ibtn("➕ Ekle", f"s|{cid}|i|link", GREEN)], _back(cid)]
+
+    elif base == 'words' and sub == 'clear':
+        text = f"🔤 {title}\n\n<b>Tüm yasaklı kelimeler silinsin mi?</b>"
+        rows += [[ibtn("🗑 Evet, hepsini sil", f"s|{cid}|wc", RED), ibtn("↩️ Vazgeç", f"s|{cid}|p|words.0")]]
+
+    elif base == 'words':
+        words = s.get('banned_words', [])
+        pg, pages, part = _paged(words, int(sub or 0) if (sub or '0').isdigit() else 0)
+        text = (f"🔤 <b>Yasaklı kelimeler</b> — {title}\n\nFiltre: <b>{'Açık' if s.get('word_ban_enabled') else 'Kapalı'}</b> · "
+                f"Toplam: {len(words)}\nSilmek için dokun.")
+        rows.append([toggle_btn("Kelime filtresi", s.get('word_ban_enabled'), f"s|{cid}|t|word_ban_enabled|words.{pg}")])
+        rows += [[ibtn(f"🗑 {w[:40]}", f"s|{cid}|wd|{pg * PAGE_SIZE + i}|{pg}", RED)] for i, w in enumerate(part)]
+        rows += _nav_rows(cid, 'words', pg, pages)
+        rows.append([ibtn("➕ Ekle", f"s|{cid}|i|word", GREEN)] +
+                    ([ibtn("🧹 Tümünü sil", f"s|{cid}|p|words.clear", RED)] if words else []))
+        rows.append(_back(cid))
+
+    elif base == 'notes':
+        with get_db() as conn:
+            names = [r['name'] for r in conn.execute("SELECT name FROM notes WHERE chat_id = ? ORDER BY name", (cid,))]
+        pg, pages, part = _paged(names, int(sub or 0) if (sub or '0').isdigit() else 0)
+        text = (f"📝 <b>Notlar</b> — {title}\n\nGrupta <code>#isim</code> yazınca not gösterilir. Toplam: {len(names)}\n"
+                "Silmek için dokun.")
+        rows += [[ibtn(f"🗑 #{n}", f"s|{cid}|nd|{n}", RED)] for n in part]
+        rows += _nav_rows(cid, 'notes', pg, pages)
+        rows += [[ibtn("➕ Not ekle", f"s|{cid}|i|note", GREEN)], _back(cid)]
+
+    elif base == 'log':
+        log_id = channel.get('log_chat_id')
+        text = (f"🧾 <b>Log kanalı</b> — {title}\n\nTüm moderasyon kayıtları buraya gönderilir.\n"
+                f"Şu an: <code>{html.escape(str(log_id)) if log_id else 'ayarlanmamış'}</code>\n"
+                "Sadece grup sahibi değiştirebilir.")
+        rows.append([ibtn("✏️ Log kanalını ayarla", f"s|{cid}|i|log", BLUE)] +
+                    ([ibtn("🗑 Kaldır", f"s|{cid}|lx", RED)] if log_id else []))
+        rows.append(_back(cid))
+
+    else:
+        active = [lbl for key, (lbl, skey, _, _) in PROTECTIONS.items() if s.get(skey)]
+        if s.get('anti_raid'):
+            active.append("🚨 Raid")
+        nm = get_nightmod(cid)
+        text = (f"⚙️ <b>ULUS — Grup Ayarları</b>\n👥 <b>{title}</b>\n\n"
+                f"🛡 Aktif korumalar: {', '.join(active) if active else 'yok'}\n"
+                f"🚪 Captcha: {'✅' if s.get('captcha_enabled') else '❌'} · Özelden doğrulama: {'✅' if s.get('join_captcha') else '❌'}\n"
+                f"⚠️ Uyarı: {s.get('warn_limit', 5)} → {WARN_ACTION_LABELS.get(s.get('warn_action', 'ban'))}\n"
+                f"🌙 Gece modu: {'Açık' if nm and nm['enabled'] else 'Kapalı'}")
+        rows = [[ibtn("🛡 Koruma", f"s|{cid}|p|prot", BLUE), ibtn("🚪 Katılım", f"s|{cid}|p|join", BLUE)],
+                [ibtn("👋 Karşılama", f"s|{cid}|p|welcome", BLUE), ibtn("⚠️ Uyarılar", f"s|{cid}|p|warn", BLUE)],
+                [ibtn("🌙 Gece Modu", f"s|{cid}|p|night", BLUE), ibtn("🔗 Linkler", f"s|{cid}|p|links.0", BLUE)],
+                [ibtn("🔤 Kelimeler", f"s|{cid}|p|words.0", BLUE), ibtn("📝 Notlar", f"s|{cid}|p|notes.0", BLUE)],
+                [ibtn("🧾 Log Kanalı", f"s|{cid}|p|log", BLUE)],
+                [ibtn("✖️ Kapat", f"s|{cid}|x", RED)]]
+    return text, InlineKeyboardMarkup(rows)
+
+async def send_settings_panel(message, chat_id: str, page: str = 'main'):
+    """Ayar panelini yeni mesaj olarak gönderir (kanallar için kanal koruma paneli)."""
     channel = get_channel_settings(chat_id)
-    settings = channel['settings']
-    text = _build_settings_text(chat_id, settings)
-    keyboard = _build_settings_keyboard(chat_id, settings)
-    await update.message.reply_text(text, reply_markup=keyboard)
+    if channel and channel.get('chat_type') == 'channel':
+        await message.reply_text(f"Kanal Koruma Ayarlari\n{chat_id}",
+                                 reply_markup=_kanal_settings_keyboard(chat_id, get_channel_cfg(chat_id)))
+        return
+    text, markup = await render_settings(chat_id, page)
+    await message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
-async def settings_toggle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    
+async def _settings_change(cid: str, channel: dict, op: str, args: list, query, context):
+    """Panelde değişiklik yapan işlemler. Dönüş: (açılacak sayfa, kısa bildirim) veya None (cevap verildi)."""
+    s = channel['settings']
+    uid = query.from_user.id
+    by = mention(query.from_user)
+    if op == 't' and args:
+        key, page = args[0], (args[1] if len(args) > 1 else 'main')
+        if key not in TOGGLE_KEYS:
+            return page, "Geçersiz ayar"
+        s[key] = not s.get(key, key == 'welcome_enabled')
+        if key == 'auto_accept' and s[key]:
+            s['auto_reject'] = False
+        elif key == 'auto_reject' and s[key]:
+            s['auto_accept'] = False
+        save_channel_settings(cid, channel)
+        await send_log(cid, f"⚙️ {html.escape(key)} → {'açıldı' if s[key] else 'kapatıldı'} | {by}", ParseMode.HTML)
+        return page, "✅ Açıldı" if s[key] else "❌ Kapatıldı"
+    if op == 'n' and len(args) >= 3 and args[0] in NUMERIC:
+        key, up, page = args[0], args[1] == 'u', args[2]
+        cur = int(s.get(key, _default_channel_settings().get(key, 0)) or 0)
+        s[key] = _step_value(key, cur, up)
+        save_channel_settings(cid, channel)
+        return page, _fmt_numeric(key, s[key])
+    if op == 'a' and len(args) == 2 and args[0] in PROTECTIONS and args[1] in ACTION_LABELS:
+        s[f'action_{args[0]}'] = args[1]
+        save_channel_settings(cid, channel)
+        await send_log(cid, f"⚙️ {html.escape(args[0])} cezası → {ACTION_LABELS[args[1]]} | {by}", ParseMode.HTML)
+        return f"pr.{args[0]}", f"Ceza: {ACTION_LABELS[args[1]]}"
+    if op == 'wa' and args and args[0] in WARN_ACTION_LABELS:
+        s['warn_action'] = args[0]
+        save_channel_settings(cid, channel)
+        return 'warn', f"Limit cezası: {WARN_ACTION_LABELS[args[0]]}"
+    if op == 'i' and args and args[0] in INPUT_PROMPTS:
+        if args[0] == 'log' and not _can_manage_log(cid, uid, channel):
+            await query.answer("Log kanalını sadece grup sahibi değiştirebilir.", show_alert=True)
+            return None
+        await _ask_input(query, context, cid, args[0])
+        return None
+    if op in ('wd', 'ld') and len(args) == 2 and args[0].isdigit():
+        list_key = 'banned_words' if op == 'wd' else 'link_whitelist'
+        items = s.setdefault(list_key, [])
+        idx = int(args[0])
+        page = f"{'words' if op == 'wd' else 'links'}.{args[1]}"
+        if idx >= len(items):
+            return page, "Liste değişmiş, yenilendi"
+        removed = items.pop(idx)
+        save_channel_settings(cid, channel)
+        await send_log(cid, f"🗑 {'Yasaklı kelime' if op == 'wd' else 'İzinli link'} silindi: {html.escape(removed)} | {by}",
+                       ParseMode.HTML)
+        return page, f"🗑 {removed[:40]} silindi"
+    if op == 'wc':
+        s['banned_words'] = []
+        save_channel_settings(cid, channel)
+        await send_log(cid, f"🧹 Tüm yasaklı kelimeler silindi | {by}", ParseMode.HTML)
+        return 'words.0', "Tüm kelimeler silindi"
+    if op == 'nd' and args:
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("DELETE FROM notes WHERE chat_id = ? AND name = ?", (cid, args[0]))
+                conn.commit()
+        return 'notes.0', f"#{args[0]} silindi"
+    if op == 'ne':
+        nm = _nm_data(cid)
+        nm['enabled'] = 0 if nm['enabled'] else 1
+        nm['configured'] = 1
+        save_nightmod(cid, nm)
+        if not nm['enabled'] and nm['is_active']:
+            await nightmod_deactivate(cid)
+        return 'night', "🌙 Gece modu " + ("açıldı" if nm['enabled'] else "kapatıldı")
+    if op == 'nt' and args and args[0] in dict(NIGHT_RESTRICTIONS):
+        nm = _nm_data(cid)
+        nm['restrictions'][args[0]] = not nm['restrictions'].get(args[0], False)
+        nm['configured'] = 1
+        save_nightmod(cid, nm)
+        return 'night', "Kaydedildi"
+    if op == 'nh' and len(args) == 2:
+        nm = _nm_data(cid)
+        prefix = 'start' if args[0] == 's' else 'end'
+        total = (nm[f'{prefix}_hour'] * 60 + nm[f'{prefix}_minute'] + (30 if args[1] == 'u' else -30)) % 1440
+        nm[f'{prefix}_hour'], nm[f'{prefix}_minute'] = divmod(total, 60)
+        nm['configured'] = 1
+        save_nightmod(cid, nm)
+        return 'night', f"{nm[f'{prefix}_hour']:02d}:{nm[f'{prefix}_minute']:02d}"
+    if op == 'lx':
+        if not _can_manage_log(cid, uid, channel):
+            await query.answer("Log kanalını sadece grup sahibi değiştirebilir.", show_alert=True)
+            return None
+        channel['log_chat_id'] = None
+        save_channel_settings(cid, channel)
+        return 'log', "Log kanalı kaldırıldı"
+    if op == 'rx':
+        s['rules'] = ''
+        save_channel_settings(cid, channel)
+        return 'welcome', "Kurallar silindi"
+    if op == 'ru':
+        ok = await raid_unlock(cid)
+        if ok:
+            await send_log(cid, f"✅ Raid kilidi panelden açıldı | {by}", ParseMode.HTML)
+        return 'raid', "🔓 Kilit açıldı" if ok else "Kilit açılamadı (bot yetkisi?)"
+    return 'main', ''
+
+async def settings_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    data = query.data
-
-    if data.startswith("nm_settings|"):
-        await query.answer()
-        chat_id = data.split("|")[1]
-        nm = get_nightmod(chat_id)
-        restrictions = json.loads(nm['restrictions']) if nm and isinstance(nm['restrictions'], str) else (nm['restrictions'] if nm else {})
-        nm_enabled = nm['enabled'] if nm else False
-        sh = nm['start_hour'] if nm else 23
-        sm = nm['start_minute'] if nm else 0
-        eh = nm['end_hour'] if nm else 7
-        em = nm['end_minute'] if nm else 0
-        keyboard = _nightmod_keyboard(chat_id, restrictions)
-        await query.message.reply_text(
-            f"Night Mode: {'ACIK' if nm_enabled else 'KAPALI'}\n"
-            f"Saat: {sh:02d}:{sm:02d} - {eh:02d}:{em:02d} (UTC+3)\n\n"
-            f"Kisitlamaları sec:",
-            reply_markup=keyboard
-        )
-        return
-
-    if data.startswith("stg_close|"):
-        await query.answer()
-        await query.edit_message_text("Ayarlar paneli kapatildi.")
-        return
-
-    if data.startswith("stg_limits|"):
-        chat_id = data.split("|", 1)[1]
-        channel = get_channel_settings(chat_id)
-        if not channel:
-            await query.answer("Kanal bulunamadi.", show_alert=True)
-            return
-        s = channel['settings']
-        await query.answer(
-            f"Flood: {s.get('flood_limit',7)}msg/{s.get('flood_timeframe',5)}sn | "
-            f"Media: {s.get('media_flood_limit',5)}medya | "
-            f"Raid: {s.get('raid_limit',10)}uye/{s.get('raid_timeframe',30)}sn",
-            show_alert=True
-        )
-        return
-
-    if not data.startswith("stg_toggle|"):
+    parts = query.data.split('|')
+    if len(parts) < 3:
         await query.answer()
         return
-
-    parts = data.split("|")
-    if len(parts) != 3:
-        await query.answer("Hata.", show_alert=True)
+    cid, op, args = parts[1], parts[2], parts[3:]
+    channel = get_channel_settings(cid)
+    if not channel:
+        await query.answer("Grup bulunamadı.", show_alert=True)
         return
-
-    _, key, chat_id = parts
-
-    caller_id = query.from_user.id
-    if not has_permission(chat_id, caller_id, 50):
+    uid = query.from_user.id
+    if not has_permission(cid, uid, 50):
         await query.answer("Yetkin yok!", show_alert=True)
         return
-
-    channel = get_channel_settings(chat_id)
-    if not channel:
-        await query.answer("Kanal bulunamadı.", show_alert=True)
+    if op == 'x':
+        await query.answer()
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Panel kapatılamadı: {e}")
         return
-
-    current = channel['settings'].get(key, False)
-    channel['settings'][key] = not current
-
-    if key == 'auto_accept' and channel['settings'][key]:
-        channel['settings']['auto_reject'] = False
-    elif key == 'auto_reject' and channel['settings'][key]:
-        channel['settings']['auto_accept'] = False
-
-    save_channel_settings(chat_id, channel)
-
-    new_state = channel['settings'][key]
-    emoji = "✅" if new_state else "❌"
-    await query.answer(f"{key.replace('_', ' ').title()} → {emoji}", show_alert=False)
-
-    settings = channel['settings']
-    text = _build_settings_text(chat_id, settings)
-    keyboard = _build_settings_keyboard(chat_id, settings)
+    note = ''
+    if op == 'p':
+        page = args[0] if args else 'main'
+    else:
+        if not _can_edit_settings(cid, uid):
+            await query.answer("Ayarları değiştirmek için Baş Admin veya 'Ayarları yönetme' yetkisi gerekli.",
+                               show_alert=True)
+            return
+        result = await _settings_change(cid, channel, op, args, query, context)
+        if result is None:
+            return
+        page, note = result
+    await query.answer(note[:190])
+    text, markup = await render_settings(cid, page)
     try:
-        await query.edit_message_text(text, reply_markup=keyboard)
-    except Exception as e:
-        logger.error(f"Settings panel yenileme hata: {e}")
+        await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML,
+                                      disable_web_page_preview=True)
+    except BadRequest as e:
+        if 'not modified' not in str(e).lower():
+            raise
 
-    await send_log(chat_id, f"⚙️ {html.escape(key)} → {'açıldı' if new_state else 'kapatıldı'} | {mention(query.from_user)}", ParseMode.HTML)
+async def _ask_input(query, context, cid: str, kind: str):
+    """Panelden metin isteme: ForceReply ile cevap alanı açılır, cevap settings_input_handler'a düşer."""
+    prompt_text, placeholder = INPUT_PROMPTS[kind]
+    prompt = await query.message.reply_text(
+        f"{mention(query.from_user)} {html.escape(prompt_text)}\n\n<i>Vazgeçmek için: iptal</i>",
+        parse_mode=ParseMode.HTML,
+        reply_markup=ForceReply(selective=True, input_field_placeholder=placeholder[:64]))
+    context.user_data['await_input'] = {
+        'kind': kind, 'chat_id': cid, 'prompt_chat': prompt.chat_id, 'prompt_id': prompt.message_id,
+        'panel_id': query.message.message_id, 'expires': time.time() + 300}
+    await query.answer("Cevabını açılan mesaja yanıt olarak yaz.")
+
+async def settings_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Panelin istediği metni (ForceReply cevabı) yakalar; diğer mesajlara dokunmaz."""
+    st = context.user_data.get('await_input') if context.user_data is not None else None
+    msg = update.message
+    if not st or not msg or not msg.text or msg.chat_id != st['prompt_chat']:
+        return
+    if msg.chat.type != 'private' and not (msg.reply_to_message and msg.reply_to_message.message_id == st['prompt_id']):
+        return
+    context.user_data.pop('await_input', None)
+    if msg.text in DM_MENU_TEXTS:
+        return  # kullanıcı menüye bastı: giriş iptal, menü işleyicisi devam etsin
+    try:
+        await bot.delete_message(st['prompt_chat'], st['prompt_id'])
+    except Exception as e:
+        logger.debug(f"Giriş istemi silinemedi: {e}")
+    if time.time() > st['expires']:
+        await msg.reply_text("⏰ Süre doldu, panelden tekrar dene.")
+        raise ApplicationHandlerStop
+    if msg.text.strip().lower() in ('iptal', 'vazgeç', 'vazgec'):
+        await msg.reply_text("İptal edildi.")
+        raise ApplicationHandlerStop
+    cid = st['chat_id']
+    channel = get_channel_settings(cid)
+    if not channel or not _can_edit_settings(cid, update.effective_user.id):
+        await msg.reply_text("Yetkin yok!")
+        raise ApplicationHandlerStop
+    note, page = await _apply_input(st['kind'], cid, channel, msg, update.effective_user)
+    await msg.reply_text(note, parse_mode=ParseMode.HTML)
+    try:
+        text, markup = await render_settings(cid, page)
+        await bot.edit_message_text(text, chat_id=st['prompt_chat'], message_id=st['panel_id'], reply_markup=markup,
+                                    parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    except Exception as e:
+        logger.debug(f"Panel yenilenemedi: {e}")
+    raise ApplicationHandlerStop
+
+async def _apply_input(kind: str, cid: str, channel: dict, msg, user):
+    """Metin girişini ayara uygular. Dönüş: (HTML bildirim, panel sayfası)"""
+    s = channel['settings']
+    text = msg.text.strip()
+    if kind == 'welcome':
+        s['welcome_msg'] = text[:1000]
+        s['welcome_enabled'] = True
+        save_channel_settings(cid, channel)
+        return "✅ Hoş geldin mesajı güncellendi.", 'welcome'
+    if kind == 'rules':
+        s['rules'] = text[:3500]
+        save_channel_settings(cid, channel)
+        return "✅ Kurallar güncellendi.", 'welcome'
+    if kind == 'word':
+        added, bad = [], []
+        for w in (line.strip() for line in text.split('\n')):
+            if not w:
+                continue
+            if w.lower().startswith('re:'):
+                try:
+                    re.compile(w[3:])
+                except re.error:
+                    bad.append(w)
+                    continue
+            else:
+                w = w.lower()
+            if w not in s['banned_words']:
+                s['banned_words'].append(w)
+                added.append(w)
+        if added:
+            s['word_ban_enabled'] = True
+        save_channel_settings(cid, channel)
+        note = f"✅ {len(added)} kelime eklendi, kelime filtresi açık."
+        if bad:
+            note += f"\n❌ Geçersiz regex: {html.escape(', '.join(bad))}"
+        return note, 'words.0'
+    if kind == 'link':
+        wl = s.setdefault('link_whitelist', [])
+        added = []
+        for item in re.split(r'[\s,]+', text.lower()):
+            item = re.sub(r'^[a-z]+://', '', item)
+            item = item[4:] if item.startswith('www.') else item
+            if item and item not in wl:
+                wl.append(item)
+                added.append(item)
+        save_channel_settings(cid, channel)
+        return f"✅ {len(added)} alan adı eklendi.", 'links.0'
+    if kind == 'note':
+        name = text.split(maxsplit=1)[0].lower() if text else ''
+        parts = msg.text_html.split(maxsplit=1)
+        if not _NOTE_NAME.match(name) or len(parts) < 2:
+            return "❌ Biçim: <code>isim içerik</code> (isim: harf, rakam, - veya _)", 'notes.0'
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("""INSERT OR REPLACE INTO notes (chat_id, name, content, file_id, file_type, created_by, created_at)
+                                VALUES (?, ?, ?, NULL, NULL, ?, ?)""", (cid, name, parts[1], user.id, time.time()))
+                conn.commit()
+        return f"✅ Not kaydedildi: <code>#{html.escape(name)}</code>", 'notes.0'
+    if kind == 'log':
+        if not _can_manage_log(cid, user.id, channel):
+            return "Log kanalını sadece grup sahibi değiştirebilir.", 'log'
+        if not re.fullmatch(r'-?\d+', text):
+            return "❌ Geçersiz ID. Örnek: <code>-1001234567890</code>", 'log'
+        try:
+            await bot.send_message(int(text), f"✅ ULUS log kanalı bağlandı: {html.escape(await _chat_title(cid))}",
+                                   parse_mode=ParseMode.HTML)
+        except Exception as e:
+            return f"❌ Bu sohbete mesaj gönderemiyorum: {html.escape(str(e))}", 'log'
+        channel['log_chat_id'] = text
+        save_channel_settings(cid, channel)
+        return "✅ Log kanalı ayarlandı.", 'log'
+    return "Bilinmeyen işlem.", 'main'
+
+
+
+async def cmd_settings(update: Update, context):
+    """/settings — butonlu ayar paneli (grupta o grup, özelde /kanal ile seçilen grup)."""
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await update.effective_message.reply_text("Önce /kanal ile seç!")
+        return
+    if not has_permission(chat_id, update.effective_user.id, 50):
+        await update.effective_message.reply_text("Yetkin yok!")
+        return
+    await send_settings_panel(update.effective_message, chat_id)
+
+
 
 async def help_settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/help menüsündeki '⚙️ Ayarlar Paneli' butonu."""
@@ -3594,8 +4143,7 @@ async def help_settings_callback(update: Update, context: ContextTypes.DEFAULT_T
         await query.answer("Yetkin yok!", show_alert=True)
         return
     await query.answer()
-    await query.message.reply_text(_build_settings_text(chat_id, channel['settings']),
-                                   reply_markup=_build_settings_keyboard(chat_id, channel['settings']))
+    await send_settings_panel(query.message, chat_id)
 
 async def duyuru(update: Update, context):
     if update.effective_user.id != FOUNDER_ID:
@@ -3683,7 +4231,7 @@ async def new_member_handler(update: Update, context):
                 logger.debug(f"new_member_handler: {e}")
             continue
 
-        if channel['settings'].get('captcha_enabled', False) and not user.is_bot:
+        if channel['settings'].get('captcha_enabled', False) and not user.is_bot and not _consume_join_pass(chat_id, user.id):
             await send_captcha(chat_id, user.id, username, context, user=user)
             continue
 
@@ -3716,7 +4264,8 @@ async def new_member_handler(update: Update, context):
                 .replace('{uye_sayisi}', str(member_count))
             )
             try:
-                await update.message.reply_text(welcome_msg, parse_mode=ParseMode.HTML)
+                if channel['settings'].get('welcome_enabled', True):
+                    await update.message.reply_text(welcome_msg, parse_mode=ParseMode.HTML)
             except Exception as e:
                 logger.debug(f"new_member_handler: {e}")
             await send_log(chat_id, f"👋 {mention(user)} katıldı → {chat_id}", ParseMode.HTML)
@@ -4050,11 +4599,11 @@ async def cmd_top(update: Update, context):
         return
     keyboard = [
         [
-            InlineKeyboardButton("📅 Günlük", callback_data=f"top|{chat_id}|gunluk"),
-            InlineKeyboardButton("📅 Haftalık", callback_data=f"top|{chat_id}|haftalik"),
-            InlineKeyboardButton("📅 Aylık", callback_data=f"top|{chat_id}|aylik"),
+            ibtn("📅 Günlük", f"top|{chat_id}|gunluk", BLUE),
+            ibtn("📅 Haftalık", f"top|{chat_id}|haftalik", BLUE),
+            ibtn("📅 Aylık", f"top|{chat_id}|aylik", BLUE),
         ],
-        [InlineKeyboardButton("📊 Bütün zamanlarda", callback_data=f"top|{chat_id}|toplam")],
+        [ibtn("📊 Bütün zamanlarda", f"top|{chat_id}|toplam", BLUE)],
         [
             InlineKeyboardButton("📋 Detaylı bilgi", callback_data=f"topdetay|{chat_id}"),
             InlineKeyboardButton("🌐 Global", callback_data=f"topglobal|{update.effective_user.id}"),
@@ -4095,11 +4644,11 @@ async def top_callback(update: Update, context):
         chat_id = data.split("|")[1]
         keyboard = [
             [
-                InlineKeyboardButton("📅 Günlük", callback_data=f"top|{chat_id}|gunluk"),
-                InlineKeyboardButton("📅 Haftalık", callback_data=f"top|{chat_id}|haftalik"),
-                InlineKeyboardButton("📅 Aylık", callback_data=f"top|{chat_id}|aylik"),
+                ibtn("📅 Günlük", f"top|{chat_id}|gunluk", BLUE),
+                ibtn("📅 Haftalık", f"top|{chat_id}|haftalik", BLUE),
+                ibtn("📅 Aylık", f"top|{chat_id}|aylik", BLUE),
             ],
-            [InlineKeyboardButton("📊 Bütün zamanlarda", callback_data=f"top|{chat_id}|toplam")],
+            [ibtn("📊 Bütün zamanlarda", f"top|{chat_id}|toplam", BLUE)],
             [
                 InlineKeyboardButton("📋 Detaylı bilgi", callback_data=f"topdetay|{chat_id}"),
                 InlineKeyboardButton("🌐 Global", callback_data=f"topglobal|{query.from_user.id}"),
@@ -4435,8 +4984,8 @@ async def enter_lockdown(chat_id: str, reason: str, spam_admin_id: int = 0):
 
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("Tum adminleri geri yukle", callback_data=f"lockdown_restore|{chat_id}|all"),
-                InlineKeyboardButton("Spam yapan haric geri yukle", callback_data=f"lockdown_restore|{chat_id}|{spam_admin_id}"),
+                ibtn("Tum adminleri geri yukle", f"lockdown_restore|{chat_id}|all", GREEN),
+                ibtn("Spam yapan haric geri yukle", f"lockdown_restore|{chat_id}|{spam_admin_id}", BLUE),
             ]
         ])
         suspect = f"Şüpheli: {mention_html(spam_admin_id, str(spam_admin_id))}\n" if spam_admin_id else ""
@@ -4551,11 +5100,7 @@ async def check_admin_spam(chat_id: str, user_id: int, is_media: bool, msg_id: i
             )
             conn.commit()
 
-    for row in msg_ids:
-        try:
-            await bot.delete_message(chat_id, row['msg_id'])
-        except Exception as e:
-            logger.debug(f"check_admin_spam: {e}")
+    await _bulk_delete(chat_id, [row['msg_id'] for row in msg_ids])
 
     try:
         member = await bot.get_chat_member(chat_id, user_id)
@@ -4797,12 +5342,13 @@ async def weekly_log_cleanup(context):
             ).fetchall()
         if not logs:
             continue
-        lines = [f"📋 <b>Haftalik Kanal Log Raporu</b>\n<code>{chat_id}</code>\n"]
+        lines = []
         for l in logs:
             dt = datetime.fromtimestamp(l['timestamp'], TZ_TR).strftime('%d.%m %H:%M')
             who = mention_html(l['user_id'], l['username'] or str(l['user_id'])) if l['user_id'] else "-"
             lines.append(f"{dt} | {html.escape(l['action'])} | {who} | {html.escape((l['detail'] or '')[:50])}")
-        report = "\n".join(lines)
+        report = (f"📋 <b>Haftalik Kanal Log Raporu</b>\n<code>{chat_id}</code>\n"
+                  f"<blockquote expandable>{chr(10).join(lines)}</blockquote>")
         await notify_managers(chat_id, report, parse_mode=ParseMode.HTML)
 
 def _kanal_settings_keyboard(chat_id: str, cfg: dict) -> InlineKeyboardMarkup:
@@ -4810,17 +5356,17 @@ def _kanal_settings_keyboard(chat_id: str, cfg: dict) -> InlineKeyboardMarkup:
     action_spam = "Ban+Yetki Al" if cfg.get('admin_spam_action') == 'demote_ban' else "Sadece Yetki Al"
     action_media = "Ban+Yetki Al" if cfg.get('admin_media_action') == 'demote_ban' else "Sadece Yetki Al"
     keyboard = [
-        [InlineKeyboardButton(f"{tog(cfg.get('admin_spam_enabled'))} Admin Spam Koruma", callback_data=f"kcfg|{chat_id}|admin_spam_enabled")],
+        [ibtn(f"{tog(cfg.get('admin_spam_enabled'))} Admin Spam Koruma", f"kcfg|{chat_id}|admin_spam_enabled", GREEN if cfg.get('admin_spam_enabled') else RED)],
         [InlineKeyboardButton(f"Spam Aksiyon: {action_spam}", callback_data=f"kcfg|{chat_id}|admin_spam_action")],
-        [InlineKeyboardButton(f"{tog(cfg.get('admin_media_enabled'))} Admin Medya Flood", callback_data=f"kcfg|{chat_id}|admin_media_enabled")],
+        [ibtn(f"{tog(cfg.get('admin_media_enabled'))} Admin Medya Flood", f"kcfg|{chat_id}|admin_media_enabled", GREEN if cfg.get('admin_media_enabled') else RED)],
         [InlineKeyboardButton(f"Medya Aksiyon: {action_media}", callback_data=f"kcfg|{chat_id}|admin_media_action")],
-        [InlineKeyboardButton(f"{tog(cfg.get('link_protection'))} Link Koruması", callback_data=f"kcfg|{chat_id}|link_protection")],
-        [InlineKeyboardButton(f"{tog(cfg.get('clone_protection'))} Klonlama Koruması", callback_data=f"kcfg|{chat_id}|clone_protection")],
-        [InlineKeyboardButton(f"{tog(cfg.get('bot_add_protection'))} Bot Ekleme Koruması", callback_data=f"kcfg|{chat_id}|bot_add_protection")],
-        [InlineKeyboardButton(f"{tog(cfg.get('bulk_ban_protection'))} Toplu Ban Koruması", callback_data=f"kcfg|{chat_id}|bulk_ban_protection")],
+        [ibtn(f"{tog(cfg.get('link_protection'))} Link Koruması", f"kcfg|{chat_id}|link_protection", GREEN if cfg.get('link_protection') else RED)],
+        [ibtn(f"{tog(cfg.get('clone_protection'))} Klonlama Koruması", f"kcfg|{chat_id}|clone_protection", GREEN if cfg.get('clone_protection') else RED)],
+        [ibtn(f"{tog(cfg.get('bot_add_protection'))} Bot Ekleme Koruması", f"kcfg|{chat_id}|bot_add_protection", GREEN if cfg.get('bot_add_protection') else RED)],
+        [ibtn(f"{tog(cfg.get('bulk_ban_protection'))} Toplu Ban Koruması", f"kcfg|{chat_id}|bulk_ban_protection", GREEN if cfg.get('bulk_ban_protection') else RED)],
         [InlineKeyboardButton("👥 Güvenli Adminler", callback_data=f"kcfg|{chat_id}|safe_admins_panel")],
         [InlineKeyboardButton("💾 Kanal Başlık/Açıklama Kaydet", callback_data=f"kcfg|{chat_id}|save_info")],
-        [InlineKeyboardButton("🔙 Kapat", callback_data=f"kcfg|{chat_id}|close")],
+        [ibtn("🔙 Kapat", f"kcfg|{chat_id}|close", RED)],
     ]
     return InlineKeyboardMarkup(keyboard)
 
@@ -4896,10 +5442,7 @@ async def kanal_cfg_callback(update: Update, context):
                     continue
                 is_safe = a.user.id in safe
                 name = f"@{a.user.username}" if a.user.username else (a.user.first_name or str(a.user.id))
-                buttons.append([InlineKeyboardButton(
-                    f"{'✅' if is_safe else '❌'} {name}",
-                    callback_data=f"kcfg|{chat_id}|safe_toggle|{a.user.id}"
-                )])
+                buttons.append([ibtn(f"{'✅' if is_safe else '❌'} {name}", f"kcfg|{chat_id}|safe_toggle|{a.user.id}", GREEN if is_safe else RED)])
             buttons.append([InlineKeyboardButton("🔙 Geri", callback_data=f"kcfg|{chat_id}|back")])
             await query.message.edit_text("Guvenli admin listesi:\n(Link atmasina izin verilenler)", reply_markup=InlineKeyboardMarkup(buttons))
         except Exception as e:
@@ -4928,10 +5471,7 @@ async def kanal_cfg_callback(update: Update, context):
                     continue
                 is_safe = a.user.id in safe
                 name = f"@{a.user.username}" if a.user.username else (a.user.first_name or str(a.user.id))
-                buttons.append([InlineKeyboardButton(
-                    f"{'✅' if is_safe else '❌'} {name}",
-                    callback_data=f"kcfg|{chat_id}|safe_toggle|{a.user.id}"
-                )])
+                buttons.append([ibtn(f"{'✅' if is_safe else '❌'} {name}", f"kcfg|{chat_id}|safe_toggle|{a.user.id}", GREEN if is_safe else RED)])
             buttons.append([InlineKeyboardButton("🔙 Geri", callback_data=f"kcfg|{chat_id}|back")])
             await query.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
         except Exception as e:
@@ -4952,64 +5492,16 @@ async def kanal_cfg_callback(update: Update, context):
     await query.message.edit_reply_markup(reply_markup=_kanal_settings_keyboard(chat_id, cfg))
 
 async def kanal_temizle(update: Update, context):
-    
+    """Kanalda /temizle gönderisi: son 50.000 gönderi aralığı toplu silinir."""
     msg = update.channel_post
     if not msg:
         return
-
     chat_id = str(msg.chat_id)
-    channel = get_channel_settings(chat_id)
-    if not channel:
+    if not get_channel_settings(chat_id):
         return
-
-    cmd_msg_id = msg.message_id
-
-    try:
-        await msg.delete()
-    except Exception as e:
-        logger.debug(f"kanal_temizle: {e}")
-
-    status = await bot.send_message(chat_id, "Kanal temizleniyor...")
-
-    deleted = 0
-    consecutive_errors = 0
-    batch = []
-    i = cmd_msg_id - 1
-
-    while i > max(1, cmd_msg_id - 50000):
-        batch.append(i)
-        i -= 1
-        if len(batch) == 100:
-            results = await asyncio.gather(
-                *[bot.delete_message(chat_id, mid) for mid in batch],
-                return_exceptions=True
-            )
-            ok = sum(1 for r in results if not isinstance(r, Exception))
-            err = len(results) - ok
-            deleted += ok
-            consecutive_errors = 0 if ok > 0 else consecutive_errors + err
-            batch = []
-            if consecutive_errors > 200:
-                break
-            await asyncio.sleep(0.2)
-
-    if batch:
-        results = await asyncio.gather(
-            *[bot.delete_message(chat_id, mid) for mid in batch],
-            return_exceptions=True
-        )
-        deleted += sum(1 for r in results if not isinstance(r, Exception))
-
-    try:
-        await status.edit_text(f"{deleted} gönderi silindi.")
-    except Exception as e:
-        logger.debug(f"kanal_temizle: {e}")
-    await asyncio.sleep(5)
-    try:
-        await status.delete()
-    except Exception as e:
-        logger.debug(f"kanal_temizle: {e}")
-    await send_log(chat_id, f"Kanal temizlendi: {deleted} gönderi silindi")
+    ids = list(range(msg.message_id, max(0, msg.message_id - 50001), -1))  # komut gönderisi dahil
+    context.application.create_task(
+        _run_cleanup(chat_id, ids, "Kanal gönderileri", "kanal yöneticisi", {}, context.job_queue), update=update)
 
 async def istekonayla(update: Update, context):
     if update.channel_post:
@@ -5358,8 +5850,8 @@ async def _cmd_set_role(update, context, role: str):
         target_member = await context.bot.get_chat_member(promote_chat_id, user_id)
         who = mention(target_member.user)
         keyboard = [[
-            InlineKeyboardButton("⚙️ Yetkiler", callback_data=f"permtab|{promote_chat_id}|{user_id}|bot"),
-            InlineKeyboardButton("❌ Kaldır", callback_data=f"removeadmin|{promote_chat_id}|{user_id}")
+            ibtn("⚙️ Yetkiler", f"permtab|{promote_chat_id}|{user_id}|bot", BLUE),
+            ibtn("❌ Kaldır", f"removeadmin|{promote_chat_id}|{user_id}", RED)
         ]]
         await msg.reply_text(
             f"✅ {who} {label} yapıldı!" + (f"\nEtiket: {html.escape(tag)}" if tag else ""),
@@ -5393,12 +5885,12 @@ async def cmd_panel(update: Update, context):
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("📢 Kanallar", callback_data="panel|channels"),
-            InlineKeyboardButton("👥 Gruplar", callback_data="panel|groups"),
+            ibtn("📢 Kanallar", "panel|channels", BLUE),
+            ibtn("👥 Gruplar", "panel|groups", BLUE),
         ],
         [
-            InlineKeyboardButton("🚫 Engelliler", callback_data="panel|blocked"),
-            InlineKeyboardButton("📊 İstatistikler", callback_data="panel|stats"),
+            ibtn("🚫 Engelliler", "panel|blocked", BLUE),
+            ibtn("📊 İstatistikler", "panel|stats", BLUE),
         ],
     ])
     await update.message.reply_text(
@@ -5541,12 +6033,12 @@ async def panel_callback(update: Update, context):
             total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats").fetchone()['c']
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("📢 Kanallar", callback_data="panel|channels"),
-                InlineKeyboardButton("👥 Gruplar", callback_data="panel|groups"),
+                ibtn("📢 Kanallar", "panel|channels", BLUE),
+                ibtn("👥 Gruplar", "panel|groups", BLUE),
             ],
             [
-                InlineKeyboardButton("🚫 Engelliler", callback_data="panel|blocked"),
-                InlineKeyboardButton("📊 İstatistikler", callback_data="panel|stats"),
+                ibtn("🚫 Engelliler", "panel|blocked", BLUE),
+                ibtn("📊 İstatistikler", "panel|stats", BLUE),
             ],
         ])
         await query.message.edit_text(
@@ -5771,7 +6263,7 @@ async def help_command(update: Update, context):
 
     if chat.type == 'private':
         if user.id == FOUNDER_ID:
-            await update.message.reply_text(
+            await update.message.reply_text(parse_mode=ParseMode.HTML, text=fold(
                 "🤖 Bot Sahibi Komutlari\n\n"
                 "/panel — Yonetim paneli\n"
                 "/engelle <id> [sebep] — Engelle\n"
@@ -5783,16 +6275,18 @@ async def help_command(update: Update, context):
                 "/duyuru <mesaj> — Tum gruplara duyuru\n"
                 "/kanal — Kanal sec\n"
                 "/kanalsettings — Kanal ayarlari\n"
-            )
+            ))
         else:
-            await update.message.reply_text(
+            await update.message.reply_text(parse_mode=ParseMode.HTML, text=fold(
                 "ULUS Security Bot\n\n"
                 "/start — Baslat\n"
+                "/menu — Alt menuyu goster\n"
+                "/settings — Secili grubun butonlu ayar paneli\n"
                 "/help — Yardim\n"
                 "/id — ID goster\n"
                 "/kanal — Kanal baglantisi\n"
                 "/itiraz <aciklama> — Ban itirazi gonder\n"
-            )
+            ))
         return
 
     chat_id = str(chat.id)
@@ -5832,7 +6326,7 @@ async def help_command(update: Update, context):
     )
 
     if not is_admin:
-        await update.message.reply_text(user_section)
+        await update.message.reply_text(fold(user_section), parse_mode=ParseMode.HTML)
         return
 
     admin_section = (
@@ -5855,7 +6349,7 @@ async def help_command(update: Update, context):
         "/cekilis — Cekilis baslat\n"
         "/cekilis_bitir [kazanan sayisi] — Cekilisi bitir\n\n"
         "⚙️ Grup Yonetimi\n"
-        "/settings — Grup ayarlari paneli\n"
+        "/settings — Butonlu ayar paneli (tum ayarlar)\n"
         "/nightmod 23:00 07:00 — Gece modu\n"
         "/wordlist — Yasakli kelimeler\n"
         "/wordban <kelime> — Kelime engelle\n"
@@ -5896,12 +6390,238 @@ async def help_command(update: Update, context):
     )
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚙️ Ayarlar Paneli", callback_data="help_settings")]
+        [ibtn("⚙️ Ayarlar Paneli", "help_settings", BLUE)]
     ])
     await update.message.reply_text(
-        admin_section + "\n\n━━━━━━━━━━━━━━━\n\n" + user_section,
-        reply_markup=keyboard
+        fold(admin_section) + "\n\n" + fold(user_section),
+        reply_markup=keyboard, parse_mode=ParseMode.HTML
     )
+
+# ─────────────────────────── ÖZEL MENÜ, GRUP SEÇME, KOMUT MENÜSÜ ───────────────────────────
+MENU_SETTINGS, MENU_GROUPS, MENU_STATS, MENU_HELP = "⚙️ Ayarlar", "🛡 Gruplarım", "📊 İstatistik", "❓ Yardım"
+DM_MENU_TEXTS = {MENU_SETTINGS, MENU_GROUPS, MENU_STATS, MENU_HELP}
+REQ_PICK_GROUP, REQ_PICK_CHANNEL = 1, 2
+ADMIN_RIGHTS_GROUP = "change_info+delete_messages+restrict_members+invite_users+pin_messages+promote_members+manage_video_chats"
+ADMIN_RIGHTS_CHANNEL = "change_info+post_messages+edit_messages+delete_messages+invite_users+promote_members"
+
+def dm_menu_keyboard() -> ReplyKeyboardMarkup:
+    """Özel sohbette klavyenin yerinde duran kalıcı menü; alttaki butonlar Telegram'ın sohbet seçicisini açar."""
+    return ReplyKeyboardMarkup(
+        [[KeyboardButton(MENU_SETTINGS, style=BLUE), KeyboardButton(MENU_GROUPS, style=BLUE)],
+         [KeyboardButton(MENU_STATS), KeyboardButton(MENU_HELP)],
+         [KeyboardButton("🔗 Grup seç", request_chat=KeyboardButtonRequestChat(
+              request_id=REQ_PICK_GROUP, chat_is_channel=False, bot_is_member=True, request_title=True)),
+          KeyboardButton("📢 Kanal seç", request_chat=KeyboardButtonRequestChat(
+              request_id=REQ_PICK_CHANNEL, chat_is_channel=True, bot_is_member=True, request_title=True))]],
+        resize_keyboard=True, is_persistent=True, input_field_placeholder="Menüden seç veya komut yaz…")
+
+def add_to_chat_markup(bot_username: str) -> InlineKeyboardMarkup:
+    """Botu gerekli admin yetkileri önceden işaretli şekilde gruba/kanala ekleyen linkler."""
+    return InlineKeyboardMarkup([[
+        ibtn("➕ Gruba ekle", url=f"https://t.me/{bot_username}?startgroup=ulus&admin={ADMIN_RIGHTS_GROUP}", style=GREEN),
+        ibtn("📢 Kanala ekle", url=f"https://t.me/{bot_username}?startchannel&admin={ADMIN_RIGHTS_CHANNEL}", style=BLUE),
+    ]])
+
+async def cmd_menu(update: Update, context):
+    await update.message.reply_text("Menü aşağıda 👇", reply_markup=dm_menu_keyboard())
+
+async def dm_menu_handler(update: Update, context):
+    """Özel menü butonları (düz metin olarak gelir)."""
+    text = update.message.text
+    if text == MENU_HELP:
+        await help_command(update, context)
+        return
+    if text == MENU_GROUPS:
+        await kanal(update, context)
+        return
+    chat_id = context.user_data.get('selected_channel')
+    if not chat_id or not get_channel_settings(chat_id):
+        await update.message.reply_text("Önce bir grup seç: 🛡 Gruplarım veya 🔗 Grup seç butonunu kullan.")
+        return
+    if text == MENU_SETTINGS:
+        await cmd_settings(update, context)
+    else:
+        await stats(update, context)
+
+async def chat_shared_handler(update: Update, context):
+    """Menüdeki 'Grup seç' / 'Kanal seç' ile Telegram'ın sohbet seçicisinden gelen seçim."""
+    shared = update.message.chat_shared
+    chat_id = str(shared.chat_id)
+    user_id = update.effective_user.id
+    channel = get_channel_settings(chat_id)
+    if not channel:
+        await update.message.reply_text(
+            "Bu sohbet bota kayıtlı değil. Botu oraya admin olarak ekle ve tekrar seç.",
+            reply_markup=add_to_chat_markup(context.bot.username))
+        return
+    if not has_permission(chat_id, user_id, 50):
+        await update.message.reply_text("Bu sohbette yetkin yok.")
+        return
+    context.user_data['selected_channel'] = chat_id
+    await update.message.reply_text(f"✅ Seçildi: <b>{html.escape(shared.title or chat_id)}</b>",
+                                    parse_mode=ParseMode.HTML)
+    await send_settings_panel(update.message, chat_id)
+
+GROUP_USER_COMMANDS = [
+    ("help", "Yardım menüsü"), ("rules", "Grup kuralları"), ("notlar", "Kayıtlı notlar"),
+    ("profil", "Profilin ve uyarıların"), ("top", "Aktiflik sıralaması"), ("info", "Kullanıcı istatistikleri"),
+    ("grupbilgi", "Grup bilgisi"), ("id", "ID göster"), ("zar", "Zar at"), ("yazitura", "Yazı tura at"),
+]
+GROUP_ADMIN_COMMANDS = [
+    ("settings", "Butonlu ayar paneli"), ("warn", "Uyarı ver"), ("unwarn", "Uyarıları sil"), ("warns", "Uyarıları gör"),
+    ("mute", "Sustur"), ("unmute", "Susturmayı kaldır"), ("ban", "Banla"), ("unban", "Banı kaldır"),
+    ("kick", "Gruptan at"), ("temizle", "Mesajları toplu sil"), ("pin", "Mesajı sabitle"), ("unpin", "Sabitlemeyi kaldır"),
+    ("slowmode", "Yavaş mod"), ("banlist", "Ban listesi"), ("mutelist", "Mute listesi"), ("save", "Not kaydet"),
+    ("notsil", "Not sil"), ("cekilis", "Çekiliş başlat"), ("cekilis_bitir", "Çekilişi bitir"),
+    ("antiraid_ac", "Raid kilidini aç"), ("staff", "Yetkili listesi"), ("stats", "Grup istatistikleri"),
+]
+PRIVATE_COMMANDS = [
+    ("start", "Başlat ve menü"), ("menu", "Menüyü göster"), ("kanal", "Grup/kanal seç"),
+    ("settings", "Seçili grubun ayarları"), ("itiraz", "Ban itirazı gönder"), ("help", "Yardım"), ("id", "ID göster"),
+]
+FOUNDER_COMMANDS = [
+    ("panel", "Yönetim paneli"), ("gban", "Global ban"), ("ungban", "Global banı kaldır"),
+    ("gbanlist", "Global ban listesi"), ("engelle", "Kullanıcı/sohbet engelle"), ("engelkaldir", "Engeli kaldır"),
+    ("duyuru", "Tüm gruplara duyuru"), ("yedek", "Veritabanı yedeği"),
+]
+
+async def setup_bot_profile(b):
+    """'/' menüsünde herkes kendi rolüne uygun komutları görür; bot profil açıklaması ayarlanır."""
+    def cmds(pairs):
+        return [BotCommand(c, d) for c, d in pairs]
+    try:
+        await b.set_my_commands(cmds(GROUP_USER_COMMANDS), scope=BotCommandScopeAllGroupChats())
+        await b.set_my_commands(cmds(GROUP_ADMIN_COMMANDS + GROUP_USER_COMMANDS),
+                                scope=BotCommandScopeAllChatAdministrators())
+        await b.set_my_commands(cmds(PRIVATE_COMMANDS), scope=BotCommandScopeAllPrivateChats())
+        if FOUNDER_ID:
+            await b.set_my_commands(cmds(PRIVATE_COMMANDS + FOUNDER_COMMANDS), scope=BotCommandScopeChat(FOUNDER_ID))
+        await b.set_my_short_description("ULUS — grup ve kanal koruma botu: spam, link, flood, raid ve captcha.")
+        await b.set_my_description(
+            "🛡 ULUS Security Bot\n\nGrubunu ve kanalını spam, link, flood, raid ve sahte hesaplara karşı korur. "
+            "Tüm ayarlar butonlu panelden yapılır.\n\nBaşlamak için /start")
+    except Exception as e:
+        logger.warning(f"Komut menüsü / bot açıklaması ayarlanamadı: {e}")
+
+# ─────────────────────────── KATILIM İSTEĞİ: ÖZELDEN DOĞRULAMA ───────────────────────────
+
+def _captcha_options(correct: int) -> list:
+    options = {correct}
+    while len(options) < 4:
+        cand = correct + random.randint(-6, 6)
+        if cand >= 0:
+            options.add(cand)
+    options = list(options)
+    random.shuffle(options)
+    return options
+
+async def send_join_captcha(request, channel: dict) -> bool:
+    """Katılım isteği gönderene özelden captcha atar. Gönderilemezse False döner (istek admin onayına kalır)."""
+    chat_id = str(request.chat.id)
+    user = request.from_user
+    timeout = int(channel['settings'].get('captcha_timeout', 120) or 120)
+    question, answer = generate_captcha()
+    kb = InlineKeyboardMarkup([[ibtn(str(o), f"jcap|{chat_id}|{o}", BLUE) for o in _captcha_options(int(answer))]])
+    try:
+        sent = await bot.send_message(
+            request.user_chat_id,
+            f"👋 Merhaba {mention(user)}!\n\n<b>{html.escape(request.chat.title or chat_id)}</b> grubuna katılma isteğin "
+            f"alındı. Onaylanman için soruyu cevapla:\n\n🧮 <b>{question} = ?</b>\n\n⏰ Süre: {human_duration(timeout)}",
+            parse_mode=ParseMode.HTML, reply_markup=kb)
+    except Exception as e:
+        logger.info(f"Özelden doğrulama gönderilemedi ({chat_id}/{user.id}): {e}")
+        return False
+    async with _db_lock:
+        with get_db() as conn:
+            conn.execute("""INSERT OR REPLACE INTO join_captcha (chat_id, user_id, answer, message_id, created_at, passed)
+                            VALUES (?, ?, ?, ?, ?, 0)""", (chat_id, user.id, answer, sent.message_id, time.time()))
+            conn.commit()
+    await send_log(chat_id, f"🔐 Özelden doğrulama gönderildi: {mention(user)} | {chat_id}", ParseMode.HTML)
+    return True
+
+async def join_captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """jcap|<chat_id>|<seçenek> — özelden doğrulama cevabı."""
+    query = update.callback_query
+    try:
+        _, chat_id, chosen = query.data.split('|')
+    except ValueError:
+        await query.answer("Hata.", show_alert=True)
+        return
+    user = query.from_user
+    with get_db() as conn:
+        row = conn.execute("SELECT answer FROM join_captcha WHERE chat_id = ? AND user_id = ? AND passed = 0",
+                           (chat_id, user.id)).fetchone()
+    if not row:
+        await query.answer("Bu doğrulamanın süresi dolmuş.", show_alert=True)
+        return
+    title = html.escape(await _chat_title(chat_id))
+    if chosen == str(row['answer']):
+        try:
+            await bot.approve_chat_join_request(chat_id, user.id)
+        except Exception as e:
+            logger.info(f"Katılım isteği onaylanamadı ({chat_id}/{user.id}): {e}")
+            async with _db_lock:
+                with get_db() as conn:
+                    conn.execute("DELETE FROM join_captcha WHERE chat_id = ? AND user_id = ?", (chat_id, user.id))
+                    conn.commit()
+            await query.answer("İstek artık geçerli değil (zaten işlenmiş olabilir).", show_alert=True)
+            return
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("UPDATE join_captcha SET passed = 1, created_at = ? WHERE chat_id = ? AND user_id = ?",
+                             (time.time(), chat_id, user.id))
+                conn.commit()
+        await query.answer("✅ Doğru!")
+        await query.edit_message_text(f"✅ Doğrulandı! <b>{title}</b> grubuna kabul edildin.", parse_mode=ParseMode.HTML)
+        await send_log(chat_id, f"✅ Özelden doğrulandı ve kabul edildi: {mention(user)} | {chat_id}", ParseMode.HTML)
+    else:
+        try:
+            await bot.decline_chat_join_request(chat_id, user.id)
+        except Exception as e:
+            logger.debug(f"Katılım isteği reddedilemedi: {e}")
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("DELETE FROM join_captcha WHERE chat_id = ? AND user_id = ?", (chat_id, user.id))
+                conn.commit()
+        await query.answer("❌ Yanlış cevap!", show_alert=True)
+        await query.edit_message_text(f"❌ Yanlış cevap. <b>{title}</b> katılım isteğin reddedildi; "
+                                      "tekrar istek gönderebilirsin.", parse_mode=ParseMode.HTML)
+        await send_log(chat_id, f"❌ Özelden doğrulama başarısız, reddedildi: {mention(user)} | {chat_id}", ParseMode.HTML)
+
+async def check_join_captcha_timeouts(context: ContextTypes.DEFAULT_TYPE):
+    """Süresi dolan özelden doğrulamaları reddeder; eski 'geçti' kayıtlarını temizler."""
+    now = time.time()
+    with get_db() as conn:
+        rows = conn.execute("SELECT chat_id, user_id, message_id, created_at FROM join_captcha WHERE passed = 0").fetchall()
+        conn.execute("DELETE FROM join_captcha WHERE passed = 1 AND created_at < ?", (now - 86400,))
+        conn.commit()
+    for r in rows:
+        channel = get_channel_settings(r['chat_id'])
+        timeout = int(channel['settings'].get('captcha_timeout', 120) or 120) if channel else 120
+        if now - r['created_at'] < timeout:
+            continue
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("DELETE FROM join_captcha WHERE chat_id = ? AND user_id = ?", (r['chat_id'], r['user_id']))
+                conn.commit()
+        try:
+            await bot.decline_chat_join_request(r['chat_id'], r['user_id'])
+        except Exception as e:
+            logger.debug(f"Zaman aşımı reddi: {e}")
+        try:
+            await bot.edit_message_text("⏰ Süre doldu, katılım isteğin reddedildi. Tekrar istek gönderebilirsin.",
+                                        chat_id=r['user_id'], message_id=r['message_id'])
+        except Exception as e:
+            logger.debug(f"Doğrulama mesajı güncellenemedi: {e}")
+        await send_log(r['chat_id'], f"⏰ Özelden doğrulama zaman aşımı → ID:{r['user_id']} reddedildi | {r['chat_id']}")
+
+def _consume_join_pass(chat_id: str, user_id: int) -> bool:
+    """Özelden doğrulamayı geçen kullanıcı grupta tekrar captcha çözmesin."""
+    with get_db() as conn:
+        n = conn.execute("DELETE FROM join_captcha WHERE chat_id = ? AND user_id = ? AND passed = 1",
+                         (chat_id, user_id)).rowcount
+        conn.commit()
+    return n > 0
 
 _flood_data: dict = {}
 
@@ -5940,12 +6660,21 @@ async def handle_join_request(update: Update, context):
     save_channel_settings(chat_id, channel)
     settings = channel['settings']
 
+    if is_gbanned(user_id):
+        try:
+            await bot.decline_chat_join_request(chat_id, user_id)
+        except Exception as e:
+            logger.debug(f"Gban katılım reddi: {e}")
+        await send_log(chat_id, f"🌐 Global banlı katılım isteği reddedildi: {mention(user)}", ParseMode.HTML)
+        return
     if settings.get('auto_reject_bot', False) and (user.is_bot or not user.username):
         try:
             await bot.decline_chat_join_request(chat_id, user_id)
             await send_log(chat_id, f"❌ Bot/sahte reddedildi: {mention(user)} → {chat_id}", ParseMode.HTML)
         except Exception as e:
             logger.debug(f"handle_join_request: {e}")
+    elif settings.get('join_captcha', False) and await send_join_captcha(request, channel):
+        pass  # doğru cevapta join_captcha_callback onaylar; gönderilemezse aşağıdaki kurallar geçerli
     elif settings.get('auto_accept', False):
         try:
             await bot.approve_chat_join_request(chat_id, user_id)
@@ -6025,14 +6754,14 @@ def _build_perm_keyboard(chat_id, target_uid, perm_row, target_role, section='bo
     for p_key, p_name in perms:
         is_on = bool(perm_row[p_key]) if perm_row and p_key in perm_row.keys() and perm_row[p_key] is not None else False
         btn_emoji = "✅" if is_on else "❌"
-        keyboard.append([InlineKeyboardButton(f"{btn_emoji} {p_name}", callback_data=f"toggleperm|{chat_id}|{target_uid}|{p_key}")])
+        keyboard.append([ibtn(f"{btn_emoji} {p_name}", f"toggleperm|{chat_id}|{target_uid}|{p_key}", GREEN if is_on else RED)])
 
     other = 'tg' if section == 'bot' else 'bot'
     other_label = '🤖 Bot Komutları' if section == 'tg' else '📡 Telegram Yetkileri'
     keyboard.append([InlineKeyboardButton(f"→ {other_label}", callback_data=f"permtab|{chat_id}|{target_uid}|{other}")])
     keyboard.append([
-        InlineKeyboardButton("✅ Kaydet ve Çık", callback_data=f"saveandexit|{chat_id}|{target_uid}"),
-        InlineKeyboardButton("❌ İptal", callback_data=f"cancelperm|{chat_id}|{target_uid}")
+        ibtn("✅ Kaydet ve Çık", f"saveandexit|{chat_id}|{target_uid}", GREEN),
+        ibtn("❌ İptal", f"cancelperm|{chat_id}|{target_uid}", RED)
     ])
     return keyboard
 
@@ -6253,10 +6982,15 @@ async def start(update: Update, context):
         return
 
     if not args or not args[0].startswith("aup_"):
+        if update.effective_chat.type != 'private':
+            await update.message.reply_text("🛡 ULUS aktif! Ayarlar için /settings, komutlar için /help.")
+            return
         await update.message.reply_text(
-            "Merhaba! Kanal/grup koruma botuna hos geldin.\n"
-            "/help ile komutlari gorebilirsin."
-        )
+            "🛡 <b>ULUS Security Bot</b>\n\nGrup ve kanalların için spam, link, flood, raid ve captcha koruması.\n\n"
+            "1️⃣ Aşağıdaki butonla botu grubuna gerekli yetkilerle ekle.\n"
+            "2️⃣ Alttaki menüden grubunu seç, ⚙️ Ayarlar ile her şeyi butonlarla yönet.",
+            parse_mode=ParseMode.HTML, reply_markup=add_to_chat_markup(context.bot.username))
+        await update.message.reply_text("Menü aşağıda 👇", reply_markup=dm_menu_keyboard())
         return
     try:
         rest = args[0][4:]
@@ -6349,7 +7083,7 @@ async def kanal(update: Update, context):
             label = f"{icon} {chat_info.title or cid}"
         except Exception:
             label = f"{icon} {cid}"
-        keyboard.append([InlineKeyboardButton(label, callback_data=f"select_{cid}")])
+        keyboard.append([ibtn(label, f"select_{cid}", BLUE)])
 
     await update.message.reply_text(
         "Yonetmek istedigin kanal/grubu sec:",
@@ -6367,6 +7101,8 @@ async def button_callback(update: Update, context):
     except Exception:
         title = chat_id
     await query.message.edit_text(f"✅ Seçildi: {title}\nArtık DM'de komutları kullanabilirsin.")
+    if has_permission(chat_id, query.from_user.id, 50):
+        await send_settings_panel(query.message, chat_id)
 
 async def id_command(update: Update, context):
     user = update.effective_user
@@ -6637,10 +7373,11 @@ async def cmd_gbanlist(update: Update, context):
     if not rows:
         await update.effective_message.reply_text("Global ban listesi boş.")
         return
-    lines = ["🌐 Global Ban Listesi (son 50):"]
-    for r in rows:
-        lines.append(f"• {r['user_id']} — {r['reason'] or '-'} ({datetime.fromtimestamp(r['banned_at'], TZ_TR):%d.%m.%Y})")
-    await update.effective_message.reply_text("\n".join(lines))
+    lines = [f"• <code>{r['user_id']}</code> — {html.escape(r['reason'] or '-')} "
+             f"({datetime.fromtimestamp(r['banned_at'], TZ_TR):%d.%m.%Y})" for r in rows]
+    await update.effective_message.reply_text(
+        "🌐 <b>Global Ban Listesi</b> (son 50):\n<blockquote expandable>" + "\n".join(lines) + "</blockquote>",
+        parse_mode=ParseMode.HTML)
 
 # ── Ayar komutları ──
 async def _require_settings_admin(update: Update, context, level: int = 70):
@@ -6783,8 +7520,8 @@ async def _submit_appeal(update: Update, context, chat_id: str):
             appeal_id = cur.lastrowid
             conn.commit()
     kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Banı kaldır", callback_data=f"appeal|ok|{appeal_id}"),
-        InlineKeyboardButton("❌ Reddet", callback_data=f"appeal|no|{appeal_id}"),
+        ibtn("✅ Banı kaldır", f"appeal|ok|{appeal_id}", GREEN),
+        ibtn("❌ Reddet", f"appeal|no|{appeal_id}", RED),
     ]])
     managers_text = (
         f"📨 <b>Ban itirazı</b> #{appeal_id}\n"
@@ -6942,8 +7679,9 @@ async def cmd_notes(update: Update, context):
     if not rows:
         await update.effective_message.reply_text("Kayıtlı not yok. /save ile ekle.")
         return
-    await update.effective_message.reply_text("📝 Notlar:\n" + "\n".join(f"• #{r['name']}" for r in rows) +
-                                              "\n\nGörmek için #isim yaz.")
+    await update.effective_message.reply_text(
+        "📝 <b>Notlar</b>\n<blockquote expandable>" + "\n".join(f"• #{r['name']}" for r in rows) +
+        "</blockquote>\nGörmek için grupta #isim yaz.", parse_mode=ParseMode.HTML)
 
 async def cmd_delete_note(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -7044,6 +7782,7 @@ async def chat_member_cache_handler(update: Update, context):
 async def post_init(application):
     global BOT_ID, userbot
     BOT_ID = application.bot.id
+    await setup_bot_profile(application.bot)
 
     if not (USERBOT_API_ID and USERBOT_API_HASH):
         logger.info("API_ID / API_HASH boş — Telethon kapalı (kullanıcı adı çözme ve toplu istek onayı Bot API ile yapılır).")
@@ -7062,7 +7801,7 @@ def main():
     app = (
         Application.builder()
         .token(TOKEN)
-        .rate_limiter(AIORateLimiter(max_retries=3))
+        .rate_limiter(UlusRateLimiter(max_retries=3))
         .post_init(post_init)
         .build()
     )
@@ -7071,6 +7810,8 @@ def main():
     # Her güncellemeden önce: engelli sohbet/kullanıcı ve global ban kontrolü
     app.add_handler(TypeHandler(Update, blocklist_guard), group=-100)
     app.add_error_handler(error_handler)
+    # Panelin ForceReply ile istediği metin (sadece bekleyen giriş varsa yakalar)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, settings_input_handler), group=-50)
 
     app.add_handler(ChatMemberHandler(chat_member_cache_handler, ChatMemberHandler.CHAT_MEMBER), group=-1)
     app.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
@@ -7099,6 +7840,9 @@ def main():
     app.add_handler(CommandHandler('setlog', setlog, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler('staff', staff))
     app.add_handler(CommandHandler('yetkiler', yetkiler, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler('menu', cmd_menu, filters=filters.ChatType.PRIVATE))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Text(sorted(DM_MENU_TEXTS)), dm_menu_handler))
+    app.add_handler(MessageHandler(filters.StatusUpdate.CHAT_SHARED, chat_shared_handler))
 
     app.add_handler(CommandHandler('addadmin', add_admin))
     app.add_handler(CommandHandler('remove', remove_admin))
@@ -7213,7 +7957,9 @@ def main():
     app.add_handler(CallbackQueryHandler(locked_callback, pattern='^locked$'))
     app.add_handler(CallbackQueryHandler(yetki_callback, pattern=r'^(yetki_set\||yetkiler\||yetki_)'))
     app.add_handler(CallbackQueryHandler(captcha_callback, pattern=r'^captcha\|'))
-    app.add_handler(CallbackQueryHandler(settings_toggle_callback, pattern=r'^(stg_|nm_settings\|)'))
+    app.add_handler(CallbackQueryHandler(settings_panel_callback, pattern=r'^s\|'))
+    app.add_handler(CallbackQueryHandler(mod_action_callback, pattern=r'^m\|'))
+    app.add_handler(CallbackQueryHandler(join_captcha_callback, pattern=r'^jcap\|'))
     app.add_handler(CallbackQueryHandler(nightmod_callback, pattern='^nm_'))
     app.add_handler(CallbackQueryHandler(wordlist_callback, pattern='^wdel'))
     app.add_handler(CallbackQueryHandler(appeal_callback, pattern=r'^appeal(pick)?\|'))
@@ -7221,6 +7967,7 @@ def main():
 
     job_queue = app.job_queue
     job_queue.run_repeating(check_captcha_timeouts, interval=15, first=15)
+    job_queue.run_repeating(check_join_captcha_timeouts, interval=15, first=20)
     job_queue.run_repeating(check_raid_locks, interval=60, first=10)
     job_queue.run_repeating(check_nightmod, interval=60, first=30)
     job_queue.run_repeating(check_temp_bans, interval=300, first=60)
