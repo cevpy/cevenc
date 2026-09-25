@@ -1,3 +1,6 @@
 python-telegram-bot[job-queue,rate-limiter]>=22.7,<23
 telethon
 python-dotenv
+# İsteğe bağlı: yapay zekâ ile uygunsuz (+18) fotoğraf taraması. ~300 MB yer kaplar,
+# PythonAnywhere ücretsiz hesabın 512 MB kotasına sığmayabilir. Kurmak için baştaki # işaretini kaldır:
+# nudenet>=3.4

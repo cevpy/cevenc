@@ -469,6 +469,69 @@ def init_db():
                 PRIMARY KEY (chat_id, name)
             );
 
+            CREATE TABLE IF NOT EXISTS blocked_media (
+                chat_id TEXT NOT NULL,
+                uid TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                note TEXT,
+                added_by INTEGER,
+                added_at REAL NOT NULL,
+                PRIMARY KEY (chat_id, uid)
+            );
+
+            CREATE TABLE IF NOT EXISTS msg_cache (
+                chat_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                user_id INTEGER,
+                text TEXT,
+                sent_at REAL NOT NULL,
+                PRIMARY KEY (chat_id, message_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_msgcache_ts ON msg_cache(sent_at);
+
+            CREATE TABLE IF NOT EXISTS reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                reporter_id INTEGER NOT NULL,
+                target_id INTEGER NOT NULL,
+                text TEXT,
+                copies TEXT DEFAULT '[]',
+                status TEXT DEFAULT 'open',
+                handled_by INTEGER,
+                created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_reports ON reports(chat_id, message_id);
+
+            CREATE TABLE IF NOT EXISTS networks (
+                owner_id INTEGER PRIMARY KEY,
+                ban_sync INTEGER DEFAULT 1,
+                created_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS network_members (
+                chat_id TEXT PRIMARY KEY,
+                owner_id INTEGER NOT NULL,
+                added_at REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS network_bans (
+                owner_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                source_chat TEXT,
+                until_date REAL,
+                banned_at REAL NOT NULL,
+                PRIMARY KEY (owner_id, user_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS admin_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL,
+                data TEXT NOT NULL,
+                admin_count INTEGER,
+                taken_at REAL NOT NULL,
+                reason TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_adminsnap ON admin_snapshots(chat_id, taken_at);
+
             CREATE INDEX IF NOT EXISTS idx_forward_ts ON forward_history(timestamp);
             CREATE INDEX IF NOT EXISTS idx_media_ts ON media_flood_history(timestamp);
             CREATE INDEX IF NOT EXISTS idx_flood_ts ON flood_history(timestamp);
@@ -819,6 +882,15 @@ def _default_channel_settings():
         # Katılım isteği gönderene özelden captcha
         'join_captcha': False,
         'welcome_enabled': True,
+        # Uygunsuz medya kalkanı (porno / engelli medya / tehlikeli dosya)
+        'media_shield': False, 'action_badmedia': 'ban', 'nsfw_scan': True, 'file_block': True,
+        'media_autolock': True, 'media_lock_minutes': 30,
+        # Geç düzenleme koruması
+        'edit_guard': False, 'edit_guard_minutes': 5, 'edit_notify': True,
+        # Rapor sistemi
+        'reports_enabled': True,
+        # Admin kurtarma: güvenilir kişiler (en fazla 3)
+        'recovery_ids': [], 'recovery_autorestore': False,
     }
 
 async def _register_chat(chat_id: str, owner_id: int, chat_type: str):
@@ -1136,6 +1208,165 @@ async def enforce_action(chat_id: str, msg, channel: dict, prot: str, reason: st
     await send_log(chat_id, f"{text} | {chat_id}", ParseMode.HTML, reply_markup=markup)
     await log_mod_action(chat_id, f"{prot}:{action}", user.id, username, BOT_ID, 'bot', reason)
 
+# ═══════════════════════════ RAPOR SİSTEMİ (/report, @admin) ═══════════════════════════
+REPORT_COOLDOWN = 60
+REPORT_PERMS = {'del': 'can_delete', 'warn': 'can_warn', 'mute': 'can_mute', 'ban': 'can_ban'}
+REPORT_RESULTS = {'del': "🗑 Mesaj silindi", 'warn': "⚠️ Silindi + uyarıldı", 'mute': "🔇 Silindi + 1 saat susturuldu",
+                  'ban': "🚫 Silindi + banlandı", 'ok': "✅ Görmezden gelindi"}
+_report_last: dict = {}
+
+def _report_recipients(chat_id: str, channel: dict) -> list:
+    """Bu gruptaki bot yetkilileri (bot kurucusu yalnızca grubun sahibiyse)."""
+    with get_db() as conn:
+        ids = [r['user_id'] for r in conn.execute("SELECT user_id FROM roles WHERE chat_id = ?", (chat_id,))]
+    return [u for u in dict.fromkeys(ids) if u != FOUNDER_ID or u == channel.get('owner')][:25]
+
+def report_markup(rid: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [ibtn("🗑 Sil", f"rp|del|{rid}", RED), ibtn("⚠️ Uyar", f"rp|warn|{rid}")],
+        [ibtn("🔇 Sustur 1s", f"rp|mute|{rid}"), ibtn("🚫 Banla", f"rp|ban|{rid}", RED)],
+        [ibtn("✅ Görmezden gel", f"rp|ok|{rid}", GREEN)],
+    ])
+
+async def _temp_reply(msg, text: str, context, seconds: int = 10):
+    try:
+        sent = await msg.reply_text(text, parse_mode=ParseMode.HTML)
+        if context.job_queue:
+            context.job_queue.run_once(_delete_message_job, seconds, data={'chat_id': sent.chat_id, 'message_id': sent.message_id})
+    except Exception as e:
+        logger.debug(f"Geçici cevap gönderilemedi: {e}")
+
+async def cmd_report(update: Update, context):
+    """/report [sebep] veya @admin — yanıtlanan mesajı yetkililere bildirir."""
+    msg = update.effective_message
+    reporter = update.effective_user
+    if msg.chat.type not in ('group', 'supergroup'):
+        await msg.reply_text("Rapor, grupta bir mesaja yanıt verilerek gönderilir: /report [sebep]")
+        return
+    chat_id = str(msg.chat_id)
+    channel = get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('reports_enabled', True) or not reporter:
+        return
+    target_msg = msg.reply_to_message
+    if not target_msg or not target_msg.from_user or target_msg.from_user.id == reporter.id:
+        await _temp_reply(msg, "Raporlamak için bir mesaja yanıt vererek /report yaz.", context)
+        return
+    target = target_msg.from_user
+    if await is_staff_user(chat_id, target.id, channel):
+        await _temp_reply(msg, "Yetkililer raporlanamaz.", context)
+        return
+    now = time.time()
+    key = (chat_id, reporter.id)
+    if now - _report_last.get(key, 0) < REPORT_COOLDOWN:
+        await _temp_reply(msg, "Çok sık rapor gönderiyorsun, biraz bekle.", context)
+        return
+    with get_db() as conn:
+        dup = conn.execute("SELECT id FROM reports WHERE chat_id = ? AND message_id = ?",
+                           (chat_id, target_msg.message_id)).fetchone()
+    if dup:
+        await _temp_reply(msg, "Bu mesaj zaten raporlandı.", context)
+        return
+    _report_last[key] = now
+    reason = ' '.join(context.args) if context.args else (msg.text or '').partition(' ')[2] if (msg.text or '').startswith('@') else ''
+    content = message_text(target_msg) or f"[{_get_msg_type(target_msg)}]"
+    async with _db_lock:
+        with get_db() as conn:
+            rid = conn.execute("INSERT INTO reports (chat_id, message_id, reporter_id, target_id, created_at) "
+                               "VALUES (?, ?, ?, ?, ?)", (chat_id, target_msg.message_id, reporter.id, target.id, now)).lastrowid
+            conn.commit()
+    text = (f"🚩 <b>Yeni rapor</b> #{rid}\nGrup: <b>{html.escape(await _chat_title(chat_id))}</b>\n"
+            f"Raporlayan: {mention(reporter)}\nRaporlanan: {mention(target)} (<code>{target.id}</code>)\n"
+            + (f"Sebep: {html.escape(reason[:300])}\n" if reason.strip() else "")
+            + f"<blockquote expandable>{html.escape(content[:1500])}</blockquote>"
+            + (f"\n<a href=\"{target_msg.link}\">Mesaja git</a>" if target_msg.link else ""))
+    copies = []
+    for uid in _report_recipients(chat_id, channel):
+        try:
+            sent = await bot.send_message(uid, text, parse_mode=ParseMode.HTML, reply_markup=report_markup(rid),
+                                          disable_web_page_preview=True)
+            copies.append([uid, sent.message_id])
+        except Exception as e:
+            logger.debug(f"Rapor iletilemedi ({uid}): {e}")
+    log_id = channel.get('log_chat_id')
+    if log_id:
+        try:
+            sent = await bot.send_message(log_id, text, parse_mode=ParseMode.HTML, reply_markup=report_markup(rid),
+                                          disable_web_page_preview=True)
+            copies.append([log_id, sent.message_id])
+        except Exception as e:
+            logger.debug(f"Rapor log kanalına iletilemedi: {e}")
+    with get_db() as conn:
+        conn.execute("UPDATE reports SET text = ?, copies = ? WHERE id = ?", (text, json.dumps(copies), rid))
+        conn.commit()
+    try:
+        await msg.delete()
+    except Exception as e:
+        logger.debug(f"Rapor komutu silinemedi: {e}")
+    try:
+        ack = await bot.send_message(chat_id, f"✅ {mention(reporter)}, raporun yetkililere iletildi."
+                                     if copies else f"⚠️ {mention(reporter)}, rapor alındı ama şu an ulaşılabilir yetkili yok.",
+                                     parse_mode=ParseMode.HTML, **thread_kw(msg, chat_id))
+        if context.job_queue:
+            context.job_queue.run_once(_delete_message_job, 10, data={'chat_id': chat_id, 'message_id': ack.message_id})
+    except Exception as e:
+        logger.debug(f"Rapor onayı gönderilemedi: {e}")
+
+async def report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """rp|<işlem>|<rapor no> — yetkili DM'sindeki rapor butonları; tüm kopyalar sonuçla güncellenir."""
+    query = update.callback_query
+    try:
+        _, act, rid = query.data.split('|')
+        rid = int(rid)
+    except ValueError:
+        await query.answer("Hata.", show_alert=True)
+        return
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM reports WHERE id = ?", (rid,)).fetchone()
+    if not row or act not in REPORT_RESULTS:
+        await query.answer("Rapor bulunamadı.", show_alert=True)
+        return
+    if row['status'] != 'open':
+        await query.answer(f"Bu rapor zaten işlendi: {REPORT_RESULTS.get(row['status'], row['status'])}", show_alert=True)
+        return
+    cid, target, clicker = row['chat_id'], row['target_id'], query.from_user
+    channel = get_channel_settings(cid)
+    allowed = has_permission(cid, clicker.id, 50) if act == 'ok' else has_specific_permission(cid, clicker.id, REPORT_PERMS[act])
+    if not channel or not allowed:
+        await query.answer("Yetkin yok!", show_alert=True)
+        return
+    try:
+        if act != 'ok':
+            try:
+                await bot.delete_message(cid, row['message_id'])
+            except Exception as e:
+                logger.debug(f"Raporlanan mesaj silinemedi: {e}")
+        if act == 'warn':
+            try:
+                tuser = (await bot.get_chat_member(cid, target)).user
+            except Exception:
+                tuser = None
+            await apply_punishment(cid, target, (tuser.username or tuser.first_name) if tuser else '', "rapor", channel, user=tuser)
+        elif act in ('mute', 'ban'):
+            if await is_staff_user(cid, target, channel):
+                await query.answer("Yetkililere uygulanamaz.", show_alert=True)
+                return
+            await _apply_mod_action(cid, 'mu' if act == 'mute' else 'bn', target, clicker, channel)
+    except Exception as e:
+        await query.answer(f"Hata: {e}"[:190], show_alert=True)
+        return
+    result = f"{REPORT_RESULTS[act]} · {mention(clicker)}"
+    with get_db() as conn:
+        conn.execute("UPDATE reports SET status = ?, handled_by = ? WHERE id = ?", (act, clicker.id, rid))
+        conn.commit()
+    await query.answer(REPORT_RESULTS[act])
+    for chat, mid in json.loads(row['copies'] or '[]'):
+        try:
+            await bot.edit_message_text(f"{row['text']}\n\n— {result}", chat_id=chat, message_id=mid,
+                                        parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        except Exception as e:
+            logger.debug(f"Rapor kopyası güncellenemedi ({chat}): {e}")
+    await log_mod_action(cid, f"rapor:{act}", target, '', clicker.id, clicker.username or '', f"rapor #{rid}")
+
 def mod_markup(chat_id, user_id: int, kind: str) -> InlineKeyboardMarkup:
     """Bot mesajlarının altındaki yetkili butonları. kind: warn / mute / ban"""
     p = f"{chat_id}|{user_id}"
@@ -1149,6 +1380,70 @@ def mod_markup(chat_id, user_id: int, kind: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 MOD_BUTTON_PERMS = {'uw': 'can_warn', 'mu': 'can_mute', 'um': 'can_mute', 'bn': 'can_ban', 'ub': 'can_ban'}
+
+async def _apply_mod_action(cid: str, act: str, target: int, clicker, channel: dict):
+    """Moderasyon butonlarının ortak çekirdeği. act: uw/mu/um/bn/ub. Dönüş: (sonuç metni, yeni klavye)."""
+    try:
+        tuser = (await bot.get_chat_member(cid, target)).user
+    except Exception:
+        tuser = None
+    uname = (tuser.username or tuser.first_name) if tuser else ''
+    now = time.time()
+    new_markup = None
+    if act == 'uw':
+        async with _db_lock:
+            with get_db() as conn:
+                row = conn.execute("SELECT warn_count FROM warnings WHERE chat_id = ? AND user_id = ?",
+                                   (cid, target)).fetchone()
+                n = max(0, (row['warn_count'] if row else 0) - 1)
+                if n:
+                    conn.execute("UPDATE warnings SET warn_count = ? WHERE chat_id = ? AND user_id = ?", (n, cid, target))
+                else:
+                    conn.execute("DELETE FROM warnings WHERE chat_id = ? AND user_id = ?", (cid, target))
+                conn.commit()
+        result = f"↩️ Uyarı geri alındı ({n}/{channel['settings'].get('warn_limit', 5)})"
+    elif act == 'mu':
+        await bot.restrict_chat_member(cid, target, permissions=ChatPermissions.no_permissions(),
+                                       until_date=int(now + 3600))
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO mute_list (chat_id, user_id, username, until_date, muted_at, muted_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (cid, target, uname, now + 3600, now, clicker.id))
+                conn.commit()
+        result, new_markup = "🔇 1 saat susturuldu", mod_markup(cid, target, 'mute')
+    elif act == 'um':
+        await bot.restrict_chat_member(cid, target, permissions=await _default_member_permissions(cid))
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("DELETE FROM mute_list WHERE chat_id = ? AND user_id = ?", (cid, target))
+                conn.commit()
+        result = "🔊 Susturma kaldırıldı"
+    elif act == 'bn':
+        await bot.ban_chat_member(cid, target)
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO ban_list (chat_id, user_id, username, reason, banned_at, banned_by)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (cid, target, uname, "moderasyon butonu", now, clicker.id))
+                conn.commit()
+        channel['stats']['bans'] = channel['stats'].get('bans', 0) + 1
+        save_channel_settings(cid, channel)
+        result, new_markup = "🚫 Banlandı", mod_markup(cid, target, 'ban')
+    else:
+        await bot.unban_chat_member(cid, target, only_if_banned=True)
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("DELETE FROM ban_list WHERE chat_id = ? AND user_id = ?", (cid, target))
+                conn.execute("DELETE FROM temp_bans WHERE chat_id = ? AND user_id = ?", (cid, target))
+                conn.commit()
+        result = "✅ Ban kaldırıldı"
+    who = mention(tuser) if tuser else mention_html(target, str(target))
+    await log_mod_action(cid, f"buton:{act}", target, uname, clicker.id, clicker.username or '', result)
+    await send_log(cid, f"{result}: {who} | {mention(clicker)}", ParseMode.HTML)
+    return result, new_markup
 
 async def mod_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """m|<işlem>|<chat_id>|<user_id> — uyarı/ban/mute mesajlarının altındaki butonlar."""
@@ -1171,64 +1466,7 @@ async def mod_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         await query.answer("Yetkililere uygulanamaz.", show_alert=True)
         return
     try:
-        tuser = (await bot.get_chat_member(cid, target)).user
-    except Exception:
-        tuser = None
-    who = mention(tuser) if tuser else mention_html(target, str(target))
-    uname = (tuser.username or tuser.first_name) if tuser else ''
-    now = time.time()
-    new_markup = None
-    try:
-        if act == 'uw':
-            async with _db_lock:
-                with get_db() as conn:
-                    row = conn.execute("SELECT warn_count FROM warnings WHERE chat_id = ? AND user_id = ?",
-                                       (cid, target)).fetchone()
-                    n = max(0, (row['warn_count'] if row else 0) - 1)
-                    if n:
-                        conn.execute("UPDATE warnings SET warn_count = ? WHERE chat_id = ? AND user_id = ?", (n, cid, target))
-                    else:
-                        conn.execute("DELETE FROM warnings WHERE chat_id = ? AND user_id = ?", (cid, target))
-                    conn.commit()
-            result = f"↩️ Uyarı geri alındı ({n}/{channel['settings'].get('warn_limit', 5)})"
-        elif act == 'mu':
-            await bot.restrict_chat_member(cid, target, permissions=ChatPermissions.no_permissions(),
-                                           until_date=int(now + 3600))
-            async with _db_lock:
-                with get_db() as conn:
-                    conn.execute("""
-                        INSERT OR REPLACE INTO mute_list (chat_id, user_id, username, until_date, muted_at, muted_by)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (cid, target, uname, now + 3600, now, clicker.id))
-                    conn.commit()
-            result, new_markup = "🔇 1 saat susturuldu", mod_markup(cid, target, 'mute')
-        elif act == 'um':
-            await bot.restrict_chat_member(cid, target, permissions=await _default_member_permissions(cid))
-            async with _db_lock:
-                with get_db() as conn:
-                    conn.execute("DELETE FROM mute_list WHERE chat_id = ? AND user_id = ?", (cid, target))
-                    conn.commit()
-            result = "🔊 Susturma kaldırıldı"
-        elif act == 'bn':
-            await bot.ban_chat_member(cid, target)
-            async with _db_lock:
-                with get_db() as conn:
-                    conn.execute("""
-                        INSERT OR REPLACE INTO ban_list (chat_id, user_id, username, reason, banned_at, banned_by)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    """, (cid, target, uname, "moderasyon butonu", now, clicker.id))
-                    conn.commit()
-            channel['stats']['bans'] = channel['stats'].get('bans', 0) + 1
-            save_channel_settings(cid, channel)
-            result, new_markup = "🚫 Banlandı", mod_markup(cid, target, 'ban')
-        else:
-            await bot.unban_chat_member(cid, target, only_if_banned=True)
-            async with _db_lock:
-                with get_db() as conn:
-                    conn.execute("DELETE FROM ban_list WHERE chat_id = ? AND user_id = ?", (cid, target))
-                    conn.execute("DELETE FROM temp_bans WHERE chat_id = ? AND user_id = ?", (cid, target))
-                    conn.commit()
-            result = "✅ Ban kaldırıldı"
+        result, new_markup = await _apply_mod_action(cid, act, target, clicker, channel)
     except Exception as e:
         await query.answer(f"Hata: {e}"[:190], show_alert=True)
         return
@@ -1239,8 +1477,6 @@ async def mod_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                                       disable_web_page_preview=True)
     except Exception as e:
         logger.debug(f"Moderasyon mesajı güncellenemedi: {e}")
-    await log_mod_action(cid, f"buton:{act}", target, uname, clicker.id, clicker.username or '', result)
-    await send_log(cid, f"{result}: {who} | {mention(clicker)}", ParseMode.HTML)
 
 # ─────────────────────────── CAPTCHA ───────────────────────────
 
@@ -1460,6 +1696,430 @@ async def newbie_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     except Exception as e:
         logger.debug(f"Newbie guard hata: {e}")
     raise ApplicationHandlerStop
+
+# ═══════════════════════════ UYGUNSUZ MEDYA KALKANI ═══════════════════════════
+# Grubu/kanalı porno atıp şikâyetle kapattırma saldırısına karşı katmanlar:
+#   1) Engelli medya listesi (file_unique_id / sticker paketi) — aynı dosyanın her kopyası anında silinir
+#   2) Tehlikeli dosya türleri (.apk, .exe …)
+#   3) İsteğe bağlı yapay zeka taraması (pip install nudenet) — arka planda, uygunsuz bulunan listeye eklenir
+#   4) Saldırı sezilince otomatik medya kilidi; kanalda art arda uygunsuz gönderi → koruma modu (lockdown)
+try:
+    from nudenet import NudeDetector  # isteğe bağlı; kurulu değilse tarama kapalı kalır
+except Exception as _nsfw_import_error:  # kurulu değil ya da platform desteklemiyor
+    NudeDetector = None
+    logger.info(f"NudeNet yok, yapay zeka medya taraması kapalı: {_nsfw_import_error}")
+
+DANGEROUS_EXTS = {'apk', 'xapk', 'apkm', 'apks', 'exe', 'scr', 'bat', 'cmd', 'com', 'msi', 'jar', 'vbs', 'vbe',
+                  'js', 'jse', 'ps1', 'dll', 'lnk', 'hta', 'pif', 'wsf', 'reg', 'cpl'}
+DANGEROUS_MIMES = {'application/vnd.android.package-archive', 'application/x-msdownload', 'application/x-dosexec',
+                   'application/x-msdos-program', 'application/java-archive'}
+# NudeNet sınıfı → en düşük güven puanı
+NSFW_CLASSES = {'FEMALE_GENITALIA_EXPOSED': 0.40, 'MALE_GENITALIA_EXPOSED': 0.40, 'ANUS_EXPOSED': 0.40,
+                'FEMALE_BREAST_EXPOSED': 0.55, 'BUTTOCKS_EXPOSED': 0.65}
+MEDIA_PERM_FIELDS = ('can_send_photos', 'can_send_videos', 'can_send_video_notes', 'can_send_audios',
+                     'can_send_documents', 'can_send_voice_notes', 'can_send_other_messages', 'can_add_web_page_previews')
+
+_nsfw_detector = None
+_nsfw_cache: dict = {}          # file_unique_id → uygunsuz mu (tekrar taramayı önler)
+_blocked_media_cache: set | None = None
+_media_attack: dict = {}        # chat_id → [(zaman, user_id)]
+_channel_media_hits: dict = {}  # chat_id → [zaman]
+
+def nsfw_available() -> bool:
+    return NudeDetector is not None
+
+def _nsfw_detect_bytes(data: bytes) -> str:
+    """Görüntüde açık çıplaklık varsa açıklama döner, yoksa boş metin. (İş parçacığında çalışır.)"""
+    global _nsfw_detector
+    if _nsfw_detector is None:
+        _nsfw_detector = NudeDetector()
+    hits = [f"{d['class']} {d['score']:.2f}" for d in _nsfw_detector.detect(data)
+            if d.get('score', 0) >= NSFW_CLASSES.get(d.get('class'), 2)]
+    return ", ".join(hits)
+
+def _media_info(msg):
+    """(file_unique_id, taranacak file_id veya None, tür, sticker paketi) — medya yoksa None."""
+    if msg.photo:
+        scan = next((p for p in reversed(msg.photo) if p.width <= 1280), msg.photo[0])
+        return msg.photo[-1].file_unique_id, scan.file_id, 'photo', None
+    if msg.sticker:
+        s = msg.sticker
+        if s.is_animated or s.is_video:
+            scan = s.thumbnail.file_id if s.thumbnail else None
+        else:
+            scan = s.file_id
+        return s.file_unique_id, scan, 'sticker', s.set_name
+    for field in ('animation', 'video', 'video_note'):
+        obj = getattr(msg, field, None)
+        if obj:
+            return obj.file_unique_id, (obj.thumbnail.file_id if obj.thumbnail else None), field, None
+    if msg.document:
+        d = msg.document
+        if (d.mime_type or '').startswith('image/') and (d.file_size or 0) < 5_000_000:
+            scan = d.file_id
+        else:
+            scan = d.thumbnail.file_id if d.thumbnail else None
+        return d.file_unique_id, scan, 'document', None
+    return None
+
+def _dangerous_file(document) -> str | None:
+    name = (document.file_name or '').lower()
+    ext = name.rsplit('.', 1)[-1] if '.' in name else ''
+    if ext in DANGEROUS_EXTS:
+        return f".{ext}"
+    if (document.mime_type or '').lower() in DANGEROUS_MIMES:
+        return document.mime_type
+    return None
+
+def _load_blocked_media():
+    global _blocked_media_cache
+    with get_db() as conn:
+        _blocked_media_cache = {(r['chat_id'], r['uid']) for r in conn.execute("SELECT chat_id, uid FROM blocked_media")}
+
+def media_is_blocked(chat_id: str, uid: str, set_name: str | None) -> bool:
+    if _blocked_media_cache is None:
+        _load_blocked_media()
+    keys = {(chat_id, uid), ('*', uid)}
+    if set_name:
+        keys |= {(chat_id, f"set:{set_name}"), ('*', f"set:{set_name}")}
+    return bool(keys & _blocked_media_cache)
+
+def block_media(chat_id: str, uid: str, kind: str, note: str, by: int) -> bool:
+    """Medyayı engelli listeye ekler; zaten varsa False."""
+    global _blocked_media_cache
+    with get_db() as conn:
+        n = conn.execute("INSERT OR IGNORE INTO blocked_media (chat_id, uid, kind, note, added_by, added_at) "
+                         "VALUES (?, ?, ?, ?, ?, ?)", (chat_id, uid, kind, note[:100], by, time.time())).rowcount
+        conn.commit()
+    _blocked_media_cache = None
+    return n > 0
+
+def unblock_media(chat_id: str, rowid: int):
+    global _blocked_media_cache
+    with get_db() as conn:
+        conn.execute("DELETE FROM blocked_media WHERE rowid = ? AND chat_id = ?", (rowid, chat_id))
+        conn.commit()
+    _blocked_media_cache = None
+
+async def media_shield_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gruplarda ve kanallarda (düzenlenen dahil) medyayı kontrol eder. Hızlı kontroller hemen, yapay zeka arka planda."""
+    msg = update.effective_message
+    if not msg or not msg.chat or msg.chat.type not in ('group', 'supergroup', 'channel'):
+        return
+    info = _media_info(msg)
+    if not info:
+        return
+    chat_id = str(msg.chat_id)
+    channel = get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('media_shield'):
+        return
+    s = channel['settings']
+    if msg.chat.type != 'channel' and await is_exempt_message(chat_id, msg, channel):
+        return
+    uid, scan_id, kind, set_name = info
+    reason = None
+    if media_is_blocked(chat_id, uid, set_name):
+        reason = "engelli sticker paketi" if set_name and not media_is_blocked(chat_id, uid, None) else "engelli medya"
+    elif kind == 'document' and s.get('file_block', True) and _dangerous_file(msg.document):
+        reason = f"tehlikeli dosya ({_dangerous_file(msg.document)})"
+    elif _nsfw_cache.get(uid):
+        reason = "uygunsuz içerik"
+    if reason:
+        await _bad_media_hit(msg, channel, chat_id, reason, context)
+        raise ApplicationHandlerStop
+    if s.get('nsfw_scan', True) and nsfw_available() and scan_id and uid not in _nsfw_cache:
+        context.application.create_task(_nsfw_scan_task(msg, chat_id, uid, scan_id, context), update=update)
+
+async def _nsfw_scan_task(msg, chat_id: str, uid: str, scan_id: str, context):
+    """Arka plan taraması: dosyayı indirir, NudeNet ile tarar; uygunsuzsa siler, cezalandırır ve listeye ekler."""
+    try:
+        tg_file = await bot.get_file(scan_id)
+        if (tg_file.file_size or 0) > 10_000_000:
+            return
+        data = bytes(await tg_file.download_as_bytearray())
+        detail = await asyncio.to_thread(_nsfw_detect_bytes, data)
+    except Exception as e:
+        logger.debug(f"NSFW taraması yapılamadı ({chat_id}): {e}")
+        return
+    if len(_nsfw_cache) > 5000:
+        _nsfw_cache.clear()
+    _nsfw_cache[uid] = bool(detail)
+    if not detail:
+        return
+    block_media(chat_id, uid, 'file', f"yapay zeka: {detail}", BOT_ID)
+    channel = get_channel_settings(chat_id)
+    if channel:
+        await _bad_media_hit(msg, channel, chat_id, f"uygunsuz içerik ({detail})", context)
+
+async def _bad_media_hit(msg, channel: dict, chat_id: str, reason: str, context):
+    try:
+        await msg.delete()
+    except Exception as e:
+        logger.debug(f"Uygunsuz medya silinemedi: {e}")
+    if msg.chat.type == 'channel':
+        await _channel_bad_media(chat_id, reason, msg)
+        return
+    if msg.sender_chat:
+        await _sender_chat_violation(msg, chat_id, f"Uygunsuz medya ({reason})")
+    elif msg.from_user:
+        await enforce_action(chat_id, msg, channel, 'badmedia', reason, context.bot_data)
+    await _count_media_attack(chat_id, msg.from_user.id if msg.from_user else 0, channel)
+
+async def _count_media_attack(chat_id: str, user_id: int, channel: dict):
+    """5 dk içinde en az 2 farklı kişiden 3 uygunsuz medya → otomatik medya kilidi."""
+    s = channel['settings']
+    now = time.time()
+    hits = [(t, u) for t, u in _media_attack.get(chat_id, []) if now - t < 300] + [(now, user_id)]
+    _media_attack[chat_id] = hits
+    if s.get('media_autolock', True) and len(hits) >= 3 and len({u for _, u in hits}) >= 2:
+        _media_attack[chat_id] = []
+        if await media_lock(chat_id, int(s.get('media_lock_minutes', 30) or 30),
+                            "otomatik: art arda uygunsuz medya (saldırı şüphesi)"):
+            await notify_managers(chat_id, f"🚨 <b>Medya saldırısı</b> sezildi, grupta medya gönderimi kilitlendi.\n"
+                                           f"Grup: <b>{html.escape(await _chat_title(chat_id))}</b>",
+                                  parse_mode=ParseMode.HTML)
+
+async def _channel_bad_media(chat_id: str, reason: str, msg):
+    """Kanalda uygunsuz gönderi: yöneticilere haber ver; 10 dk içinde ikincisi → koruma modu (adminlerin yetkisi alınır)."""
+    now = time.time()
+    hits = [t for t in _channel_media_hits.get(chat_id, []) if now - t < 600] + [now]
+    _channel_media_hits[chat_id] = hits
+    who = html.escape(msg.author_signature) if msg.author_signature else "imzasız gönderi"
+    await notify_managers(chat_id, f"🔞 <b>Kanalda uygunsuz medya silindi</b>\nSebep: {html.escape(reason)}\n"
+                                   f"Gönderen: {who}\nKanal: <code>{chat_id}</code>", parse_mode=ParseMode.HTML)
+    await log_channel_action(chat_id, 'bad_media', 0, msg.author_signature or '', reason)
+    if len(hits) >= 2 and not get_channel_cfg(chat_id).get('lockdown_mode'):
+        _channel_media_hits[chat_id] = []
+        await enter_lockdown(chat_id, "Kanalda art arda uygunsuz medya (kanalı kapattırma saldırısı şüphesi)")
+
+async def media_lock(chat_id: str, minutes: int, reason: str) -> bool:
+    """Üyelerin medya göndermesini geçici kapatır; eski izinleri saklar. Raid kilidi varken gerek yok."""
+    ch = get_channel_settings(chat_id)
+    if not ch:
+        return False
+    s = ch['settings']
+    if s.get('media_lock'):
+        return True
+    if s.get('raid_lock'):
+        return False
+    try:
+        chat = await bot.get_chat(chat_id)
+        saved = (chat.permissions or ChatPermissions.all_permissions()).to_dict()
+        locked = ChatPermissions.de_json({**saved, **{f: False for f in MEDIA_PERM_FIELDS}}, bot)
+        await bot.set_chat_permissions(chat_id, locked, use_independent_chat_permissions=True)
+    except Exception as e:
+        logger.error(f"Medya kilidi uygulanamadı ({chat_id}): {e}")
+        return False
+    ch = get_channel_settings(chat_id)
+    ch['settings']['media_lock'] = {'until': time.time() + minutes * 60, 'saved_perms': saved}
+    save_channel_settings(chat_id, ch)
+    text = (f"🔒 <b>Medya kilidi</b>: {human_duration(minutes * 60)} boyunca fotoğraf, video, sticker, GIF ve dosya "
+            f"gönderimi kapalı.\nSebep: {html.escape(reason)}")
+    try:
+        await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logger.debug(f"Medya kilidi duyurusu gönderilemedi: {e}")
+    await send_log(chat_id, f"{text} | {chat_id}", ParseMode.HTML)
+    return True
+
+async def media_unlock(chat_id: str) -> bool:
+    ch = get_channel_settings(chat_id)
+    lock = ch['settings'].pop('media_lock', None) if ch else None
+    if not lock:
+        return False
+    saved = lock.get('saved_perms')
+    if ch['settings'].get('raid_lock'):
+        # Raid kilidi sonradan geldi: onun açılışında medya kilidinden önceki gerçek izinler dönsün
+        ch['settings']['raid_lock']['saved_perms'] = saved
+        save_channel_settings(chat_id, ch)
+        return True
+    try:
+        perms = ChatPermissions.de_json(saved, bot) if saved else ChatPermissions.all_permissions()
+        await bot.set_chat_permissions(chat_id, perms, use_independent_chat_permissions=True)
+    except Exception as e:
+        logger.error(f"Medya kilidi açılamadı ({chat_id}): {e}")
+        ch['settings']['media_lock'] = lock
+        save_channel_settings(chat_id, ch)
+        return False
+    save_channel_settings(chat_id, ch)
+    try:
+        await bot.send_message(chat_id, "🔓 Medya kilidi açıldı, eski izinler geri yüklendi.")
+    except Exception as e:
+        logger.debug(f"Medya kilidi açılış duyurusu gönderilemedi: {e}")
+    await send_log(chat_id, f"🔓 Medya kilidi açıldı | {chat_id}")
+    return True
+
+async def check_media_locks(context: ContextTypes.DEFAULT_TYPE):
+    now = time.time()
+    with get_db() as conn:
+        rows = conn.execute("SELECT chat_id FROM channels WHERE settings LIKE '%media_lock%'").fetchall()
+    for r in rows:
+        ch = get_channel_settings(r['chat_id'])
+        lock = ch['settings'].get('media_lock') if ch else None
+        if lock and now >= lock.get('until', 0):
+            await media_unlock(r['chat_id'])
+
+async def cmd_medya_engel(update: Update, context):
+    """/medyaengel (medyaya yanıt) — o medyayı bu grupta engeller; /paketengel sticker paketini; /gmedyaengel tüm gruplarda."""
+    msg = update.effective_message
+    cmd = (msg.text or '').split()[0].split('@')[0].lower().lstrip('/')
+    chat_id = str(msg.chat_id)
+    is_global = cmd == 'gmedyaengel'
+    if is_global and update.effective_user.id != FOUNDER_ID:
+        return
+    if msg.chat.type not in ('group', 'supergroup') or not get_channel_settings(chat_id):
+        await msg.reply_text("Bu komutu grupta, engellenecek medyaya yanıt vererek kullan.")
+        return
+    if not is_global and not has_permission(chat_id, update.effective_user.id, 50):
+        await msg.reply_text("Yetkin yok!")
+        return
+    target = msg.reply_to_message
+    info = _media_info(target) if target else None
+    if not info:
+        await msg.reply_text("Engellemek istediğin fotoğraf/video/GIF/sticker/dosyaya yanıt vererek yaz.")
+        return
+    uid, _, kind, set_name = info
+    if cmd == 'paketengel':
+        if not set_name:
+            await msg.reply_text("Paket engeli için bir sticker'a yanıt ver.")
+            return
+        added = block_media(chat_id, f"set:{set_name}", 'set', f"paket {set_name}", update.effective_user.id)
+        label = f"sticker paketi <code>{html.escape(set_name)}</code>"
+    else:
+        added = block_media('*' if is_global else chat_id, uid, 'file', kind, update.effective_user.id)
+        label = f"bu {kind}" + (" (tüm gruplarda)" if is_global else "")
+    try:
+        await target.delete()
+    except Exception as e:
+        logger.debug(f"Engellenen medya silinemedi: {e}")
+    await msg.reply_text(f"🚫 {label} engellendi. Aynısı gönderilirse silinir." if added else "Bu zaten engelli.",
+                         parse_mode=ParseMode.HTML)
+    if added:
+        ch = get_channel_settings(chat_id)
+        if not ch['settings'].get('media_shield'):
+            ch['settings']['media_shield'] = True
+            save_channel_settings(chat_id, ch)
+        await send_log(chat_id, f"🚫 Medya engellendi ({html.escape(label)}) | {mention(update.effective_user)}",
+                       ParseMode.HTML)
+
+async def cmd_medya_kilit(update: Update, context):
+    """/medyakilit [dk] ve /medyaac"""
+    msg = update.effective_message
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile seç!")
+        return
+    if not has_permission(chat_id, update.effective_user.id, 70):
+        await msg.reply_text("Yetkin yok! (Baş Admin ve üstü)")
+        return
+    cmd = (msg.text or '').split()[0].split('@')[0].lower().lstrip('/')
+    if cmd == 'medyaac':
+        await msg.reply_text("🔓 Medya kilidi açıldı." if await media_unlock(chat_id) else "Medya kilidi zaten açık.")
+        return
+    minutes = int(context.args[0]) if context.args and context.args[0].isdigit() else \
+        int(get_channel_settings(chat_id)['settings'].get('media_lock_minutes', 30) or 30)
+    minutes = max(1, min(minutes, 1440))
+    ok = await media_lock(chat_id, minutes, f"manuel: {update.effective_user.first_name}")
+    await msg.reply_text("🔒 Medya kilitlendi." if ok else "Kilitlenemedi (raid kilidi aktif olabilir veya botun yetkisi yok).")
+
+# ═══════════════════════════ GEÇ DÜZENLEME KORUMASI ═══════════════════════════
+# Telegram düzenlenen mesajın sadece yeni hâlini gönderir; eski hâl için mesajlar koruma açıkken 2 gün saklanır.
+
+def _fmt_age(sec: float) -> str:
+    sec = int(sec)
+    d, rem = divmod(sec, 86400)
+    h, rem = divmod(rem, 3600)
+    m = rem // 60
+    if d:
+        return f"{d} gün {h} saat"
+    if h:
+        return f"{h} saat {m} dk"
+    return f"{max(m, 1)} dk"
+
+async def message_cache_handler(update: Update, context):
+    """Geç düzenleme koruması açık gruplarda mesajın ilk hâlini saklar."""
+    msg = update.message
+    if not msg or not msg.from_user:
+        return
+    chat_id = str(msg.chat_id)
+    channel = get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('edit_guard'):
+        return
+    text = message_text(msg) or (f"[{_get_msg_type(msg)}]" if _media_info(msg) else '')
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO msg_cache (chat_id, message_id, user_id, text, sent_at) VALUES (?, ?, ?, ?, ?)",
+                     (chat_id, msg.message_id, msg.from_user.id, text[:4000], msg.date.timestamp()))
+        conn.commit()
+
+async def edit_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gönderildikten X dk sonra düzenlenen mesajı siler; grubun kurucusuna ve botu ekleyene eski/yeni hâli gönderir."""
+    msg = update.edited_message
+    if not msg or not msg.from_user or not msg.edit_date or msg.location:  # canlı konum güncellemeleri de "düzenleme" gelir
+        return
+    chat_id = str(msg.chat_id)
+    channel = get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('edit_guard'):
+        return
+    s = channel['settings']
+    limit_min = int(s.get('edit_guard_minutes', 5) or 5)
+    age = (msg.edit_date - msg.date).total_seconds()
+    new_text = message_text(msg) or (f"[{_get_msg_type(msg)}]" if _media_info(msg) else '')
+    with get_db() as conn:
+        row = conn.execute("SELECT text FROM msg_cache WHERE chat_id = ? AND message_id = ?",
+                           (chat_id, msg.message_id)).fetchone()
+    if age <= limit_min * 60 or await is_exempt_message(chat_id, msg, channel):
+        with get_db() as conn:  # izin verilen düzenleme: sonraki karşılaştırma için son hâli sakla
+            conn.execute("UPDATE msg_cache SET text = ? WHERE chat_id = ? AND message_id = ?",
+                         (new_text[:4000], chat_id, msg.message_id))
+            conn.commit()
+        return
+    old_text = row['text'] if row else None
+    try:
+        await msg.delete()
+    except Exception as e:
+        logger.debug(f"Geç düzenlenen mesaj silinemedi: {e}")
+    with get_db() as conn:
+        conn.execute("DELETE FROM msg_cache WHERE chat_id = ? AND message_id = ?", (chat_id, msg.message_id))
+        conn.commit()
+    try:
+        notice = await bot.send_message(
+            chat_id, f"✏️ {mention(msg.from_user)}, {limit_min} dakikadan eski mesajlar düzenlenemez; "
+                     f"düzenlediğin mesaj silindi.", parse_mode=ParseMode.HTML, **thread_kw(msg, chat_id))
+        if context.job_queue:
+            context.job_queue.run_once(_delete_message_job, 20, data={'chat_id': chat_id, 'message_id': notice.message_id})
+    except Exception as e:
+        logger.debug(f"Düzenleme uyarısı gönderilemedi: {e}")
+    report = await _edit_report_text(chat_id, msg, old_text, new_text, age)
+    if s.get('edit_notify', True):
+        for uid in await _edit_notify_targets(chat_id, channel):
+            try:
+                await bot.send_message(uid, report, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+            except Exception as e:
+                logger.debug(f"Düzenleme bildirimi gönderilemedi ({uid}): {e}")
+    await send_log(chat_id, report, ParseMode.HTML)
+    raise ApplicationHandlerStop
+
+async def _edit_notify_targets(chat_id: str, channel: dict) -> list:
+    """Grubun Telegram'daki kurucusu + botu gruba ekleyen kişi."""
+    targets = []
+    try:
+        targets += [a.user.id for a in await bot.get_chat_administrators(chat_id) if a.status == 'creator']
+    except Exception as e:
+        logger.debug(f"Grup kurucusu alınamadı ({chat_id}): {e}")
+    if channel.get('owner'):
+        targets.append(channel['owner'])
+    return list(dict.fromkeys(t for t in targets if t))
+
+async def _edit_report_text(chat_id: str, msg, old_text, new_text: str, age: float) -> str:
+    sent = msg.date.astimezone(TZ_TR).strftime('%d.%m.%Y %H:%M')
+    old_block = html.escape(old_text) if old_text else "<i>kayıt yok (mesaj, koruma açılmadan önce gönderilmiş)</i>"
+    link = f"\n<a href=\"{msg.link}\">Mesajın yeri</a>" if msg.link else ""
+    return (f"✏️ <b>Geç düzenlenen mesaj silindi</b>\n"
+            f"Grup: <b>{html.escape(await _chat_title(chat_id))}</b>\n"
+            f"Kullanıcı: {mention(msg.from_user)} (<code>{msg.from_user.id}</code>)\n"
+            f"Gönderilme: {sent} · {_fmt_age(age)} sonra düzenlendi\n\n"
+            f"<b>Eski hâli:</b>\n<blockquote expandable>{old_block}</blockquote>\n"
+            f"<b>Yeni hâli:</b>\n<blockquote expandable>{html.escape(new_text) or '—'}</blockquote>{link}")
 
 async def anti_forward_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -3554,6 +4214,8 @@ PROTECTIONS = {
     'flood':   ("🌊 Flood", 'anti_spam_flood', 'mute', "Kısa sürede limitten fazla mesaj."),
     'forward': ("↪️ Forward", 'anti_forward', 'mute', "Başka sohbetten iletilen mesajlar."),
     'media':   ("🖼 Medya flood", 'anti_media_flood', 'mute', "Kısa sürede limitten fazla fotoğraf/video/sticker."),
+    'badmedia': ("🔞 Uygunsuz medya", 'media_shield', 'ban',
+                 "Porno/çıplaklık (yapay zeka, kuruluysa), engelli medya ve sticker paketleri, tehlikeli dosyalar (.apk, .exe…)."),
 }
 ACTION_LABELS = {'delete': 'Sil', 'warn': 'Uyar', 'mute': 'Sustur', 'kick': 'At', 'ban': 'Banla'}
 WARN_ACTION_LABELS = {'ban': 'Banla', 'tempban': 'Geçici ban', 'kick': 'At', 'mute': 'Sustur'}
@@ -3573,10 +4235,13 @@ NUMERIC = {
     'mute_minutes':          (1, 10080, [5, 10, 15, 30, 60, 120, 360, 720, 1440, 4320, 10080], "{} dk"),
     'warn_action_duration':  (3600, 30 * 86400, [3600, 3 * 3600, 6 * 3600, 12 * 3600, 86400, 3 * 86400,
                                                  7 * 86400, 30 * 86400], None),
+    'media_lock_minutes':    (5, 1440, [5, 10, 15, 30, 60, 120, 360, 720, 1440], "{} dk"),
+    'edit_guard_minutes':    (1, 1440, [1, 2, 3, 5, 10, 15, 30, 60, 120, 360, 1440], "{} dk"),
 }
 TOGGLE_KEYS = {v[1] for v in PROTECTIONS.values()} | {
     'anti_raid', 'captcha_enabled', 'join_captcha', 'auto_accept', 'auto_reject', 'auto_reject_bot',
-    'restrict_no_username', 'welcome_enabled'}
+    'restrict_no_username', 'welcome_enabled', 'nsfw_scan', 'file_block', 'media_autolock', 'edit_guard',
+    'edit_notify', 'reports_enabled', 'recovery_autorestore'}
 NIGHT_RESTRICTIONS = [('block_messages', "Mesaj"), ('block_media', "Foto/Video"), ('block_voice', "Ses/Video not"),
                       ('block_sticker', "Sticker/GIF"), ('block_links', "Link önizleme"), ('block_files', "Dosya/Müzik")]
 PAGE_SIZE = 8
@@ -3589,6 +4254,7 @@ INPUT_PROMPTS = {
     'link': ("🔗 İzin verilecek alan adlarını yaz (boşlukla ayır). Örn: youtube.com t.me/kanalim", "youtube.com"),
     'note': ("📝 Notu şu biçimde yaz: isim içerik", "kurallar Grup kuralları..."),
     'log': ("🧾 Log kanalı/grubu ID'sini yaz (örn. -1001234567890). Bot orada mesaj atabilmeli.", "-1001234567890"),
+    'recovery': ("🛟 Güvenilir kişinin kullanıcı ID'sini yaz (kişi bota /id yazarak öğrenebilir).", "123456789"),
 }
 
 def _can_edit_settings(chat_id: str, user_id: int) -> bool:
@@ -3682,6 +4348,8 @@ async def render_settings(cid: str, page: str = 'main'):
             text += f" (limit {s.get('warn_limit', 5)} → {WARN_ACTION_LABELS.get(s.get('warn_action', 'ban'))})"
         if act == 'mute' and sub in ESCALATING:
             text += "\nSusturma kademeli: 10 dk → 30 dk → 5 saat"
+        if sub == 'badmedia':
+            text += _badmedia_text(s)
         page_id = f"pr.{sub}"
         rows.append([toggle_btn("Koruma " + ("açık" if on else "kapalı"), on, f"s|{cid}|t|{skey}|{page_id}")])
         rows.append([ibtn(f"• {lbl} •" if a == act else lbl, f"s|{cid}|a|{sub}|{a}", BLUE if a == act else None)
@@ -3697,6 +4365,8 @@ async def render_settings(cid: str, page: str = 'main'):
             rows.append([ibtn("🔗 İzinli linkler ›", f"s|{cid}|p|links.0", BLUE)])
         elif sub == 'word':
             rows.append([ibtn("🔤 Kelime listesi ›", f"s|{cid}|p|words.0", BLUE)])
+        elif sub == 'badmedia':
+            rows += _badmedia_rows(cid, s, page_id)
         rows.append(_back(cid, 'prot'))
 
     elif base == 'join':
@@ -3819,6 +4489,9 @@ async def render_settings(cid: str, page: str = 'main'):
                     ([ibtn("🗑 Kaldır", f"s|{cid}|lx", RED)] if log_id else []))
         rows.append(_back(cid))
 
+    elif base in EXT_PAGES:
+        text, rows = await _render_ext_page(cid, base, sub, channel, title)
+
     else:
         active = [lbl for key, (lbl, skey, _, _) in PROTECTIONS.items() if s.get(skey)]
         if s.get('anti_raid'):
@@ -3833,7 +4506,8 @@ async def render_settings(cid: str, page: str = 'main'):
                 [ibtn("👋 Karşılama", f"s|{cid}|p|welcome", BLUE), ibtn("⚠️ Uyarılar", f"s|{cid}|p|warn", BLUE)],
                 [ibtn("🌙 Gece Modu", f"s|{cid}|p|night", BLUE), ibtn("🔗 Linkler", f"s|{cid}|p|links.0", BLUE)],
                 [ibtn("🔤 Kelimeler", f"s|{cid}|p|words.0", BLUE), ibtn("📝 Notlar", f"s|{cid}|p|notes.0", BLUE)],
-                [ibtn("🧾 Log Kanalı", f"s|{cid}|p|log", BLUE)],
+                [ibtn("✏️ Düzenleme & Rapor", f"s|{cid}|p|edit", BLUE), ibtn("🧾 Log Kanalı", f"s|{cid}|p|log", BLUE)],
+                [ibtn("🌐 Grup Ağı", f"s|{cid}|p|net", BLUE), ibtn("🛟 Kurtarma", f"s|{cid}|p|rec", BLUE)],
                 [ibtn("✖️ Kapat", f"s|{cid}|x", RED)]]
     return text, InlineKeyboardMarkup(rows)
 
@@ -3946,6 +4620,8 @@ async def _settings_change(cid: str, channel: dict, op: str, args: list, query, 
         if ok:
             await send_log(cid, f"✅ Raid kilidi panelden açıldı | {by}", ParseMode.HTML)
         return 'raid', "🔓 Kilit açıldı" if ok else "Kilit açılamadı (bot yetkisi?)"
+    if op in EXT_OPS:
+        return await _settings_change_ext(cid, channel, op, args, query, context)
     return 'main', ''
 
 async def settings_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4110,7 +4786,189 @@ async def _apply_input(kind: str, cid: str, channel: dict, msg, user):
         channel['log_chat_id'] = text
         save_channel_settings(cid, channel)
         return "✅ Log kanalı ayarlandı.", 'log'
+    if kind == 'recovery':
+        return await _apply_recovery_input(cid, channel, msg, user)
     return "Bilinmeyen işlem.", 'main'
+
+# ── Panel ekleri: uygunsuz medya, engelli medya listesi, düzenleme & rapor, grup ağı, kurtarma ──
+EXT_PAGES = {'bm', 'edit', 'net', 'rec', 'snapc'}
+EXT_OPS = {'mk', 'mo', 'bd', 'na', 'nr', 'nb', 'nc', 'ns', 'rd', 'sn', 'rg'}
+
+def _badmedia_rows(cid: str, s: dict, page_id: str) -> list:
+    ai = "🤖 Yapay zeka taraması" + ("" if nsfw_available() else " (kurulu değil)")
+    locked = bool(s.get('media_lock'))
+    return [
+        [toggle_btn(ai, s.get('nsfw_scan', True) and nsfw_available(), f"s|{cid}|t|nsfw_scan|{page_id}")],
+        [toggle_btn("📦 Tehlikeli dosyalar (.apk .exe …)", s.get('file_block', True), f"s|{cid}|t|file_block|{page_id}")],
+        [toggle_btn("🔒 Saldırıda otomatik medya kilidi", s.get('media_autolock', True),
+                    f"s|{cid}|t|media_autolock|{page_id}")],
+        _num_row(cid, 'media_lock_minutes', s, page_id, "Kilit süresi"),
+        [ibtn("🚫 Engelli medya listesi ›", f"s|{cid}|p|bm.0", BLUE)],
+        [ibtn("🔓 Medya kilidini aç", f"s|{cid}|mo", GREEN) if locked else ibtn("🔒 Medyayı şimdi kilitle", f"s|{cid}|mk", RED)],
+    ]
+
+def _badmedia_text(s: dict) -> str:
+    ai = ("açık" if s.get('nsfw_scan', True) else "kapalı") if nsfw_available() else \
+        "kurulu değil (sunucuda <code>pip install nudenet</code>)"
+    lock = s.get('media_lock')
+    lock_txt = f"\n🔒 Medya kilidi aktif: {datetime.fromtimestamp(lock['until'], TZ_TR):%H:%M}'e kadar" if lock else ""
+    return (f"\nYapay zeka taraması: {ai}\nEngellemek için medyaya yanıt ver: <code>/medyaengel</code> · "
+            f"sticker paketi: <code>/paketengel</code>{lock_txt}")
+
+async def _render_ext_page(cid: str, base: str, sub: str, channel: dict, title: str):
+    s = channel['settings']
+    rows: list = []
+    if base == 'bm':
+        with get_db() as conn:
+            items = conn.execute("SELECT rowid, uid, kind, note FROM blocked_media WHERE chat_id = ? ORDER BY added_at DESC",
+                                 (cid,)).fetchall()
+        pg, pages, part = _paged(list(items), int(sub or 0) if (sub or '0').isdigit() else 0)
+        text = (f"🚫 <b>Engelli medya</b> — {title}\n\nAynısı gönderilince silinir. Toplam: {len(items)}\n"
+                "Kaldırmak için dokun. Eklemek: medyaya yanıt verip <code>/medyaengel</code>")
+        for r in part:
+            label = f"📦 {r['uid'][4:]}" if r['kind'] == 'set' else f"🖼 {r['note'] or r['kind']}"
+            rows.append([ibtn(f"🗑 {label[:40]}", f"s|{cid}|bd|{r['rowid']}|{pg}", RED)])
+        rows += _nav_rows(cid, 'bm', pg, pages)
+        rows.append(_back(cid, 'pr.badmedia'))
+    elif base == 'edit':
+        text = (f"✏️ <b>Düzenleme & 🚩 Rapor</b> — {title}\n\n"
+                f"• <b>Geç düzenleme koruması</b>: gönderildikten {s.get('edit_guard_minutes', 5)} dk sonra düzenlenen mesaj "
+                "silinir; eski ve yeni hâli grubun kurucusuna ve botu ekleyen kişiye özelden gönderilir "
+                "(bot, onların özelden /start yazmış olmasını ister).\n"
+                "• <b>Rapor</b>: üyeler bir mesaja yanıt verip <code>/report</code> veya <code>@admin</code> yazar; "
+                "yetkililere butonlu bildirim gider.")
+        rows += [[toggle_btn("Geç düzenleme koruması", s.get('edit_guard'), f"s|{cid}|t|edit_guard|edit")],
+                 _num_row(cid, 'edit_guard_minutes', s, 'edit', "Süre"),
+                 [toggle_btn("Kurucuya/ekleyene bildir", s.get('edit_notify', True), f"s|{cid}|t|edit_notify|edit")],
+                 [toggle_btn("Rapor sistemi", s.get('reports_enabled', True), f"s|{cid}|t|reports_enabled|edit")],
+                 _back(cid)]
+    elif base == 'net':
+        owner = network_of(cid)
+        if owner:
+            chats = network_chats(owner)
+            names = "\n".join([f"• {html.escape(await _chat_title(c))}" for c in chats[:20]])
+            text = (f"🌐 <b>Grup ağı</b> — {title}\n\nBu grup {mention_html(owner, str(owner))} ağında "
+                    f"({len(chats)} grup):\n<blockquote expandable>{names}</blockquote>\n"
+                    "Ban eşitleme açıkken bir grupta banlanan kişi ağdaki tüm gruplardan banlanır (kick hariç); "
+                    "ban kaldırılınca her yerden kalkar.")
+            rows += [[toggle_btn("Ban eşitleme", network_ban_sync(owner), f"s|{cid}|nb")],
+                     [ibtn("📋 Kelime & link listelerini ağa kopyala", f"s|{cid}|nc", BLUE)],
+                     [ibtn("⚙️ Koruma ayarlarını ağa kopyala", f"s|{cid}|ns", BLUE)],
+                     [ibtn("➖ Bu grubu ağdan çıkar", f"s|{cid}|nr", RED)]]
+        else:
+            text = (f"🌐 <b>Grup ağı</b> — {title}\n\nBu grup bir ağda değil. Yönettiğin grupları kendi ağına eklersen "
+                    "banlar tüm gruplara yayılır ve ayarlarını tek tıkla kopyalarsın. (Kurucu / yardımcı kurucu gerekir.)")
+            rows.append([ibtn("➕ Bu grubu ağıma ekle", f"s|{cid}|na", GREEN)])
+        rows.append(_back(cid))
+    elif base == 'rec':
+        ids = s.get('recovery_ids', [])
+        with get_db() as conn:
+            snap = conn.execute("SELECT id, admin_count, taken_at FROM admin_snapshots WHERE chat_id = ? "
+                                "ORDER BY taken_at DESC LIMIT 1", (cid,)).fetchone()
+        last = (f"{datetime.fromtimestamp(snap['taken_at'], TZ_TR):%d.%m %H:%M} ({snap['admin_count']} admin)"
+                if snap else "henüz yok")
+        text = (f"🛟 <b>Admin kurtarma</b> — {title}\n\nAdmin listesi 6 saatte bir kaydedilir. Biri kısa sürede 3+ adminin "
+                "yetkisini alırsa yöneticilere ve güvenilir kişilere kurtarma butonlu uyarı gider. Güvenilir kişiler "
+                "bota özelden <code>/kurtar</code> yazarak adminleri geri yükleyebilir.\n"
+                f"Son kayıt: {last}\nGüvenilir kişiler ({len(ids)}/3) — kaldırmak için dokun:")
+        rows += [[ibtn(f"🗑 {mention_name}", f"s|{cid}|rd|{i}", RED)]
+                 for i, mention_name in enumerate(str(u) for u in ids)]
+        if len(ids) < 3:
+            rows.append([ibtn("➕ Güvenilir kişi ekle", f"s|{cid}|i|recovery", GREEN)])
+        rows += [[toggle_btn("Otomatik geri yükle", s.get('recovery_autorestore'), f"s|{cid}|t|recovery_autorestore|rec")],
+                 [ibtn("📸 Şimdi kaydet", f"s|{cid}|sn", BLUE)] + ([ibtn("♻️ Geri yükle ›", f"s|{cid}|p|snapc.{snap['id']}")]
+                                                                   if snap else []),
+                 _back(cid)]
+    else:  # snapc.<kayıt>: geri yükleme onayı
+        with get_db() as conn:
+            snap = conn.execute("SELECT id, data, taken_at FROM admin_snapshots WHERE id = ? AND chat_id = ?",
+                                (int(sub) if sub.isdigit() else 0, cid)).fetchone()
+        if not snap:
+            text = "Kayıt bulunamadı."
+        else:
+            names = ", ".join(html.escape(a['name']) for a in json.loads(snap['data']) if a['status'] != 'creator')
+            text = (f"♻️ {datetime.fromtimestamp(snap['taken_at'], TZ_TR):%d.%m %H:%M} kaydındaki adminler geri yüklenecek:\n"
+                    f"<blockquote expandable>{names or '—'}</blockquote>")
+            rows.append([ibtn("✅ Evet, geri yükle", f"s|{cid}|rg|{snap['id']}", GREEN), ibtn("❌ Vazgeç", f"s|{cid}|p|rec", RED)])
+        rows.append(_back(cid, 'rec'))
+    return text, rows
+
+async def _settings_change_ext(cid: str, channel: dict, op: str, args: list, query, context):
+    s = channel['settings']
+    uid = query.from_user.id
+    by = mention(query.from_user)
+    if op in ('mk', 'mo'):
+        if op == 'mk':
+            ok = await media_lock(cid, int(s.get('media_lock_minutes', 30) or 30), f"panel: {query.from_user.first_name}")
+            return 'pr.badmedia', "🔒 Medya kilitlendi" if ok else "Kilitlenemedi (raid kilidi veya bot yetkisi)"
+        return 'pr.badmedia', "🔓 Medya kilidi açıldı" if await media_unlock(cid) else "Kilit zaten açık"
+    if op == 'bd' and args and args[0].isdigit():
+        unblock_media(cid, int(args[0]))
+        return f"bm.{args[1] if len(args) > 1 else 0}", "Engel kaldırıldı"
+    if op in ('na', 'nr', 'nb', 'nc', 'ns'):
+        owner = network_of(cid)
+        if op == 'na':
+            if not has_permission(cid, uid, 90):
+                await query.answer("Ağa eklemek için bu grupta kurucu veya yardımcı kurucu olmalısın.", show_alert=True)
+                return None
+            network_add(cid, uid)
+            await send_log(cid, f"🌐 Grup {by} ağına eklendi", ParseMode.HTML)
+            return 'net', "Ağa eklendi"
+        if not owner:
+            return 'net', "Bu grup bir ağda değil"
+        if op == 'nr':
+            if uid != owner and not has_permission(cid, uid, 90):
+                await query.answer("Yetkin yok!", show_alert=True)
+                return None
+            network_remove(cid)
+            return 'net', "Ağdan çıkarıldı"
+        if uid != owner:
+            await query.answer("Bu işlemi sadece ağın sahibi yapabilir.", show_alert=True)
+            return None
+        if op == 'nb':
+            with get_db() as conn:
+                conn.execute("UPDATE networks SET ban_sync = 1 - ban_sync WHERE owner_id = ?", (owner,))
+                conn.commit()
+            return 'net', "Ban eşitleme " + ("açık" if network_ban_sync(owner) else "kapalı")
+        n = network_copy(cid, owner, lists=(op == 'nc'))
+        await send_log(cid, f"🌐 Ayarlar ağdaki {n} gruba kopyalandı | {by}", ParseMode.HTML)
+        return 'net', f"{n} gruba kopyalandı"
+    # kurtarma işlemleri: grup sahibi veya kurucu/yardımcı kurucu
+    if uid != channel.get('owner') and not has_permission(cid, uid, 90):
+        await query.answer("Kurtarma ayarlarını sadece grup sahibi / kurucu değiştirebilir.", show_alert=True)
+        return None
+    if op == 'rd' and args and args[0].isdigit():
+        ids = s.setdefault('recovery_ids', [])
+        if int(args[0]) < len(ids):
+            ids.pop(int(args[0]))
+            save_channel_settings(cid, channel)
+        return 'rec', "Kaldırıldı"
+    if op == 'sn':
+        sid = await take_admin_snapshot(cid, "manuel")
+        return 'rec', "📸 Kaydedildi" if sid else "Kaydedilemedi (bot admin mi?)"
+    if op == 'rg' and args and args[0].isdigit():
+        ok, failed = await restore_snapshot(cid, int(args[0]))
+        return 'rec', f"♻️ {ok} admin geri yüklendi" + (f", {len(failed)} başarısız" if failed else "")
+    return 'main', ''
+
+async def _apply_recovery_input(cid: str, channel: dict, msg, user):
+    if user.id != channel.get('owner') and not has_permission(cid, user.id, 90):
+        return "Güvenilir kişiyi sadece grup sahibi / kurucu ekleyebilir.", 'rec'
+    ref = msg.text.strip().lstrip('@')
+    target = int(ref) if ref.lstrip('-').isdigit() else None
+    if target is None:
+        with get_db() as conn:
+            row = conn.execute("SELECT user_id FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1", (ref,)).fetchone()
+        target = row['user_id'] if row else None
+    if not target or target < 0:
+        return "❌ Kişi bulunamadı. Kullanıcı ID'sini yaz (kişi bota /id yazarak öğrenebilir).", 'rec'
+    ids = channel['settings'].setdefault('recovery_ids', [])
+    if target not in ids:
+        if len(ids) >= 3:
+            return "En fazla 3 güvenilir kişi eklenebilir.", 'rec'
+        ids.append(target)
+        save_channel_settings(cid, channel)
+    return f"✅ {mention_html(target, str(target))} güvenilir kişi olarak eklendi. Bota özelden /start yazmış olmalı.", 'rec'
 
 
 
@@ -5034,6 +5892,308 @@ async def restore_admins(chat_id: str, exclude_user_id: int = 0):
     save_channel_cfg(chat_id, cfg)
     await log_channel_action(chat_id, 'lockdown_restored', 0, '', f'{restored} admin geri yuklendi')
     return restored
+
+# ═══════════════════════════ GRUP AĞI (çoklu grup yönetimi) ═══════════════════════════
+# Bir kurucu yönettiği grupları ağa bağlar: bir grupta ban diğerlerine yayılır (kick değil), ban kaldırma da.
+NETWORK_COPY_EXCLUDE = {'welcome_msg', 'rules', 'spam_whitelist', 'banned_words', 'link_whitelist', 'raid_lock',
+                        'media_lock', 'recovery_ids'}
+
+def network_of(chat_id: str):
+    with get_db() as conn:
+        row = conn.execute("SELECT owner_id FROM network_members WHERE chat_id = ?", (str(chat_id),)).fetchone()
+    return row['owner_id'] if row else None
+
+def network_chats(owner_id: int) -> list:
+    with get_db() as conn:
+        return [r['chat_id'] for r in conn.execute("SELECT chat_id FROM network_members WHERE owner_id = ? ORDER BY added_at",
+                                                   (owner_id,))]
+
+def network_ban_sync(owner_id: int) -> bool:
+    with get_db() as conn:
+        row = conn.execute("SELECT ban_sync FROM networks WHERE owner_id = ?", (owner_id,)).fetchone()
+    return bool(row['ban_sync']) if row else False
+
+def network_add(chat_id: str, owner_id: int):
+    with get_db() as conn:
+        conn.execute("INSERT OR IGNORE INTO networks (owner_id, ban_sync, created_at) VALUES (?, 1, ?)", (owner_id, time.time()))
+        conn.execute("INSERT OR REPLACE INTO network_members (chat_id, owner_id, added_at) VALUES (?, ?, ?)",
+                     (str(chat_id), owner_id, time.time()))
+        conn.commit()
+
+def network_remove(chat_id: str):
+    with get_db() as conn:
+        conn.execute("DELETE FROM network_members WHERE chat_id = ?", (str(chat_id),))
+        conn.commit()
+
+def network_copy(source: str, owner_id: int, lists: bool) -> int:
+    """Kaynak grubun ayarlarını ağdaki diğer gruplara kopyalar. lists=True: kelime ve link listeleri (birleştirerek)."""
+    src = get_channel_settings(source)['settings']
+    copied = 0
+    for cid in network_chats(owner_id):
+        if cid == source:
+            continue
+        ch = get_channel_settings(cid)
+        if not ch:
+            continue
+        if lists:
+            for key in ('banned_words', 'link_whitelist'):
+                ch['settings'][key] = list(dict.fromkeys(ch['settings'].get(key, []) + src.get(key, [])))
+        else:
+            for key in _default_channel_settings():
+                if key not in NETWORK_COPY_EXCLUDE:
+                    ch['settings'][key] = copy.deepcopy(src.get(key))
+        save_channel_settings(cid, ch)
+        copied += 1
+    return copied
+
+async def network_ban_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ağdaki bir grupta ban → 5 sn sonra hâlâ banlıysa (kick değilse) diğer gruplara yayılır; ban kaldırma da yayılır."""
+    cm = update.chat_member
+    if not cm:
+        return
+    chat_id = str(cm.chat.id)
+    owner = network_of(chat_id)
+    if not owner or not network_ban_sync(owner):
+        return
+    user = cm.new_chat_member.user
+    old, new = cm.old_chat_member.status, cm.new_chat_member.status
+    if user.id == BOT_ID or user.is_bot:
+        return
+    if new == 'kicked' and old != 'kicked':
+        if context.job_queue:
+            context.job_queue.run_once(_network_ban_job, 5, data={'chat_id': chat_id, 'owner': owner, 'user_id': user.id})
+    elif old == 'kicked' and new != 'kicked':
+        async with _db_lock:
+            with get_db() as conn:
+                n = conn.execute("DELETE FROM network_bans WHERE owner_id = ? AND user_id = ?", (owner, user.id)).rowcount
+                conn.commit()
+        if n:
+            for cid in network_chats(owner):
+                if cid != chat_id:
+                    try:
+                        await bot.unban_chat_member(cid, user.id, only_if_banned=True)
+                    except Exception as e:
+                        logger.debug(f"Ağ ban kaldırma ({cid}): {e}")
+            await send_log(chat_id, f"🌐 Ağ banı kaldırıldı: {mention(user)} (ağdaki tüm gruplarda)", ParseMode.HTML)
+
+async def _network_ban_job(context: ContextTypes.DEFAULT_TYPE):
+    d = context.job.data
+    with get_db() as conn:
+        if conn.execute("SELECT 1 FROM network_bans WHERE owner_id = ? AND user_id = ?", (d['owner'], d['user_id'])).fetchone():
+            return  # zaten ağ genelinde banlı (yayılan banın kendi bildirimi)
+    try:
+        member = await bot.get_chat_member(d['chat_id'], d['user_id'])
+    except Exception as e:
+        logger.debug(f"Ağ banı kontrolü yapılamadı: {e}")
+        return
+    if member.status != 'kicked':
+        return  # kick (ban + unban) — yayılmaz
+    until_ts = member.until_date.timestamp() if getattr(member, 'until_date', None) else 0
+    until = int(until_ts) if until_ts > time.time() + 60 else None
+    async with _db_lock:
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO network_bans (owner_id, user_id, source_chat, until_date, banned_at) "
+                         "VALUES (?, ?, ?, ?, ?)", (d['owner'], d['user_id'], d['chat_id'], until, time.time()))
+            conn.commit()
+    ok = 0
+    for cid in network_chats(d['owner']):
+        if cid == d['chat_id']:
+            continue
+        try:
+            await bot.ban_chat_member(cid, d['user_id'], until_date=until)
+            ok += 1
+        except Exception as e:
+            logger.debug(f"Ağ banı uygulanamadı ({cid}): {e}")
+    await send_log(d['chat_id'], f"🌐 Ağ banı: {mention(member.user)} ağdaki {ok} gruba daha yayıldı", ParseMode.HTML)
+
+# ═══════════════════════════ YEDEK ADMİN KURTARMA ═══════════════════════════
+# Admin listesinin düzenli anlık görüntüsü; toplu yetki alma sezilince uyarı; güvenilir kişiler /kurtar ile geri yükler.
+ADMIN_RIGHT_FIELDS = ('can_manage_chat', 'can_delete_messages', 'can_manage_video_chats', 'can_restrict_members',
+                      'can_promote_members', 'can_change_info', 'can_invite_users', 'can_post_stories',
+                      'can_edit_stories', 'can_delete_stories', 'can_post_messages', 'can_edit_messages',
+                      'can_pin_messages', 'can_manage_topics')
+SNAPSHOT_KEEP = 10
+_demotions: dict = {}      # (chat_id, by_id) → [(zaman, user_id)]
+_demotion_alerted: dict = {}
+
+async def take_admin_snapshot(chat_id: str, reason: str = "periyodik"):
+    """Güncel admin listesini (yetkileriyle) kaydeder; öncekiyle aynıysa yeni kayıt açmaz. Dönüş: kayıt no veya None."""
+    try:
+        admins = await bot.get_chat_administrators(chat_id)
+    except Exception as e:
+        logger.debug(f"Admin anlık görüntüsü alınamadı ({chat_id}): {e}")
+        return None
+    data = sorted(({'user_id': a.user.id, 'name': a.user.first_name or str(a.user.id), 'status': a.status,
+                    'title': getattr(a, 'custom_title', None) or '',
+                    'rights': {f: bool(getattr(a, f, False)) for f in ADMIN_RIGHT_FIELDS}}
+                   for a in admins if not a.user.is_bot), key=lambda x: x['user_id'])
+    payload = json.dumps(data, ensure_ascii=False)
+    with get_db() as conn:
+        last = conn.execute("SELECT id, data FROM admin_snapshots WHERE chat_id = ? ORDER BY taken_at DESC LIMIT 1",
+                            (chat_id,)).fetchone()
+        if last and last['data'] == payload:
+            return last['id']
+        sid = conn.execute("INSERT INTO admin_snapshots (chat_id, data, admin_count, taken_at, reason) VALUES (?, ?, ?, ?, ?)",
+                           (chat_id, payload, len(data), time.time(), reason)).lastrowid
+        conn.execute("DELETE FROM admin_snapshots WHERE chat_id = ? AND id NOT IN "
+                     "(SELECT id FROM admin_snapshots WHERE chat_id = ? ORDER BY taken_at DESC LIMIT ?)",
+                     (chat_id, chat_id, SNAPSHOT_KEEP))
+        conn.commit()
+    return sid
+
+async def admin_snapshot_job(context: ContextTypes.DEFAULT_TYPE):
+    with get_db() as conn:
+        chats = [r['chat_id'] for r in conn.execute("SELECT chat_id FROM channels")]
+    for cid in chats:
+        await take_admin_snapshot(cid)
+
+def _can_recover(chat_id: str, user_id: int) -> bool:
+    channel = get_channel_settings(chat_id)
+    if not channel:
+        return False
+    return (user_id in channel['settings'].get('recovery_ids', []) or user_id == channel.get('owner')
+            or has_permission(chat_id, user_id, 90))
+
+async def restore_snapshot(chat_id: str, snap_id: int):
+    """Kayıttaki adminleri yetkileriyle geri atar (kurucu hariç). Bot sadece kendinde olan yetkileri verebilir.
+    Dönüş: (başarılı, başarısız isimler)"""
+    with get_db() as conn:
+        row = conn.execute("SELECT data FROM admin_snapshots WHERE id = ? AND chat_id = ?", (snap_id, chat_id)).fetchone()
+    if not row:
+        return 0, ["kayıt bulunamadı"]
+    try:
+        me = await bot.get_chat_member(chat_id, BOT_ID)
+    except Exception as e:
+        return 0, [f"bot bilgisi alınamadı: {e}"]
+    ok, failed = 0, []
+    for adm in json.loads(row['data']):
+        if adm['status'] == 'creator':
+            continue
+        rights = {k: v and bool(getattr(me, k, False)) for k, v in adm['rights'].items()}
+        try:
+            await bot.promote_chat_member(chat_id, adm['user_id'], **rights)
+            if adm.get('title'):
+                try:
+                    await bot.set_chat_administrator_custom_title(chat_id, adm['user_id'], adm['title'])
+                except Exception as e:
+                    logger.debug(f"Admin etiketi geri yüklenemedi: {e}")
+            ok += 1
+        except Exception as e:
+            logger.debug(f"Admin geri yüklenemedi ({chat_id}/{adm['user_id']}): {e}")
+            failed.append(adm['name'])
+    invalidate_admin_cache(chat_id)
+    await send_log(chat_id, f"♻️ Admin kurtarma: {ok} admin geri yüklendi"
+                            + (f", başarısız: {html.escape(', '.join(failed))}" if failed else ""), ParseMode.HTML)
+    return ok, failed
+
+async def demotion_watch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Aynı kişi 10 dk içinde 3+ admini düşürürse: kurtarma butonlu uyarı; ayar açıksa otomatik geri yükleme."""
+    cm = update.chat_member
+    if not cm or not cm.from_user:
+        return
+    old, new = cm.old_chat_member, cm.new_chat_member
+    if old.status != 'administrator' or new.status == 'administrator' or new.user.is_bot or cm.from_user.id == BOT_ID:
+        return
+    chat_id, by = str(cm.chat.id), cm.from_user
+    channel = get_channel_settings(chat_id)
+    if not channel:
+        return
+    now = time.time()
+    key = (chat_id, by.id)
+    hits = [(t, u) for t, u in _demotions.get(key, []) if now - t < 600] + [(now, new.user.id)]
+    _demotions[key] = hits
+    if len(hits) < 3 or now - _demotion_alerted.get(chat_id, 0) < 1800:
+        return
+    _demotion_alerted[chat_id] = now
+    first = min(t for t, _ in hits)
+    with get_db() as conn:
+        snap = conn.execute("SELECT id, taken_at FROM admin_snapshots WHERE chat_id = ? AND taken_at < ? "
+                            "ORDER BY taken_at DESC LIMIT 1", (chat_id, first)).fetchone()
+    title = html.escape(await _chat_title(chat_id))
+    text = (f"🚨 <b>Toplu yetki alma</b>\nGrup/kanal: <b>{title}</b>\n{mention(by)} (<code>{by.id}</code>) "
+            f"10 dk içinde {len(hits)} adminin yetkisini aldı.")
+    markup = None
+    if snap:
+        when = datetime.fromtimestamp(snap['taken_at'], TZ_TR).strftime('%d.%m %H:%M')
+        text += f"\nSon sağlam kayıt: {when}"
+        markup = InlineKeyboardMarkup([[ibtn("♻️ Adminleri geri yükle", f"rc|{snap['id']}", GREEN)]])
+        if channel['settings'].get('recovery_autorestore'):
+            ok, failed = await restore_snapshot(chat_id, snap['id'])
+            text += f"\n♻️ Otomatik geri yüklendi: {ok} admin" + (f" (başarısız: {len(failed)})" if failed else "")
+            markup = None
+    else:
+        text += "\nKullanılabilir admin kaydı yok."
+    targets = list(dict.fromkeys(get_channel_managers(chat_id) + channel['settings'].get('recovery_ids', [])))
+    for uid in targets:
+        if uid == by.id:
+            continue
+        try:
+            await bot.send_message(uid, text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        except Exception as e:
+            logger.debug(f"Kurtarma uyarısı gönderilemedi ({uid}): {e}")
+    await log_channel_action(chat_id, 'mass_demote', by.id, by.username or '', f"{len(hits)} admin")
+
+async def cmd_kurtar(update: Update, context):
+    """/kurtar (özelden) — güvenilir kişi veya kurucu: admin kaydını seçip geri yükler."""
+    uid = update.effective_user.id
+    with get_db() as conn:
+        chats = [r['chat_id'] for r in conn.execute("SELECT chat_id FROM channels")]
+    mine = [c for c in chats if _can_recover(c, uid)]
+    if not mine:
+        await update.effective_message.reply_text("Kurtarma yetkin olan bir grup/kanal yok. "
+                                                  "Grup sahibi seni panelden 'güvenilir kişi' olarak eklemeli.")
+        return
+    rows = [[ibtn(f"🛟 {(await _chat_title(c))[:40]}", f"rk|{c}", BLUE)] for c in mine[:20]]
+    await update.effective_message.reply_text("Hangi grubun/kanalın adminlerini geri yüklemek istiyorsun?",
+                                              reply_markup=InlineKeyboardMarkup(rows))
+
+async def recovery_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """rk|<chat_id> kayıtları listele · rs|<kayıt> onay sor · rc|<kayıt> geri yükle"""
+    query = update.callback_query
+    kind, _, arg = query.data.partition('|')
+    uid = query.from_user.id
+    if kind == 'rk':
+        chat_id = arg
+        if not _can_recover(chat_id, uid):
+            await query.answer("Yetkin yok!", show_alert=True)
+            return
+        await query.answer()
+        with get_db() as conn:
+            snaps = conn.execute("SELECT id, admin_count, taken_at, reason FROM admin_snapshots WHERE chat_id = ? "
+                                 "ORDER BY taken_at DESC LIMIT 6", (chat_id,)).fetchall()
+        if not snaps:
+            await query.edit_message_text("Bu grup için henüz admin kaydı yok (kayıt 6 saatte bir alınır).")
+            return
+        rows = [[ibtn(f"{datetime.fromtimestamp(s['taken_at'], TZ_TR):%d.%m %H:%M} · {s['admin_count']} admin",
+                      f"rs|{s['id']}", BLUE)] for s in snaps]
+        await query.edit_message_text(f"<b>{html.escape(await _chat_title(chat_id))}</b> — geri yüklenecek kaydı seç:",
+                                      parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows))
+        return
+    try:
+        snap_id = int(arg)
+    except ValueError:
+        await query.answer("Hata.", show_alert=True)
+        return
+    with get_db() as conn:
+        snap = conn.execute("SELECT chat_id, data, taken_at FROM admin_snapshots WHERE id = ?", (snap_id,)).fetchone()
+    if not snap or not _can_recover(snap['chat_id'], uid):
+        await query.answer("Yetkin yok veya kayıt yok.", show_alert=True)
+        return
+    if kind == 'rs':
+        await query.answer()
+        names = ", ".join(html.escape(a['name']) for a in json.loads(snap['data']) if a['status'] != 'creator')
+        await query.edit_message_text(
+            f"♻️ {datetime.fromtimestamp(snap['taken_at'], TZ_TR):%d.%m %H:%M} kaydındaki adminler geri yüklenecek:\n"
+            f"<blockquote expandable>{names or '—'}</blockquote>\nOnaylıyor musun?", parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[ibtn("✅ Evet, geri yükle", f"rc|{snap_id}", GREEN),
+                                                ibtn("❌ Vazgeç", f"rk|{snap['chat_id']}", RED)]]))
+        return
+    await query.answer("Geri yükleniyor...")
+    ok, failed = await restore_snapshot(snap['chat_id'], snap_id)
+    await query.edit_message_text(f"♻️ {ok} admin geri yüklendi."
+                                  + (f"\n❌ Başarısız: {html.escape(', '.join(failed))}\n(Bot, kendisinde olmayan yetkiyi "
+                                     "veremez ve başkasının atadığı adminleri değiştiremez.)" if failed else ""),
+                                  parse_mode=ParseMode.HTML)
 
 async def lockdown_restore_callback(update: Update, context):
     query = update.callback_query
@@ -6272,6 +7432,8 @@ async def help_command(update: Update, context):
                 "/ungban <id|@kullanici> — Global bani kaldir\n"
                 "/gbanlist — Global ban listesi\n"
                 "/yedek — Veritabani yedegi al\n"
+                "/gmedyaengel — Yanitlanan medyayi tum gruplarda engelle\n"
+                "/kurtar — Admin kurtarma\n"
                 "/duyuru <mesaj> — Tum gruplara duyuru\n"
                 "/kanal — Kanal sec\n"
                 "/kanalsettings — Kanal ayarlari\n"
@@ -6286,6 +7448,7 @@ async def help_command(update: Update, context):
                 "/id — ID goster\n"
                 "/kanal — Kanal baglantisi\n"
                 "/itiraz <aciklama> — Ban itirazi gonder\n"
+                "/kurtar — Admin kurtarma (guvenilir kisiler icin)\n"
             ))
         return
 
@@ -6323,6 +7486,7 @@ async def help_command(update: Update, context):
         "/help — Bu menu\n"
         "/id — ID goster\n"
         "/itiraz <aciklama> — Ban itirazi (bota ozelden)\n"
+        "/report [sebep] veya @admin — Yanitladigin mesaji yetkililere bildir\n"
     )
 
     if not is_admin:
@@ -6371,7 +7535,10 @@ async def help_command(update: Update, context):
         "/captcha on/off\n"
         "/captchasure <30s-60m> — Captcha suresi\n"
         "/yeniuye <dakika|off> — Yeni uye link/medya kisiti\n"
-        "/linkizin ekle|sil <alan adi> — Link muaf listesi\n\n"
+        "/linkizin ekle|sil <alan adi> — Link muaf listesi\n"
+        "/medyaengel — Yanitlanan medyayi engelle (aynisi hep silinir)\n"
+        "/paketengel — Yanitlanan sticker'in paketini engelle\n"
+        "/medyakilit [dk] · /medyaac — Medya gonderimini kilitle / ac\n\n"
         "📝 Notlar\n"
         "/save <isim> <metin> — Not kaydet (veya mesaja yanit)\n"
         "/notsil <isim> — Notu sil\n\n"
@@ -6466,6 +7633,7 @@ GROUP_USER_COMMANDS = [
     ("help", "Yardım menüsü"), ("rules", "Grup kuralları"), ("notlar", "Kayıtlı notlar"),
     ("profil", "Profilin ve uyarıların"), ("top", "Aktiflik sıralaması"), ("info", "Kullanıcı istatistikleri"),
     ("grupbilgi", "Grup bilgisi"), ("id", "ID göster"), ("zar", "Zar at"), ("yazitura", "Yazı tura at"),
+    ("report", "Yanıtladığın mesajı yetkililere bildir"),
 ]
 GROUP_ADMIN_COMMANDS = [
     ("settings", "Butonlu ayar paneli"), ("warn", "Uyarı ver"), ("unwarn", "Uyarıları sil"), ("warns", "Uyarıları gör"),
@@ -6474,15 +7642,19 @@ GROUP_ADMIN_COMMANDS = [
     ("slowmode", "Yavaş mod"), ("banlist", "Ban listesi"), ("mutelist", "Mute listesi"), ("save", "Not kaydet"),
     ("notsil", "Not sil"), ("cekilis", "Çekiliş başlat"), ("cekilis_bitir", "Çekilişi bitir"),
     ("antiraid_ac", "Raid kilidini aç"), ("staff", "Yetkili listesi"), ("stats", "Grup istatistikleri"),
+    ("medyaengel", "Yanıtlanan medyayı engelle"), ("paketengel", "Sticker paketini engelle"),
+    ("medyakilit", "Medya gönderimini kilitle"), ("medyaac", "Medya kilidini aç"),
 ]
 PRIVATE_COMMANDS = [
     ("start", "Başlat ve menü"), ("menu", "Menüyü göster"), ("kanal", "Grup/kanal seç"),
     ("settings", "Seçili grubun ayarları"), ("itiraz", "Ban itirazı gönder"), ("help", "Yardım"), ("id", "ID göster"),
+    ("kurtar", "Admin kurtarma (güvenilir kişiler)"),
 ]
 FOUNDER_COMMANDS = [
     ("panel", "Yönetim paneli"), ("gban", "Global ban"), ("ungban", "Global banı kaldır"),
     ("gbanlist", "Global ban listesi"), ("engelle", "Kullanıcı/sohbet engelle"), ("engelkaldir", "Engeli kaldır"),
     ("duyuru", "Tüm gruplara duyuru"), ("yedek", "Veritabanı yedeği"),
+    ("gmedyaengel", "Medyayı tüm gruplarda engelle"),
 ]
 
 async def setup_bot_profile(b):
@@ -7745,6 +8917,8 @@ async def db_cleanup_job(context: ContextTypes.DEFAULT_TYPE):
             conn.execute("DELETE FROM spam_incidents WHERE incident_at < ?", (now - 30 * 86400,))
             conn.execute("DELETE FROM newcomers WHERE joined_at < ?", (now - 2 * 86400,))
             conn.execute("DELETE FROM appeals WHERE created_at < ? AND status != 'pending'", (now - 90 * 86400,))
+            conn.execute("DELETE FROM msg_cache WHERE sent_at < ?", (now - 2 * 86400,))
+            conn.execute("DELETE FROM reports WHERE created_at < ?", (now - 30 * 86400,))
             conn.commit()
 
 # ── Genel hata yakalayıcı ──
@@ -7814,6 +8988,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, settings_input_handler), group=-50)
 
     app.add_handler(ChatMemberHandler(chat_member_cache_handler, ChatMemberHandler.CHAT_MEMBER), group=-1)
+    app.add_handler(ChatMemberHandler(network_ban_handler, ChatMemberHandler.CHAT_MEMBER), group=-2)
+    app.add_handler(ChatMemberHandler(demotion_watch_handler, ChatMemberHandler.CHAT_MEMBER), group=-3)
     app.add_handler(ChatMemberHandler(handle_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
     app.add_handler(ChatMemberHandler(handle_chat_member_protection, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(CommandHandler('kanalsettings', cmd_kanal_settings))
@@ -7825,7 +9001,14 @@ def main():
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member_handler), group=1)
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
 
+    app.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.ChatType.GROUPS, edit_guard_handler),
+                    group=-13)
+    app.add_handler(MessageHandler(
+        (filters.ChatType.GROUPS | filters.ChatType.CHANNEL)
+        & (filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Sticker.ALL | filters.Document.ALL
+           | filters.VIDEO_NOTE), media_shield_handler), group=-12)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, newbie_guard_handler), group=-11)
+    app.add_handler(MessageHandler(filters.UpdateType.MESSAGE & filters.ChatType.GROUPS, message_cache_handler), group=97)
     app.add_handler(MessageHandler(filters.ALL, anti_forward_handler), group=-10)
     app.add_handler(MessageHandler(filters.ALL, anti_media_flood_handler), group=-9)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, anti_spam_flood_handler), group=-8)
@@ -7945,6 +9128,11 @@ def main():
     app.add_handler(CommandHandler('not', cmd_get_note))
     app.add_handler(CommandHandler('notlar', cmd_notes))
     app.add_handler(CommandHandler('notsil', cmd_delete_note))
+    app.add_handler(CommandHandler(['report', 'rapor'], cmd_report))
+    app.add_handler(MessageHandler(filters.Regex(r'(?i)^@admins?\b') & filters.ChatType.GROUPS & filters.REPLY, cmd_report))
+    app.add_handler(CommandHandler(['medyaengel', 'paketengel', 'gmedyaengel'], cmd_medya_engel))
+    app.add_handler(CommandHandler(['medyakilit', 'medyaac'], cmd_medya_kilit))
+    app.add_handler(CommandHandler('kurtar', cmd_kurtar, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(panel_callback, pattern=r'^panel\|'))
 
     app.add_handler(CallbackQueryHandler(button_callback, pattern='^select_'))
@@ -7960,6 +9148,8 @@ def main():
     app.add_handler(CallbackQueryHandler(settings_panel_callback, pattern=r'^s\|'))
     app.add_handler(CallbackQueryHandler(mod_action_callback, pattern=r'^m\|'))
     app.add_handler(CallbackQueryHandler(join_captcha_callback, pattern=r'^jcap\|'))
+    app.add_handler(CallbackQueryHandler(report_callback, pattern=r'^rp\|'))
+    app.add_handler(CallbackQueryHandler(recovery_callback, pattern=r'^r[kcs]\|'))
     app.add_handler(CallbackQueryHandler(nightmod_callback, pattern='^nm_'))
     app.add_handler(CallbackQueryHandler(wordlist_callback, pattern='^wdel'))
     app.add_handler(CallbackQueryHandler(appeal_callback, pattern=r'^appeal(pick)?\|'))
@@ -7968,6 +9158,8 @@ def main():
     job_queue = app.job_queue
     job_queue.run_repeating(check_captcha_timeouts, interval=15, first=15)
     job_queue.run_repeating(check_join_captcha_timeouts, interval=15, first=20)
+    job_queue.run_repeating(check_media_locks, interval=60, first=15)
+    job_queue.run_repeating(admin_snapshot_job, interval=6 * 3600, first=120)
     job_queue.run_repeating(check_raid_locks, interval=60, first=10)
     job_queue.run_repeating(check_nightmod, interval=60, first=30)
     job_queue.run_repeating(check_temp_bans, interval=300, first=60)
