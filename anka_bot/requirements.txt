@@ -1,0 +1,3 @@
+python-telegram-bot[job-queue,rate-limiter]>=21,<22
+telethon
+python-dotenv
