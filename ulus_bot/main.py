@@ -7561,7 +7561,7 @@ async def chat_shared_handler(update: Update, context):
             "Bot bu sohbette yönetici değil. Botu oraya yönetici olarak ekle ve tekrar seç.",
             reply_markup=add_to_chat_markup(context.bot.username))
         return
-    if not has_permission(chat_id, user_id, 50):
+    if not has_permission(chat_id, user_id, 50) and not await repair_rank(chat_id, user_id):
         await update.message.reply_text("Bu sohbette yetkin yok.")
         return
     context.user_data['selected_channel'] = chat_id
@@ -8177,11 +8177,12 @@ async def kanal(update: Update, context):
         chat_id = str(update.effective_chat.id)
         existing = get_channel_settings(chat_id)
         if not existing:
-            await _register_chat(chat_id, user_id, update.effective_chat.type)
+            # sahibi komutu yazan kişi değil, Telegram'daki grup kurucusu olur
+            _unregistered_checked.pop(chat_id, None)
+            ok = await ensure_registered(chat_id, update.effective_chat.type)
             await update.message.reply_text(
-                "Grup kaydedildi! Artık /kanal ile secebilirsin.\n"
-                f"Grup ID: {chat_id}"
-            )
+                f"Grup kaydedildi! Artık bota özelden 🛡 Gruplarım ile seçebilirsin.\nGrup ID: {chat_id}" if ok
+                else "Kaydedilemedi: önce botu bu gruba yönetici yap.")
         else:
             await update.message.reply_text(
                 f"Bu grup kayitli (ID: {chat_id})\n"
@@ -8189,7 +8190,7 @@ async def kanal(update: Update, context):
             )
         return
 
-    owned = []
+    owned, unknown = [], []
     with get_db() as conn:
         all_chats = conn.execute(
             "SELECT chat_id, chat_type, owner_id FROM channels"
@@ -8203,6 +8204,16 @@ async def kanal(update: Update, context):
             ).fetchone()
             if is_owner or has_role:
                 owned.append((cid, ctype))
+            else:
+                unknown.append((cid, ctype))
+    # Kayıtta rütbesi olmayan ama Telegram'da kurucu/yönetici olduğu sohbetler: rütbeyi Telegram'dan onar
+    sem = asyncio.Semaphore(8)
+    async def _check(cid):
+        async with sem:
+            return await repair_rank(cid, user_id)
+    for (cid, ctype), fixed in zip(unknown, await asyncio.gather(*(_check(c) for c, _ in unknown))):
+        if fixed:
+            owned.append((cid, ctype))
 
     if not owned:
         await update.message.reply_text(
@@ -8919,6 +8930,22 @@ async def ensure_registered(chat_id: str, chat_type: str | None = None) -> bool:
     _unregistered_checked.pop(chat_id, None)
     logger.info(f"Kaydı olmayan sohbet otomatik kaydedildi: {chat_id} (sahip {creator})")
     return True
+
+async def repair_rank(chat_id: str, user_id: int) -> bool:
+    """Telegram'da kurucu/yönetici olup bot kaydında rütbesi olmayan kişinin rütbesini onarır."""
+    if user_level(chat_id, user_id):
+        return True
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+    except TelegramError:
+        return False
+    if member.status == 'creator':
+        await sync_creator(chat_id, [member])
+        return True
+    if member.status == 'administrator':
+        await auto_assign_role(chat_id, user_id, member)
+        return True
+    return False
 
 async def auto_register_handler(update: Update, context):
     """Grup/kanal güncellemesi kaydı olmayan bir sohbetten geldiyse (bot orada yöneticiyse) kaydeder."""
