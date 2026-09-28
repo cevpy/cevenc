@@ -609,6 +609,40 @@ def _drop_implicit_founder_roles():
 
 _drop_implicit_founder_roles()
 
+def _restore_if_empty() -> str | None:
+    """Veritabanı boş açıldıysa (dosya silinmiş/yenilenmiş) en son yedekten geri yükler. Dönüş: yüklenen yedek."""
+    with get_db() as conn:
+        if conn.execute("SELECT COUNT(*) FROM channels").fetchone()[0]:
+            return None
+    try:
+        files = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith('bot_data_') and f.endswith('.db'))
+    except OSError:
+        return None
+    for name in reversed(files):
+        path = os.path.join(BACKUP_DIR, name)
+        try:
+            src = sqlite3.connect(path)
+            try:
+                if not src.execute("SELECT COUNT(*) FROM channels").fetchone()[0]:
+                    continue
+                dst = sqlite3.connect(DB_FILE)
+                try:
+                    src.backup(dst)
+                finally:
+                    dst.close()
+            finally:
+                src.close()
+        except sqlite3.Error as e:
+            logger.warning(f"Yedek okunamadı {name}: {e}")
+            continue
+        logger.warning(f"Veritabanı boş açıldı; yedekten geri yüklendi: {name}")
+        init_db()
+        migrate_db()
+        return name
+    return None
+
+RESTORED_FROM = _restore_if_empty()
+
 # ═══════════════════════════ RÜTBE HİYERARŞİSİ ═══════════════════════════
 # Kurucu (grup sahibi) > Yardımcı Kurucu > Üst Admin > Admin. Herkes sadece kendinden alt rütbeye işlem yapar.
 ROLE_LEVELS = {
@@ -7521,10 +7555,10 @@ async def chat_shared_handler(update: Update, context):
     shared = update.message.chat_shared
     chat_id = str(shared.chat_id)
     user_id = update.effective_user.id
-    channel = get_channel_settings(chat_id)
+    channel = get_channel_settings(chat_id) or (await ensure_registered(chat_id) and get_channel_settings(chat_id))
     if not channel:
         await update.message.reply_text(
-            "Bu sohbet bota kayıtlı değil. Botu oraya admin olarak ekle ve tekrar seç.",
+            "Bot bu sohbette yönetici değil. Botu oraya yönetici olarak ekle ve tekrar seç.",
             reply_markup=add_to_chat_markup(context.bot.username))
         return
     if not has_permission(chat_id, user_id, 50):
@@ -8172,10 +8206,10 @@ async def kanal(update: Update, context):
 
     if not owned:
         await update.message.reply_text(
-            "Hicbir kanal/grupta yetkin yok!\n\n"
-            "Once botu gruba/kanala ekle ve o gruptan /kanal yaz.\n"
-            f"Senin ID'n: {user_id}"
-        )
+            "Kayıtlı bir grubun/kanalın bulunamadı.\n\n"
+            "Alttaki 🔗 Grup seç / 📢 Kanal seç butonuyla sohbetini seç: bot orada yöneticiyse "
+            "otomatik tanınır. Bot henüz ekli değilse önce Gruba ekle butonunu kullan.",
+            reply_markup=add_to_chat_markup(context.bot.username))
         return
 
     keyboard = []
@@ -8840,10 +8874,74 @@ async def chat_member_cache_handler(update: Update, context):
         invalidate_admin_cache(str(update.chat_member.chat.id))
 
 
+async def _startup_report(b):
+    """Açılışta veritabanı yolunu ve kayıtlı sohbet sayısını loglar ve bot sahibine bildirir."""
+    with get_db() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM channels").fetchone()[0]
+    size = os.path.getsize(DB_FILE) // 1024 if os.path.exists(DB_FILE) else 0
+    text = (f"🟢 ULUS başladı\nVeritabanı: <code>{html.escape(DB_FILE)}</code> ({size} KB)\n"
+            f"Kayıtlı grup/kanal: <b>{n}</b>")
+    if RESTORED_FROM:
+        text += f"\n⚠️ Veritabanı boş açıldı, son yedekten geri yüklendi: <code>{html.escape(RESTORED_FROM)}</code>"
+    elif n == 0:
+        text += ("\n⚠️ Kayıtlı sohbet yok. Bot yeniden başlatılınca bu sayı düşüyorsa veritabanı dosyası "
+                 "silinmiş ya da farklı bir klasörden çalıştırılıyor olabilir.")
+    logger.info(text.replace("<code>", "").replace("</code>", "").replace("<b>", "").replace("</b>", ""))
+    if FOUNDER_ID:
+        try:
+            await b.send_message(FOUNDER_ID, text, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.debug(f"Açılış bildirimi gönderilemedi: {e}")
+
+_unregistered_checked: dict = {}
+
+async def ensure_registered(chat_id: str, chat_type: str | None = None) -> bool:
+    """Bot yöneticisi olduğu ama kaydı olmayan sohbeti (ör. veritabanı kaybından sonra) otomatik kaydeder.
+    Sahibi: Telegram'daki grup/kanal sahibi. Başarısız denemeler 10 dk boyunca tekrarlanmaz."""
+    chat_id = str(chat_id)
+    if get_channel_settings(chat_id):
+        return True
+    if time.time() - _unregistered_checked.get(chat_id, 0) < 600:
+        return False
+    _unregistered_checked[chat_id] = time.time()
+    try:
+        me = await bot.get_chat_member(chat_id, BOT_ID)
+        if me.status != 'administrator':
+            return False
+        admins = await bot.get_chat_administrators(chat_id)
+        if not chat_type:
+            chat_type = (await bot.get_chat(chat_id)).type
+    except TelegramError as e:
+        logger.debug(f"Otomatik kayıt kontrolü başarısız {chat_id}: {e}")
+        return False
+    creator = next((a.user.id for a in admins if getattr(a, 'status', None) == 'creator'), 0)
+    await _register_chat(chat_id, creator, chat_type)
+    _unregistered_checked.pop(chat_id, None)
+    logger.info(f"Kaydı olmayan sohbet otomatik kaydedildi: {chat_id} (sahip {creator})")
+    return True
+
+async def auto_register_handler(update: Update, context):
+    """Grup/kanal güncellemesi kaydı olmayan bir sohbetten geldiyse (bot orada yöneticiyse) kaydeder."""
+    chat = update.effective_chat
+    if chat and chat.type in ('group', 'supergroup', 'channel') and not get_channel_settings(str(chat.id)):
+        await ensure_registered(str(chat.id), chat.type)
+
+async def checkpoint_job(context):
+    """WAL dosyasındaki değişiklikleri ana veritabanı dosyasına yazar (yalnız .db kopyalansa da veri kaybolmaz)."""
+    try:
+        with get_db() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except sqlite3.Error as e:
+        logger.debug(f"WAL checkpoint: {e}")
+
+async def post_shutdown(application):
+    await checkpoint_job(None)
+
 async def post_init(application):
     global BOT_ID, userbot
     BOT_ID = application.bot.id
     await setup_bot_profile(application.bot)
+    await _startup_report(application.bot)
 
     if not (USERBOT_API_ID and USERBOT_API_HASH):
         logger.info("API_ID / API_HASH boş — Telethon kapalı (kullanıcı adı çözme ve toplu istek onayı Bot API ile yapılır).")
@@ -8864,12 +8962,14 @@ def main():
         .token(TOKEN)
         .rate_limiter(UlusRateLimiter(max_retries=3))
         .post_init(post_init)
+        .post_shutdown(post_shutdown)
         .build()
     )
     bot = app.bot  # tüm modül tek (rate limiter'lı) bot nesnesini kullanır
 
     # Her güncellemeden önce: engelli sohbet/kullanıcı ve global ban kontrolü
     app.add_handler(TypeHandler(Update, blocklist_guard), group=-100)
+    app.add_handler(TypeHandler(Update, auto_register_handler), group=-99)
     app.add_error_handler(error_handler)
     # Panelin ForceReply ile istediği metin (sadece bekleyen giriş varsa yakalar)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, settings_input_handler), group=-50)
@@ -9052,6 +9152,7 @@ def main():
     job_queue.run_repeating(check_temp_bans, interval=300, first=60)
     job_queue.run_repeating(check_expired_mutes, interval=300, first=120)
     job_queue.run_repeating(db_cleanup_job, interval=3600, first=600)
+    job_queue.run_repeating(checkpoint_job, interval=600, first=60)
     job_queue.run_repeating(spam_memory_cleanup, interval=3600, first=3600)
     job_queue.run_repeating(weekly_log_cleanup, interval=86400, first=3600)
     job_queue.run_daily(backup_job, time=dtime(4, 0, tzinfo=TZ_TR))
