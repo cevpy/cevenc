@@ -34,6 +34,7 @@ import traceback
 import unicodedata
 from datetime import datetime, timedelta, timezone, time as dtime
 import asyncio
+import functools
 import logging
 import os
 import re
@@ -597,6 +598,17 @@ def migrate_db():
 
 migrate_db()
 
+def _drop_implicit_founder_roles():
+    """Eski sürüm bot sahibini her gruba 'kurucu' yazıyordu; sahibi olmadığı gruplardaki bu kayıtlar silinir."""
+    if not FOUNDER_ID:
+        return
+    with get_db() as conn:
+        conn.execute("DELETE FROM roles WHERE user_id = ? AND role = 'kurucu' AND chat_id NOT IN "
+                     "(SELECT chat_id FROM channels WHERE owner_id = ?)", (FOUNDER_ID, FOUNDER_ID))
+        conn.commit()
+
+_drop_implicit_founder_roles()
+
 # ═══════════════════════════ RÜTBE HİYERARŞİSİ ═══════════════════════════
 # Kurucu (grup sahibi) > Yardımcı Kurucu > Üst Admin > Admin. Herkes sadece kendinden alt rütbeye işlem yapar.
 ROLE_LEVELS = {
@@ -645,15 +657,47 @@ TG_RIGHTS = {
     'can_promote_members':    ('⭐ Admin atama', LVL_YARDIMCI),
 }
 
+# Telegram/Python hata metinleri kullanıcıya ham gösterilmez; anlaşılır Türkçe karşılığı verilir.
+TG_ERRORS = [
+    (('not enough rights', 'chat_admin_required', 'have no rights', 'need administrator rights'),
+     "Botun bu işlem için yetkisi yok. Botu gerekli yetkilerle yönetici yap."),
+    (('right_forbidden',), "Bot, kendisinde olmayan bir yetkiyi başkasına veremez."),
+    (('user is an administrator', 'user_admin_invalid', "can't remove chat owner", "can't restrict self",
+      'can_not_restrict', 'administrator of the chat'), "Bu kişi grupta yönetici; bu işlem yöneticilere uygulanamaz."),
+    (('user not found', 'participant_id_invalid', 'user_not_participant', 'member not found', 'user_id_invalid'),
+     "Kullanıcı grupta bulunamadı."),
+    (('message to delete not found', 'message to pin not found', 'message not found'), "Mesaj bulunamadı (silinmiş olabilir)."),
+    (("message can't be deleted",), "Bu mesaj silinemiyor (48 saatten eski olabilir)."),
+    (('retry after', 'too many requests', 'flood'), "Telegram şu an çok fazla istek alıyor, biraz sonra tekrar dene."),
+    (('chat not found',), "Sohbet bulunamadı. Bot o sohbette mi?"),
+    (('only for supergroups', 'supergroup'), "Bu işlem sadece süper gruplarda çalışır."),
+    (('bot was blocked', 'bot can\'t initiate', 'forbidden'), "Bota erişim yok (bot engellenmiş ya da sohbetten çıkarılmış)."),
+    (('timed out', 'timeout', 'network'), "Telegram'a ulaşılamadı, biraz sonra tekrar dene."),
+]
+
+def friendly_error(e: Exception) -> str:
+    low = str(e).lower()
+    for keys, text in TG_ERRORS:
+        if any(k in low for k in keys):
+            return f"❌ {text}"
+    logger.warning(f"Beklenmeyen hata: {e!r}")
+    return "❌ İşlem yapılamadı, lütfen tekrar dene."
+
+def valid_id(x) -> bool:
+    """Telegram kullanıcı/sohbet ID'si makul aralıkta mı? (dev sayılar SQLite'ı çökertir)"""
+    try:
+        return 0 < abs(int(x)) < 10 ** 16
+    except (TypeError, ValueError):
+        return False
+
 def role_of_level(level: int) -> str | None:
     return next((r for r in ROLE_ORDER if ROLE_LEVELS[r] <= level), None)
 
 def user_level(chat_id: str, user_id: int) -> int:
-    """Kullanıcının bu sohbetteki rütbe seviyesi. Bot kurucusu ve grubun sahibi her zaman 100."""
-    if not user_id:
+    """Kullanıcının bu sohbetteki rütbe seviyesi. Grubun sahibi her zaman 100.
+    Bot sahibinin (FOUNDER_ID) başkasının grubunda kendiliğinden rütbesi yoktur."""
+    if not valid_id(user_id):
         return 0
-    if user_id == FOUNDER_ID:
-        return LVL_KURUCU
     with get_db() as conn:
         row = conn.execute("SELECT role FROM roles WHERE chat_id = ? AND user_id = ?", (str(chat_id), user_id)).fetchone()
         owner = conn.execute("SELECT owner_id FROM channels WHERE chat_id = ?", (str(chat_id),)).fetchone()
@@ -680,10 +724,19 @@ def has_specific_permission(chat_id: str, user_id: int, permission: str) -> bool
     return permission not in perm_overrides(chat_id, user_id)
 
 def can_act_on(chat_id: str, caller_id: int, target_id: int) -> bool:
-    """Hiyerarşi: sadece kendinden düşük rütbeye işlem yapılır (bot kurucusu hariç)."""
-    if caller_id == FOUNDER_ID:
-        return target_id != FOUNDER_ID
+    """Hiyerarşi: sadece kendinden düşük rütbeye işlem yapılır."""
     return user_level(chat_id, target_id) < user_level(chat_id, caller_id)
+
+def hierarchy_block(chat_id: str, caller_id: int, target_id: int) -> str | None:
+    """Moderasyon hedefi uygun değilse kibar açıklama, uygunsa None."""
+    if target_id == caller_id:
+        return "Bu işlemi kendine uygulayamazsın."
+    if target_id in (BOT_ID, GROUP_ANON_BOT_ID, TELEGRAM_SERVICE_ID):
+        return "Bu hesaba işlem uygulanamaz."
+    if not can_act_on(chat_id, caller_id, target_id):
+        role = role_of_level(user_level(chat_id, target_id))
+        return f"⛔ {ROLE_NAMES[role] if role else 'Bu kişi'} senin rütbende veya üstünde; işlem yapamazsın."
+    return None
 
 async def deny(update: Update, perm: str | None = None, level: int | None = None):
     """Yetki yok mesajı: gereken rütbeyi söyler."""
@@ -722,8 +775,8 @@ async def sync_creator(chat_id: str, admins) -> None:
         row = conn.execute("SELECT role FROM roles WHERE chat_id = ? AND user_id = ?", (chat_id, creator)).fetchone()
         if ch['owner_id'] == creator and row and row['role'] == 'kurucu':
             return
-        conn.execute("UPDATE roles SET role = 'yardimci_kurucu' WHERE chat_id = ? AND role = 'kurucu' "
-                     "AND user_id NOT IN (?, ?)", (chat_id, creator, FOUNDER_ID))
+        conn.execute("UPDATE roles SET role = 'yardimci_kurucu' WHERE chat_id = ? AND role = 'kurucu' AND user_id != ?",
+                     (chat_id, creator))
         conn.execute("INSERT OR REPLACE INTO roles (chat_id, user_id, role) VALUES (?, ?, 'kurucu')", (chat_id, creator))
         conn.execute("UPDATE channels SET owner_id = ? WHERE chat_id = ?", (creator, chat_id))
         conn.commit()
@@ -871,7 +924,7 @@ async def is_staff_user(chat_id: str, user_id: int, channel: dict | None = None)
     """Bot rolleri + Telegram adminleri + muaf liste."""
     if not user_id:
         return False
-    if user_id in (FOUNDER_ID, TELEGRAM_SERVICE_ID, GROUP_ANON_BOT_ID, BOT_ID):
+    if user_id in (TELEGRAM_SERVICE_ID, GROUP_ANON_BOT_ID, BOT_ID):
         return True
     if has_permission(chat_id, user_id, 50):
         return True
@@ -988,11 +1041,6 @@ async def _register_chat(chat_id: str, owner_id: int, chat_type: str):
                     "INSERT OR IGNORE INTO roles (chat_id, user_id, role) VALUES (?, ?, 'kurucu')",
                     (chat_id, owner_id)
                 )
-                if owner_id != FOUNDER_ID:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO roles (chat_id, user_id, role) VALUES (?, ?, 'kurucu')",
-                        (chat_id, FOUNDER_ID)
-                    )
                 conn.commit()
                 _invalidate_settings(chat_id)
                 return True
@@ -1062,6 +1110,8 @@ async def resolve_user(chat_id, user_ref=None, replied_user=None):
 
     if user_ref.isdigit():
         user_id = int(user_ref)
+        if not valid_id(user_id):
+            return None, None
         try:
             member = await bot.get_chat_member(chat_id, user_id)
             return user_id, member
@@ -1291,7 +1341,7 @@ def _report_recipients(chat_id: str, channel: dict) -> list:
     """Bu gruptaki bot yetkilileri (bot kurucusu yalnızca grubun sahibiyse)."""
     with get_db() as conn:
         ids = [r['user_id'] for r in conn.execute("SELECT user_id FROM roles WHERE chat_id = ?", (chat_id,))]
-    return [u for u in dict.fromkeys(ids) if u != FOUNDER_ID or u == channel.get('owner')][:25]
+    return list(dict.fromkeys(ids))[:25]
 
 def report_markup(rid: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
@@ -1424,7 +1474,7 @@ async def report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
             await _apply_mod_action(cid, 'mu' if act == 'mute' else 'bn', target, clicker, channel)
     except Exception as e:
-        await query.answer(f"Hata: {e}"[:190], show_alert=True)
+        await query.answer(friendly_error(e)[:190], show_alert=True)
         return
     result = f"{REPORT_RESULTS[act]} · {mention(clicker)}"
     with get_db() as conn:
@@ -1540,7 +1590,7 @@ async def mod_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         result, new_markup = await _apply_mod_action(cid, act, target, clicker, channel)
     except Exception as e:
-        await query.answer(f"Hata: {e}"[:190], show_alert=True)
+        await query.answer(friendly_error(e)[:190], show_alert=True)
         return
     await query.answer(result)
     try:
@@ -2632,9 +2682,8 @@ async def klasorcu(update: Update, context):
     if not chat_id or not get_channel_settings(chat_id):
         await update.message.reply_text("Önce /kanal ile seç!")
         return
-    channel = get_channel_settings(chat_id)
-    if update.effective_user.id != channel['owner']:
-        await update.message.reply_text("Sadece owner kullanabilir!")
+    if not has_permission(chat_id, update.effective_user.id, LVL_KURUCU):
+        await deny(update, level=LVL_KURUCU)
         return
     user_id, member = await resolve_user(
         chat_id,
@@ -2656,7 +2705,7 @@ async def klasorcu(update: Update, context):
         await update.message.reply_text(f"📂 {who} klasörcü yapıldı!", parse_mode=ParseMode.HTML)
         await send_log(chat_id, f"📂 {who} klasörcü atandı | {chat_id}", ParseMode.HTML)
     except Exception as e:
-        await update.message.reply_text(f"Hata: {e}")
+        await update.message.reply_text(friendly_error(e))
 
 async def ban(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -2673,8 +2722,8 @@ async def ban(update: Update, context):
     if not member:
         await update.message.reply_text("Kullanıcı bulunamadı!")
         return
-    if not can_act_on(chat_id, update.effective_user.id, user_id):
-        await update.message.reply_text("⛔ Kendi rütbendeki veya üstündeki birine işlem yapamazsın.")
+    if (why := hierarchy_block(chat_id, update.effective_user.id, user_id)):
+        await update.message.reply_text(why)
         return
 
     if update.message.reply_to_message:
@@ -2733,7 +2782,7 @@ async def ban(update: Update, context):
         await send_log(chat_id, f"🚫 {who} {ban_type} | Sebep: {reason_h} | {chat_id}", ParseMode.HTML)
         await log_mod_action(chat_id, ban_type, user_id, username, update.effective_user.id, update.effective_user.username or '', reason)
     except Exception as e:
-        await update.message.reply_text(f"Hata: {e}")
+        await update.message.reply_text(friendly_error(e))
 
 async def unban(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -2767,7 +2816,7 @@ async def unban(update: Update, context):
         await update.message.reply_text(f"✅ {who} unban edildi!", parse_mode=ParseMode.HTML)
         await send_log(chat_id, f"✅ {who} ban kaldırıldı | {chat_id}", ParseMode.HTML)
     except Exception as e:
-        await update.message.reply_text(f"Hata: {e}")
+        await update.message.reply_text(friendly_error(e))
 
 async def kick(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -2784,8 +2833,8 @@ async def kick(update: Update, context):
     if not member:
         await update.message.reply_text("Kullanıcı bulunamadı!")
         return
-    if not can_act_on(chat_id, update.effective_user.id, user_id):
-        await update.message.reply_text("⛔ Kendi rütbendeki veya üstündeki birine işlem yapamazsın.")
+    if (why := hierarchy_block(chat_id, update.effective_user.id, user_id)):
+        await update.message.reply_text(why)
         return
     try:
         channel = get_channel_settings(chat_id)
@@ -2799,7 +2848,7 @@ async def kick(update: Update, context):
         await send_log(chat_id, f"👢 {who} kicklendi | {chat_id}", ParseMode.HTML)
         await log_mod_action(chat_id, 'kick', user_id, username, update.effective_user.id, update.effective_user.username or '', '')
     except Exception as e:
-        await update.message.reply_text(f"Hata: {e}")
+        await update.message.reply_text(friendly_error(e))
 
 async def mute(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -2816,8 +2865,8 @@ async def mute(update: Update, context):
     if not member:
         await update.message.reply_text("Kullanıcı bulunamadı!")
         return
-    if not can_act_on(chat_id, update.effective_user.id, user_id):
-        await update.message.reply_text("⛔ Kendi rütbendeki veya üstündeki birine işlem yapamazsın.")
+    if (why := hierarchy_block(chat_id, update.effective_user.id, user_id)):
+        await update.message.reply_text(why)
         return
 
     duration_str = None
@@ -2876,7 +2925,7 @@ async def mute(update: Update, context):
         await send_log(chat_id, f"🔇 {who} {duration_str} mute | {chat_id}", ParseMode.HTML)
         await log_mod_action(chat_id, 'mute', user_id, username, update.effective_user.id, update.effective_user.username or '', duration_str)
     except Exception as e:
-        await update.message.reply_text(f"Hata: {e}")
+        await update.message.reply_text(friendly_error(e))
 
 async def unmute(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -2910,7 +2959,7 @@ async def unmute(update: Update, context):
         await update.message.reply_text(f"🔊 {who} unmute edildi!", parse_mode=ParseMode.HTML)
         await send_log(chat_id, f"🔊 {who} unmute edildi | {chat_id}", ParseMode.HTML)
     except Exception as e:
-        await update.message.reply_text(f"Hata: {e}")
+        await update.message.reply_text(friendly_error(e))
 
 async def warn(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -2927,8 +2976,8 @@ async def warn(update: Update, context):
     if not member:
         await update.message.reply_text("Kullanıcı bulunamadı!")
         return
-    if not can_act_on(chat_id, update.effective_user.id, user_id):
-        await update.message.reply_text("⛔ Kendi rütbendeki veya üstündeki birine işlem yapamazsın.")
+    if (why := hierarchy_block(chat_id, update.effective_user.id, user_id)):
+        await update.message.reply_text(why)
         return
 
     if update.message.reply_to_message:
@@ -2968,7 +3017,7 @@ async def warn(update: Update, context):
                                             parse_mode=ParseMode.HTML, reply_markup=mod_markup(chat_id, user_id, 'ban'))
             await send_log(chat_id, f"🚫 {who} {warn_limit} uyarı → ban | Sebep: {reason_h} | {chat_id}", ParseMode.HTML)
         except Exception as e:
-            await update.message.reply_text(f"Hata: {e}")
+            await update.message.reply_text(friendly_error(e))
     else:
         await update.message.reply_text(f"⚠️ {who} uyarıldı! Sebep: {reason_h} | Uyarı: {warn_count}/{warn_limit}",
                                         parse_mode=ParseMode.HTML, reply_markup=mod_markup(chat_id, user_id, 'warn'))
@@ -2990,8 +3039,8 @@ async def unwarn(update: Update, context):
     if not member:
         await update.message.reply_text("Kullanıcı bulunamadı!")
         return
-    if not can_act_on(chat_id, update.effective_user.id, user_id):
-        await update.message.reply_text("⛔ Kendi rütbendeki veya üstündeki birine işlem yapamazsın.")
+    if (why := hierarchy_block(chat_id, update.effective_user.id, user_id)):
+        await update.message.reply_text(why)
         return
     async with _db_lock:
         with get_db() as conn:
@@ -3044,7 +3093,7 @@ async def pin(update: Update, context):
         await update.message.reply_text("📌 Mesaj sabitlendi!")
         await send_log(chat_id, f"📌 Mesaj sabitlendi | {chat_id}")
     except Exception as e:
-        await update.message.reply_text(f"Hata: {e}")
+        await update.message.reply_text(friendly_error(e))
 
 async def unpin(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -3064,7 +3113,7 @@ async def unpin(update: Update, context):
         await update.message.reply_text("✅ Sabitleme kaldırıldı!")
         await send_log(chat_id, f"📍 Sabitleme kaldırıldı | {chat_id}")
     except Exception as e:
-        await update.message.reply_text(f"Hata: {e}")
+        await update.message.reply_text(friendly_error(e))
 
 async def slowmode(update: Update, context):
     
@@ -3088,7 +3137,7 @@ async def slowmode(update: Update, context):
     except ValueError:
         await update.message.reply_text("Geçerli bir saniye değeri gir!")
     except Exception as e:
-        await update.message.reply_text(f"Hata: {e}")
+        await update.message.reply_text(friendly_error(e))
 
 async def temizle(update: Update, context):
     """/temizle <sayı> veya /temizle all — toplu silme (deleteMessages) arka planda çalışır, bot beklemez."""
@@ -3788,17 +3837,17 @@ async def wordlist(update: Update, context):
 
 async def wordlist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     data = query.data
+    chat_id = data.split("|")[1]
+    if not await require(update, chat_id, 'can_manage_settings'):
+        return
+    await query.answer()
 
     if data.startswith("wdel_close|"):
         await query.edit_message_text("Kelime listesi kapatildi.")
         return
 
     if data.startswith("wdel_all|"):
-        chat_id = data.split("|")[1]
-        if not await require(update, chat_id, 'can_manage_settings'):
-            return
         channel = get_channel_settings(chat_id)
         channel['settings']['banned_words'] = []
         save_channel_settings(chat_id, channel)
@@ -3807,14 +3856,10 @@ async def wordlist_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("wdel|"):
-        parts = data.split("|")
-        chat_id = parts[1]
-        idx = int(parts[2])
-        if not await require(update, chat_id, 'can_manage_settings'):
-            return
+        idx = int(data.split("|")[2])
         channel = get_channel_settings(chat_id)
         words = channel['settings'].get('banned_words', [])
-        if idx < len(words):
+        if 0 <= idx < len(words):
             silinen = words.pop(idx)
             channel['settings']['banned_words'] = words
             save_channel_settings(chat_id, channel)
@@ -4077,17 +4122,17 @@ async def check_nightmod(context: ContextTypes.DEFAULT_TYPE):
 async def nightmod_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     query = update.callback_query
-    await query.answer()
     data = query.data
+    chat_id = data.split("|")[1]
+    if not await require(update, chat_id, 'can_manage_settings'):
+        return
+    await query.answer()
 
     if data.startswith("nm_cancel|"):
         await query.edit_message_text("Night mode yapilandirmasi iptal edildi.")
         return
 
     if data.startswith("nm_save|"):
-        chat_id = data.split("|")[1]
-        if not await require(update, chat_id, 'can_manage_settings'):
-            return
         nm = get_nightmod(chat_id)
         if not nm:
             nm_data = {
@@ -4122,13 +4167,7 @@ async def nightmod_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data.startswith("nm_toggle|"):
-        parts = data.split("|")
-        chat_id = parts[1]
-        key = parts[2]
-
-        if not await require(update, chat_id, 'can_manage_settings'):
-            return
-
+        key = data.split("|")[2]
         nm = get_nightmod(chat_id)
         if nm:
             restrictions = json.loads(nm['restrictions']) if isinstance(nm['restrictions'], str) else nm['restrictions']
@@ -4773,7 +4812,7 @@ async def _apply_input(kind: str, cid: str, channel: dict, msg, user):
             await bot.send_message(int(text), f"✅ ULUS log kanalı bağlandı: {html.escape(await _chat_title(cid))}",
                                    parse_mode=ParseMode.HTML)
         except Exception as e:
-            return f"❌ Bu sohbete mesaj gönderemiyorum: {html.escape(str(e))}", 'log'
+            return f"❌ Bu sohbete mesaj gönderemiyorum. {html.escape(friendly_error(e)[2:])}", 'log'
         channel['log_chat_id'] = text
         save_channel_settings(cid, channel)
         return "✅ Log kanalı ayarlandı.", 'log'
@@ -4946,7 +4985,7 @@ async def _apply_recovery_input(cid: str, channel: dict, msg, user):
     if not has_permission(cid, user.id, LVL_KURUCU):
         return "Güvenilir kişiyi sadece kurucu ekleyebilir.", 'rec'
     ref = msg.text.strip().lstrip('@')
-    target = int(ref) if ref.lstrip('-').isdigit() else None
+    target = int(ref) if ref.lstrip('-').isdigit() and valid_id(int(ref)) else None
     if target is None:
         with get_db() as conn:
             row = conn.execute("SELECT user_id FROM users WHERE LOWER(username) = LOWER(?) LIMIT 1", (ref,)).fetchone()
@@ -5080,7 +5119,9 @@ async def new_member_handler(update: Update, context):
                 logger.debug(f"new_member_handler: {e}")
             continue
 
-        if channel['settings'].get('captcha_enabled', False) and not user.is_bot and not _consume_join_pass(chat_id, user.id):
+        added_by_staff = adder_is_staff and adder.id != user.id  # yetkilinin elle eklediği kişi doğrulanmış sayılır
+        if channel['settings'].get('captcha_enabled', False) and not user.is_bot and not added_by_staff \
+                and not _consume_join_pass(chat_id, user.id):
             await send_captcha(chat_id, user.id, username, context, user=user)
             continue
 
@@ -5339,9 +5380,9 @@ def _build_leaderboard_text(chat_id: str, period: str, title: str,
 
 async def _send_leaderboard(update: Update, context, period: str):
     
-    chat_id = str(update.effective_chat.id)
-    if not get_channel_settings(chat_id):
-        await update.message.reply_text("Bu grup kayıtlı değil!")
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await update.message.reply_text("Bu grup kayıtlı değil! Özelden kullanıyorsan önce /kanal ile grup seç.")
         return
 
     label_map = {
@@ -5442,9 +5483,9 @@ async def cmd_toplam(update: Update, context):
 
 async def cmd_top(update: Update, context):
     
-    chat_id = str(update.effective_chat.id)
-    if not get_channel_settings(chat_id):
-        await update.message.reply_text("Bu grup kayıtlı değil!")
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await update.message.reply_text("Bu grup kayıtlı değil! Özelden kullanıyorsan önce /kanal ile grup seç.")
         return
     keyboard = [
         [
@@ -5614,9 +5655,9 @@ async def top_callback(update: Update, context):
 
 async def cmd_info(update: Update, context):
     
-    chat_id = str(update.effective_chat.id)
-    if not get_channel_settings(chat_id):
-        await update.message.reply_text("Bu grup kayıtlı değil!")
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await update.message.reply_text("Bu grup kayıtlı değil! Özelden kullanıyorsan önce /kanal ile grup seç.")
         return
 
     if update.message.reply_to_message and update.message.reply_to_message.from_user:
@@ -5733,8 +5774,6 @@ def get_channel_managers(chat_id: str) -> list:
         for r in row:
             if r['user_id'] not in managers:
                 managers.append(r['user_id'])
-    if FOUNDER_ID not in managers:
-        managers.append(FOUNDER_ID)
     return managers
 
 async def notify_managers(chat_id: str, text: str, reply_markup=None, parse_mode: str | None = None):
@@ -6576,7 +6615,7 @@ async def kanal_cfg_callback(update: Update, context):
             save_channel_cfg(chat_id, cfg)
             await query.answer(f"Kaydedildi: {chat_info.title}", show_alert=True)
         except Exception as e:
-            await query.answer(f"Hata: {e}", show_alert=True)
+            await query.answer(friendly_error(e), show_alert=True)
         return
 
     elif key == 'safe_admins_panel':
@@ -6593,7 +6632,7 @@ async def kanal_cfg_callback(update: Update, context):
             buttons.append([InlineKeyboardButton("🔙 Geri", callback_data=f"kcfg|{chat_id}|back")])
             await query.message.edit_text("Guvenli admin listesi:\n(Link atmasina izin verilenler)", reply_markup=InlineKeyboardMarkup(buttons))
         except Exception as e:
-            await query.message.edit_text(f"Hata: {e}")
+            await query.message.edit_text(friendly_error(e))
         return
 
     elif key == 'back':
@@ -6672,82 +6711,52 @@ async def istekonayla(update: Update, context):
 
     await reply_func("İstekler onaylanıyor, lütfen bekle...")
 
-    approved = 0
-    failed = 0
-
     ub = await get_userbot()
+    pending_ids = []
     if ub:
         try:
             from telethon.tl.functions.messages import GetChatInviteImportersRequest
-            from telethon.tl.types import ChannelParticipantsKicked
             entity = await ub.get_entity(int(chat_id))
             result = await ub(GetChatInviteImportersRequest(
-                peer=entity,
-                requested=True,
-                offset_date=0,
-                offset_user=InputPeerUser(0, 0),
-                limit=limit or 200
-            ))
-            for u in result.importers:
-                try:
-                    await bot.approve_chat_join_request(chat_id, u.user_id)
-                    approved += 1
-                    await asyncio.sleep(0.1)
-                except Exception:
-                    failed += 1
+                peer=entity, requested=True, offset_date=0, offset_user=InputPeerUser(0, 0), limit=limit or 200))
+            pending_ids = [u.user_id for u in result.importers]
         except Exception as e:
             logger.warning(f"Telethon istekonayla hata: {e}")
+    if not pending_ids:
+        # Telethon yoksa: botun gördüğü ve kaydettiği bekleyen istekler (Bot API'de "hepsini onayla" metodu yok)
+        with get_db() as conn:
+            pending_ids = [r['user_id'] for r in conn.execute(
+                "SELECT user_id FROM join_requests WHERE chat_id = ? AND status = 'pending' ORDER BY requested_at",
+                (chat_id,))]
+    if limit:
+        pending_ids = pending_ids[:limit]
+    if not pending_ids:
+        await reply_func("Bekleyen katılım isteği bulunamadı.")
+        return
 
-            try:
-                import httpx
-                async with httpx.AsyncClient() as client:
-                    resp = await client.post(
-                        f"https://api.telegram.org/bot{TOKEN}/approveAllChatJoinRequests",
-                        json={"chat_id": chat_id}
-                    )
-                result = resp.json()
-                if result.get("ok"):
-                    approved = -1
-                else:
-                    await reply_func(f"Hata: {result.get('description', 'Bilinmeyen')}")
-                    return
-            except Exception as e2:
-                await reply_func(f"Hata: {e2}")
-                return
-    else:
-
+    approved, failed = 0, 0
+    done = []
+    for uid in pending_ids:
         try:
-            import httpx
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    f"https://api.telegram.org/bot{TOKEN}/approveAllChatJoinRequests",
-                    json={"chat_id": chat_id}
-                )
-            result = resp.json()
-            if result.get("ok"):
-                approved = -1
-            else:
-                await reply_func(f"Hata: {result.get('description', 'Bilinmeyen')}")
-                return
-        except Exception as e:
-            await reply_func(f"Hata: {e}")
-            return
+            await bot.approve_chat_join_request(chat_id, uid)
+            approved += 1
+            done.append(uid)
+        except TelegramError as e:
+            failed += 1
+            if 'hide_requester_missing' in str(e).lower() or 'user_already_participant' in str(e).lower():
+                done.append(uid)  # istek artık yok: listeden düş
+        await asyncio.sleep(0.05)
 
     async with _db_lock:
         with get_db() as conn:
-            conn.execute(
-                "UPDATE join_requests SET status = 'approved' WHERE chat_id = ? AND status = 'pending'",
-                (chat_id,)
-            )
+            conn.executemany("UPDATE join_requests SET status = 'approved' WHERE chat_id = ? AND user_id = ?",
+                             [(chat_id, u) for u in done])
             conn.commit()
 
-    if approved == -1:
-        await reply_func("Tüm bekleyen istekler onaylandı!")
-    else:
-        msg = f"✅ {approved} istek onaylandı."
-        if failed:
-            msg += f" ({failed} başarısız)"
-        await reply_func(msg)
+    msg = f"✅ {approved} istek onaylandı."
+    if failed:
+        msg += f" ({failed} istek onaylanamadı; süresi dolmuş veya geri çekilmiş olabilir)"
+    await reply_func(msg)
     await send_log(chat_id, f"İstek onaylama: {approved} onaylandı | {chat_id}")
 
 _blocked_cache: set | None = None
@@ -6827,9 +6836,11 @@ async def auto_assign_role(chat_id: str, user_id: int, member):
 
 async def cmd_uvye_etiketi(update: Update, context):
     msg = update.effective_message
-    chat_id = str(update.effective_chat.id)
+    chat_id = _get_effective_chat_id(update, context)
     user_id = update.effective_user.id
-
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile grup seç!")
+        return
     if not await require(update, chat_id, 'can_manage_roles'):
         return
 
@@ -6842,7 +6853,7 @@ async def cmd_uvye_etiketi(update: Update, context):
     elif context.args and len(context.args) >= 2:
         ref = context.args[0].lstrip('@')
         tag = ' '.join(context.args[1:])
-        if ref.isdigit():
+        if ref.isdigit() and valid_id(int(ref)):
             target_id = int(ref)
         else:
             tid, _ = await resolve_user(chat_id, ref)
@@ -6879,14 +6890,17 @@ async def cmd_uvye_etiketi(update: Update, context):
                 conn.commit()
         await msg.reply_text(f"🏷 Etiket verildi: {who} → {html.escape(tag)}", parse_mode=ParseMode.HTML)
     except Exception as e:
-        await msg.reply_text(f"Hata: {e}")
+        await msg.reply_text(friendly_error(e))
 
 async def _cmd_set_role(update, context, role: str):
     """/admin, /basadmin, /yardimcikurucu @kişi [etiket] — rütbe verir (hiyerarşi kurallarıyla)."""
     msg = update.channel_post or update.message
     if not msg:
         return
-    chat_id = str(msg.chat_id)
+    chat_id = str(msg.chat_id) if update.channel_post else _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile grup seç!")
+        return
     caller_id = update.effective_user.id if update.effective_user and not update.channel_post else None
     if caller_id is None and not update.channel_post:
         return
@@ -6904,7 +6918,7 @@ async def _cmd_set_role(update, context, role: str):
     elif args:
         user_ref = args[0].strip().lstrip('@')
         tag = ' '.join(args[1:]) if len(args) > 1 else None
-        if user_ref.isdigit():
+        if user_ref.isdigit() and valid_id(int(user_ref)):
             user_id = int(user_ref)
         else:
             user_id, _ = await resolve_user(chat_id, user_ref)
@@ -7283,7 +7297,7 @@ async def cmd_grupbilgi(update: Update, context):
         username_link = f"@{chat_info.username}" if getattr(chat_info, 'username', None) else "Ozel grup"
         member_count = await bot.get_chat_member_count(chat_id)
     except Exception as e:
-        await update.message.reply_text(f"Bilgi alinamadi: {e}")
+        await update.message.reply_text(friendly_error(e))
         return
     with get_db() as conn:
         total_msgs = conn.execute("SELECT COUNT(*) as c FROM message_stats WHERE chat_id=?", (chat_id,)).fetchone()['c']
@@ -7780,7 +7794,7 @@ def rank_error(chat_id: str, caller_id: int, target_id: int, role: str | None = 
         return f"⛔ Rütbe yönetimi için {ROLE_NAMES['yardimci_kurucu']} ve üstü gerekli."
     if not can_act_on(chat_id, caller_id, target_id):
         return "⛔ Kendi rütbendeki veya üstündeki birini düzenleyemezsin."
-    if role and ROLE_LEVELS[role] >= user_level(chat_id, caller_id) and caller_id != FOUNDER_ID:
+    if role and ROLE_LEVELS[role] >= user_level(chat_id, caller_id):
         return f"⛔ {ROLE_NAMES[role]} rütbesini sadece üst rütbe verebilir."
     return None
 
@@ -7801,6 +7815,8 @@ async def apply_tg_rights(chat_id: str, user_id: int, level: int) -> None:
 
 async def set_rank(chat_id: str, caller_id: int | None, target_id: int, role: str) -> str | None:
     """Rütbe verir. caller_id None ise (kanal gönderisi) kontrol yapılmaz. Hata metni ya da None döner."""
+    if not valid_id(target_id):
+        return "Kullanıcı bulunamadı."
     if caller_id is not None:
         err = rank_error(chat_id, caller_id, target_id, role)
         if err:
@@ -7813,7 +7829,7 @@ async def set_rank(chat_id: str, caller_id: int | None, target_id: int, role: st
             return "❌ Botun admin atama yetkisi yok!"
         if 'user not found' in err or 'participant' in err:
             return "❌ Kullanıcı grupta bulunamadı!"
-        return f"❌ Hata: {e}"
+        return friendly_error(e)
     async with _db_lock:
         with get_db() as conn:
             conn.execute("INSERT OR REPLACE INTO roles (chat_id, user_id, role) VALUES (?, ?, ?)", (chat_id, target_id, role))
@@ -7884,7 +7900,7 @@ async def render_perm_panel(chat_id: str, caller_id: int, target_id: int, sectio
                                   GREEN if on else RED)])
         title = "🤖 Bot yetkileri"
     caller_level = user_level(chat_id, caller_id)
-    ranks = [r for r in ROLE_ORDER[1:] if ROLE_LEVELS[r] < caller_level or caller_id == FOUNDER_ID]
+    ranks = [r for r in ROLE_ORDER[1:] if ROLE_LEVELS[r] < caller_level]
     rows.append([ibtn(("• " if r == role else "") + ROLE_NAMES[r], f"setrank|{chat_id}|{target_id}|{r}",
                       GREEN if r == role else BLUE) for r in ranks])
     other = 'tg' if section == 'bot' else 'bot'
@@ -7967,7 +7983,7 @@ async def toggle_permission_callback(update: Update, context: ContextTypes.DEFAU
         try:
             await apply_tg_rights(chat_id, target_id, level)
         except TelegramError as e:
-            await query.answer(f"Telegram hatası: {e}"[:190], show_alert=True)
+            await query.answer(friendly_error(e)[:190], show_alert=True)
             return
     label = (PERMS if keys is PERM_KEYS else TG_RIGHTS)[key][0]
     await _show_perm_panel(query, chat_id, target_id, section, f"{'✅ Açıldı' if turn_on else '❌ Kapatıldı'}: {label}")
@@ -8151,8 +8167,7 @@ async def kanal(update: Update, context):
             has_role = conn.execute(
                 "SELECT 1 FROM roles WHERE chat_id = ? AND user_id = ?", (cid, user_id)
             ).fetchone()
-            is_founder = (user_id == FOUNDER_ID)
-            if is_owner or has_role or is_founder:
+            if is_owner or has_role:
                 owned.append((cid, ctype))
 
     if not owned:
@@ -8213,8 +8228,8 @@ async def setlog(update: Update, context):
     if not channel:
         await update.message.reply_text("Kanal bulunamadı!")
         return
-    if update.message.from_user.id != channel['owner']:
-        await update.message.reply_text("Sadece owner kullanabilir!")
+    if not has_permission(chat_id, update.effective_user.id, LVL_KURUCU):
+        await deny(update, level=LVL_KURUCU)
         return
     if not context.args or not context.args[0].lstrip('-').isdigit():
         await update.message.reply_text(f"Mevcut log: {channel.get('log_chat_id', 'Ayarlanmamış')}\nKullanım: /setlog -1001234567890")
@@ -8225,8 +8240,8 @@ async def setlog(update: Update, context):
     await update.message.reply_text(f"✅ Log kanalı güncellendi: {new_log_id}")
 
 async def staff(update: Update, context):
-    chat_id = context.user_data.get('selected_channel') or str(update.effective_chat.id)
-    channel = get_channel_settings(chat_id)
+    chat_id = _get_effective_chat_id(update, context)
+    channel = get_channel_settings(chat_id) if chat_id else None
     if not channel:
         await update.message.reply_text("Kanal bulunamadı!")
         return
@@ -8244,7 +8259,7 @@ async def staff(update: Update, context):
     try:
         tg_admins = await bot.get_chat_administrators(chat_id)
     except Exception as e:
-        await update.message.reply_text(f"Admin listesi alınamadı: {e}")
+        await update.message.reply_text(friendly_error(e))
         return
 
     grouped = {r: [] for r in role_order}
@@ -8314,7 +8329,7 @@ async def _resolve_target_id(update: Update, context) -> tuple[int | None, str]:
         ref = context.args[0].lstrip('@')
         reason = ' '.join(context.args[1:])
         if ref.lstrip('-').isdigit():
-            return int(ref), reason
+            return (int(ref), reason) if valid_id(int(ref)) else (None, '')
         ub = await get_userbot()
         if ub:
             try:
@@ -8786,6 +8801,38 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
                                            parse_mode=ParseMode.HTML)
         except Exception:
             pass
+    await _tell_user_about_error(update)
+
+bad_callbacks: list = []  # testler için: geçersiz veri yüzünden durdurulan buton tıklamaları
+
+def guard_callback(fn):
+    """Buton verisi eski/bozuksa (ayrıştırma hatası) çökme yerine 'buton geçersiz' uyarısı verir."""
+    @functools.wraps(fn)
+    async def wrapper(update, context):
+        try:
+            return await fn(update, context)
+        except (ValueError, IndexError, KeyError, OverflowError) as e:
+            data = getattr(update.callback_query, 'data', '')
+            bad_callbacks.append((fn.__name__, data, repr(e)))
+            logger.warning(f"Geçersiz buton verisi {fn.__name__} {data!r}: {e!r}")
+            try:
+                await update.callback_query.answer("⚠️ Bu buton eskimiş veya geçersiz. Menüyü yeniden aç.", show_alert=True)
+            except TelegramError:
+                pass
+    return wrapper
+
+async def _tell_user_about_error(update) -> None:
+    """Beklenmeyen hatada kullanıcıya kısa ve kibar bir bilgi verir (ham hata metni gösterilmez)."""
+    if not isinstance(update, Update):
+        return
+    text = "⚠️ Bir sorun oluştu, işlem tamamlanamadı. Lütfen tekrar dene."
+    try:
+        if update.callback_query:
+            await update.callback_query.answer(text, show_alert=True)
+        elif update.message and (update.effective_chat.type == 'private' or (update.message.text or '').startswith('/')):
+            await update.message.reply_text(text)
+    except TelegramError:
+        pass
 
 async def chat_member_cache_handler(update: Update, context):
     """Admin atama/alma olduğunda admin önbelleğini temizler."""
@@ -9013,6 +9060,16 @@ def main():
     job_queue.run_daily(run_daily_scheduler, time=dtime(0, 0, tzinfo=TZ_TR))
 
     logger.info("✅ Bot çalışıyor...")
+    # Eski/bozuk buton verisi (ör. önceki sürümden kalan butonlar) çökme yerine kibar uyarı versin
+    for handlers in app.handlers.values():
+        for h in handlers:
+            if isinstance(h, CallbackQueryHandler):
+                h.callback = guard_callback(h.callback)
+    # Düzenlenen komut mesajı komutu tekrar çalıştırmasın (çift ban/uyarı ve update.message=None hataları)
+    for handlers in app.handlers.values():
+        for h in handlers:
+            if isinstance(h, CommandHandler):
+                h.filters = h.filters & ~filters.UpdateType.EDITED
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
