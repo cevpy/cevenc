@@ -5237,8 +5237,8 @@ def _utc3_day_range(d: datetime):
     
     day_start = d.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
-    start_ts = (day_start - timedelta(hours=3)).timestamp()
-    end_ts = (day_end - timedelta(hours=3)).timestamp()
+    start_ts = (day_start - timedelta(hours=3)).replace(tzinfo=timezone.utc).timestamp()
+    end_ts = (day_end - timedelta(hours=3)).replace(tzinfo=timezone.utc).timestamp()
     return start_ts, end_ts
 
 def _get_period_start(period: str) -> float:
@@ -5257,7 +5257,7 @@ def _get_period_range(period: str):
         start3 = now3.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     else:
         return 0.0, time.time() + 1
-    start_utc = (start3 - timedelta(hours=3)).timestamp()
+    start_utc = (start3 - timedelta(hours=3)).replace(tzinfo=timezone.utc).timestamp()  # sunucu saat diliminden bağımsız
     return start_utc, time.time() + 1
 
 def _get_leaderboard(chat_id: str, period: str, limit: int = 15,
@@ -5439,8 +5439,8 @@ async def _auto_announce_weekly(context):
     this_monday3 = this_monday3.replace(hour=0, minute=0, second=0, microsecond=0)
     last_monday3 = this_monday3 - timedelta(days=7)
 
-    since_ts = (last_monday3 - timedelta(hours=3)).timestamp()
-    until_ts = (this_monday3 - timedelta(hours=3)).timestamp()
+    since_ts = (last_monday3 - timedelta(hours=3)).replace(tzinfo=timezone.utc).timestamp()
+    until_ts = (this_monday3 - timedelta(hours=3)).replace(tzinfo=timezone.utc).timestamp()
 
     title = "Grubunuzda Haftalık en çok aktif olan 15 kişi:"
     footer = "📊 Bu Sıralama geçtiğimiz Haftaya aittir."
@@ -8976,12 +8976,10 @@ def main():
     app.add_handler(CommandHandler('yetkim', cmd_yetkim))
     app.add_handler(CallbackQueryHandler(top_callback, pattern=r'^top'))
 
+    # Mesaj sayacı: her yeni mesaj anında veritabanına yazılır (yeniden başlatmada kaybolmaz).
+    # Düzenlemeler ve katıldı/ayrıldı gibi servis mesajları sayılmaz.
     app.add_handler(MessageHandler(
-        filters.ALL & ~filters.COMMAND & filters.ChatType.GROUPS,
-        track_message
-    ), group=99)
-    app.add_handler(MessageHandler(
-        filters.COMMAND & filters.ChatType.GROUPS,
+        filters.UpdateType.MESSAGE & ~filters.StatusUpdate.ALL & filters.ChatType.GROUPS,
         track_message
     ), group=99)
 
