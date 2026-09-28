@@ -598,13 +598,33 @@ def migrate_db():
 
 migrate_db()
 
+def _migrate_installer():
+    """channels.added_by (botu ekleyen kişi) sütunu. Eski kayıtlarda bot sahibi, kurucu eşitlemesiyle yardımcı
+    kurucuya düşürüldüyse (elle verilmemiş yardımcı kurucu) botu ekleyen kişi olarak kurucuya geri alınır."""
+    with get_db() as conn:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(channels)")}
+        if 'added_by' not in cols:
+            conn.execute("ALTER TABLE channels ADD COLUMN added_by INTEGER")
+        if FOUNDER_ID:
+            rows = conn.execute("""
+                SELECT c.chat_id FROM channels c JOIN roles r ON r.chat_id = c.chat_id
+                WHERE c.added_by IS NULL AND r.user_id = ? AND r.role = 'yardimci_kurucu'
+                  AND NOT EXISTS (SELECT 1 FROM bot_given_admins b WHERE b.chat_id = c.chat_id AND b.user_id = ?)
+            """, (FOUNDER_ID, FOUNDER_ID)).fetchall()
+            for r in rows:
+                conn.execute("UPDATE channels SET added_by = ? WHERE chat_id = ?", (FOUNDER_ID, r['chat_id']))
+                conn.execute("UPDATE roles SET role = 'kurucu' WHERE chat_id = ? AND user_id = ?", (r['chat_id'], FOUNDER_ID))
+        conn.commit()
+
+_migrate_installer()
+
 def _drop_implicit_founder_roles():
     """Eski sürüm bot sahibini her gruba 'kurucu' yazıyordu; sahibi olmadığı gruplardaki bu kayıtlar silinir."""
     if not FOUNDER_ID:
         return
     with get_db() as conn:
         conn.execute("DELETE FROM roles WHERE user_id = ? AND role = 'kurucu' AND chat_id NOT IN "
-                     "(SELECT chat_id FROM channels WHERE owner_id = ?)", (FOUNDER_ID, FOUNDER_ID))
+                     "(SELECT chat_id FROM channels WHERE owner_id = ? OR added_by = ?)", (FOUNDER_ID, FOUNDER_ID, FOUNDER_ID))
         conn.commit()
 
 _drop_implicit_founder_roles()
@@ -638,6 +658,7 @@ def _restore_if_empty() -> str | None:
         logger.warning(f"Veritabanı boş açıldı; yedekten geri yüklendi: {name}")
         init_db()
         migrate_db()
+        _migrate_installer()
         return name
     return None
 
@@ -734,9 +755,9 @@ def user_level(chat_id: str, user_id: int) -> int:
         return 0
     with get_db() as conn:
         row = conn.execute("SELECT role FROM roles WHERE chat_id = ? AND user_id = ?", (str(chat_id), user_id)).fetchone()
-        owner = conn.execute("SELECT owner_id FROM channels WHERE chat_id = ?", (str(chat_id),)).fetchone()
-    if owner and owner['owner_id'] == user_id:
-        return LVL_KURUCU
+        owner = conn.execute("SELECT owner_id, added_by FROM channels WHERE chat_id = ?", (str(chat_id),)).fetchone()
+    if owner and user_id in (owner['owner_id'], owner['added_by']):
+        return LVL_KURUCU  # Telegram'daki sahip ve botu ekleyen kişi
     return ROLE_LEVELS.get(row['role'] if row else None, 0)
 
 def has_permission(chat_id: str, user_id: int, min_level: int = 50) -> bool:
@@ -803,14 +824,15 @@ async def sync_creator(chat_id: str, admins) -> None:
         return
     # _db_lock alınmaz: admin listesi kilit tutulurken de istenebilir (asyncio.Lock yeniden girilemez)
     with get_db() as conn:
-        ch = conn.execute("SELECT owner_id FROM channels WHERE chat_id = ?", (chat_id,)).fetchone()
+        ch = conn.execute("SELECT owner_id, added_by FROM channels WHERE chat_id = ?", (chat_id,)).fetchone()
         if not ch:
             return
         row = conn.execute("SELECT role FROM roles WHERE chat_id = ? AND user_id = ?", (chat_id, creator)).fetchone()
         if ch['owner_id'] == creator and row and row['role'] == 'kurucu':
             return
-        conn.execute("UPDATE roles SET role = 'yardimci_kurucu' WHERE chat_id = ? AND role = 'kurucu' AND user_id != ?",
-                     (chat_id, creator))
+        # eski kayıtlı "kurucu" yardımcıya iner; botu ekleyen kişi kurucu kalır
+        conn.execute("UPDATE roles SET role = 'yardimci_kurucu' WHERE chat_id = ? AND role = 'kurucu' "
+                     "AND user_id NOT IN (?, ?)", (chat_id, creator, ch['added_by'] or 0))
         conn.execute("INSERT OR REPLACE INTO roles (chat_id, user_id, role) VALUES (?, ?, 'kurucu')", (chat_id, creator))
         conn.execute("UPDATE channels SET owner_id = ? WHERE chat_id = ?", (creator, chat_id))
         conn.commit()
@@ -838,7 +860,7 @@ def get_channel_settings(chat_id: str) -> dict | None:
         return copy.deepcopy(cached[1]) if cached[1] is not None else None
     with get_db() as conn:
         row = conn.execute(
-            "SELECT owner_id, log_chat_id, chat_type, settings, stats, invites FROM channels WHERE chat_id = ?",
+            "SELECT owner_id, log_chat_id, chat_type, settings, stats, invites, added_by FROM channels WHERE chat_id = ?",
             (chat_id,)
         ).fetchone()
     if not row:
@@ -1052,29 +1074,37 @@ def _default_channel_settings():
         'recovery_ids': [], 'recovery_autorestore': False,
     }
 
-async def _register_chat(chat_id: str, owner_id: int, chat_type: str):
-    
+async def _register_chat(chat_id: str, owner_id: int, chat_type: str, added_by: int | None = -1):
+    """Sohbeti kaydeder. added_by: botu ekleyen kişi (varsayılan owner_id); o da kurucu sayılır."""
+    if added_by == -1:
+        added_by = owner_id
     default_settings = _default_channel_settings()
     default_stats = {'bans': 0, 'kicks': 0, 'spams': 0, 'joins': 0, 'requests': 0, 'mutes': 0}
     async with _db_lock:
         with get_db() as conn:
-            existing = conn.execute("SELECT owner_id FROM channels WHERE chat_id = ?", (chat_id,)).fetchone()
+            existing = conn.execute("SELECT owner_id, added_by FROM channels WHERE chat_id = ?", (chat_id,)).fetchone()
+            if existing and added_by and not existing['added_by']:
+                # kaydı olan sohbete bot yeniden eklendi: ekleyen kişi (bilinmiyorduysa) kurucu olur
+                conn.execute("UPDATE channels SET added_by = ? WHERE chat_id = ?", (added_by, chat_id))
+                conn.execute("INSERT OR REPLACE INTO roles (chat_id, user_id, role) VALUES (?, ?, 'kurucu')", (chat_id, added_by))
+                conn.commit()
+                _invalidate_settings(chat_id)
             if not existing:
                 conn.execute("""
                     INSERT INTO channels
-                    (chat_id, owner_id, log_chat_id, chat_type, settings, stats, invites)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    (chat_id, owner_id, log_chat_id, chat_type, settings, stats, invites, added_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     chat_id, owner_id, None,
                     chat_type,
                     json.dumps(default_settings, ensure_ascii=False),
                     json.dumps(default_stats),
-                    json.dumps({})
+                    json.dumps({}),
+                    added_by or None
                 ))
-                conn.execute(
-                    "INSERT OR IGNORE INTO roles (chat_id, user_id, role) VALUES (?, ?, 'kurucu')",
-                    (chat_id, owner_id)
-                )
+                for uid in {owner_id, added_by} - {0, None}:
+                    conn.execute("INSERT OR REPLACE INTO roles (chat_id, user_id, role) VALUES (?, ?, 'kurucu')",
+                                 (chat_id, uid))
                 conn.commit()
                 _invalidate_settings(chat_id)
                 return True
@@ -8316,6 +8346,8 @@ async def staff(update: Update, context):
             continue
         uid = u.id
         seen.add(uid)
+        if member.status == 'creator' and getattr(member, 'is_anonymous', False) and uid != channel.get('added_by'):
+            continue  # gizli (anonim) kurucu listede gösterilmez
         title = getattr(member, 'custom_title', None)
         entry = mention(u) + (f" » {html.escape(title)}" if title else "")
 
@@ -8344,6 +8376,12 @@ async def staff(update: Update, context):
             grouped[role].append(entry)
         except Exception as e:
             logger.debug(f"staff: {e}")
+
+    if not grouped['kurucu']:
+        # kurucu gizliyse yerine en yetkili kişi kurucu olarak görünür
+        top = next((r for r in role_order[1:] if grouped[r]), None)
+        if top:
+            grouped['kurucu'].append(grouped[top].pop(0))
 
     lines = ["━━━━━━━━━━━━━━━━━━━━", "GRUP PERSONELİ", "━━━━━━━━━━━━━━━━━━━━"]
     total = 0
@@ -8926,7 +8964,7 @@ async def ensure_registered(chat_id: str, chat_type: str | None = None) -> bool:
         logger.debug(f"Otomatik kayıt kontrolü başarısız {chat_id}: {e}")
         return False
     creator = next((a.user.id for a in admins if getattr(a, 'status', None) == 'creator'), 0)
-    await _register_chat(chat_id, creator, chat_type)
+    await _register_chat(chat_id, creator, chat_type, added_by=None)
     _unregistered_checked.pop(chat_id, None)
     logger.info(f"Kaydı olmayan sohbet otomatik kaydedildi: {chat_id} (sahip {creator})")
     return True
