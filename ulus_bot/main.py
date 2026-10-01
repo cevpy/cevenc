@@ -38,6 +38,7 @@ import functools
 import logging
 import os
 import re
+import signal
 
 from dotenv import load_dotenv
 
@@ -68,7 +69,17 @@ TOKEN = os.getenv("BOT_TOKEN", "").strip()
 if not TOKEN:
     raise SystemExit("BOT_TOKEN tanımlı değil! .env dosyasını doldurun.")
 
-FOUNDER_ID = int(os.getenv("FOUNDER_ID", "0") or 0)
+def _env_int(name: str, default: int = 0) -> int:
+    raw = (os.getenv(name, str(default)) or str(default)).strip()
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+FOUNDER_ID_RAW = (os.getenv("FOUNDER_ID", "") or "").strip()
+FOUNDER_ID = _env_int("FOUNDER_ID", 0)
+FOUNDER_ID_VALID = bool(FOUNDER_ID_RAW) and str(FOUNDER_ID) == FOUNDER_ID_RAW and FOUNDER_ID > 0
+
 DB_FILE = _env_path("DB_FILE", "bot_data.db")
 BACKUP_DIR = _env_path("BACKUP_DIR", "backups")
 BACKUP_KEEP = int(os.getenv("BACKUP_KEEP", "7") or 7)
@@ -81,6 +92,21 @@ USERBOT_API_HASH = os.getenv("API_HASH", "").strip()
 USERBOT_SESSION = _env_path("TELETHON_SESSION", "ulus_userbot")
 
 TZ_TR = timezone(timedelta(hours=3))
+MESSAGE_STATS_RETENTION_DAYS = max(1, _env_int("MESSAGE_STATS_RETENTION_DAYS", 30))
+
+# Premium emoji: ENV'den custom ID verilirse HTML parse ile kullanılır, yoksa standart emojiye düşer.
+EMOJI_FALLBACKS = {
+    'success': '✅', 'error': '❌', 'warn': '⚠️', 'ban': '🚫', 'mute': '🔇',
+    'unmute': '🔊', 'unban': '✅', 'info': 'ℹ️', 'clock': '⏰', 'shield': '🛡️'
+}
+EMOJIS = {
+    key: {
+        'id': (os.getenv(f"EMOJI_{key.upper()}_ID", "") or "").strip(),
+        'fallback': fallback,
+    }
+    for key, fallback in EMOJI_FALLBACKS.items()
+}
+
 TELEGRAM_SERVICE_ID = 777000        # Bağlı kanaldan otomatik iletilen gönderiler
 GROUP_ANON_BOT_ID = 1087968824      # Anonim adminler
 CHANNEL_BOT_ID = 136817688          # "Kanal olarak" yazan kullanıcılar
@@ -309,6 +335,14 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_msgstats_chat ON message_stats(chat_id, sent_at);
             CREATE INDEX IF NOT EXISTS idx_msgstats_user ON message_stats(chat_id, user_id, sent_at);
+
+            CREATE INDEX IF NOT EXISTS idx_ban_list_user ON ban_list(user_id, banned_at);
+            CREATE INDEX IF NOT EXISTS idx_ban_list_chat_time ON ban_list(chat_id, banned_at);
+            CREATE INDEX IF NOT EXISTS idx_temp_bans_unban ON temp_bans(unban_at);
+            CREATE INDEX IF NOT EXISTS idx_temp_bans_chat_unban ON temp_bans(chat_id, unban_at);
+            CREATE INDEX IF NOT EXISTS idx_mute_list_until ON mute_list(chat_id, until_date);
+            CREATE INDEX IF NOT EXISTS idx_warnings_chat_user ON warnings(chat_id, user_id);
+            CREATE INDEX IF NOT EXISTS idx_modlog_chat_time ON mod_log(chat_id, timestamp);
 
             CREATE TABLE IF NOT EXISTS bot_given_admins (
                 chat_id TEXT NOT NULL,
@@ -686,7 +720,7 @@ PERMS = {
     'can_mute':            ('🔇 Susturma', LVL_ADMIN),
     'can_kick':            ('👢 Atma (kick)', LVL_ADMIN),
     'can_ban':             ('🔨 Ban / ban kaldırma', LVL_UST),
-    'can_unwarn':          ('↩️ Uyarı silme', LVL_UST),
+    'can_unwarn':          ('↩️ Uyarı geri alma', LVL_UST),
     'can_pin':             ('📌 Sabitleme', LVL_UST),
     'can_purge':           ('🧹 Toplu silme / yavaş mod', LVL_UST),
     'can_requests':        ('📩 Katılım isteği / itiraz', LVL_UST),
@@ -807,11 +841,35 @@ async def deny(update: Update, perm: str | None = None, level: int | None = None
     if update.effective_message:
         await update.effective_message.reply_text(text)
 
-async def require(update: Update, chat_id: str, perm: str) -> bool:
-    if has_specific_permission(chat_id, update.effective_user.id, perm):
+async def _is_real_chat_admin(chat_id: str, user_id: int) -> bool:
+    try:
+        m = await bot.get_chat_member(chat_id, user_id)
+        return m.status in ('administrator', 'creator')
+    except Exception:
+        return False
+
+async def _is_bot_admin(chat_id: str) -> bool:
+    if not BOT_ID:
         return True
-    await deny(update, perm)
-    return False
+    try:
+        me = await bot.get_chat_member(chat_id, BOT_ID)
+        return me.status in ('administrator', 'creator')
+    except Exception:
+        return False
+
+async def require(update: Update, chat_id: str, perm: str) -> bool:
+    user_id = update.effective_user.id if update.effective_user else 0
+    if not has_specific_permission(chat_id, user_id, perm):
+        await deny(update, perm)
+        return False
+    if chat_id and str(chat_id).startswith('-'):
+        if not await _is_real_chat_admin(str(chat_id), user_id):
+            await update.effective_message.reply_text("⛔ Bu komut için grupta gerçekten yönetici olmalısın.")
+            return False
+        if perm in ('can_ban', 'can_mute', 'can_warn', 'can_delete', 'can_manage_settings', 'can_manage_roles') and not await _is_bot_admin(str(chat_id)):
+            await update.effective_message.reply_text("⛔ Bot bu grupta yönetici değil veya yetkileri yetersiz.")
+            return False
+    return True
 
 def tg_rights_for(level: int, off: set = frozenset()) -> dict:
     """Rütbenin Telegram admin hakları (kişiye özel kapatılanlar hariç)."""
@@ -896,8 +954,8 @@ async def send_log(chat_id: str, message: str, parse_mode: str | None = None, re
     log_id = channel.get('log_chat_id') if channel else None
     if log_id:
         try:
-            await bot.send_message(log_id, message, parse_mode=parse_mode, disable_web_page_preview=True,
-                                   reply_markup=reply_markup)
+            await safe_send_message(log_id, message, parse_mode=parse_mode, disable_web_page_preview=True,
+                                    reply_markup=reply_markup)
         except Exception as e:
             logger.debug(f"Log gönderilemedi ({chat_id}): {e}")
 
@@ -918,8 +976,30 @@ def ibtn(text: str, data: str | None = None, style: str | None = None, url: str 
     """Renkli inline buton (Telegram'ın Şubat 2026 sonrası sürümlerinde renkli, eskilerde normal görünür)."""
     return InlineKeyboardButton(text, callback_data=data, url=url, style=style)
 
+def _emoji(name: str, html_mode: bool = False) -> str:
+    e = EMOJIS.get(name, {})
+    fallback = e.get('fallback') or ''
+    eid = (e.get('id') or '').strip()
+    if html_mode and eid:
+        return f'<tg-emoji emoji-id="{html.escape(eid)}">{fallback}</tg-emoji>'
+    return fallback
+
+def _strip_custom_emoji_tags(text: str) -> str:
+    return re.sub(r'<tg-emoji[^>]*>(.*?)</tg-emoji>', r'\1', text or '')
+
+async def safe_send_message(chat_id, text: str, **kwargs):
+    try:
+        return await bot.send_message(chat_id, text, **kwargs)
+    except BadRequest as e:
+        msg = str(e).lower()
+        if 'emoji' in msg or 'entity' in msg:
+            clean = _strip_custom_emoji_tags(text)
+            return await bot.send_message(chat_id, clean, **kwargs)
+        raise
+
 def toggle_btn(label: str, on, data: str) -> InlineKeyboardButton:
-    return ibtn(f"{'✅' if on else '❌'} {label}", data, GREEN if on else RED)
+    icon = _emoji('success') if on else _emoji('error')
+    return ibtn(f"{icon} {label}", data, GREEN if on else RED)
 
 def thread_kw(msg, chat_id=None) -> dict:
     """Konulara (topic) bölünmüş gruplarda bot mesajının aynı konuya gitmesi için send_message parametresi."""
@@ -1239,7 +1319,7 @@ async def log_mod_action(chat_id: str, action: str, target_id: int, target_uname
             conn.commit()
 
 async def apply_punishment(chat_id: str, user_id: int, username: str, reason: str, channel: dict, user=None,
-                           thread: dict | None = None):
+                           thread: dict | None = None, actor_id: int | None = None, actor_username: str = 'bot'):
     """Uyarı verir; limit dolunca ayarlanan cezayı (ban/tempban/kick/mute) uygular.
     Mesajların altına yetkililer için moderasyon butonları eklenir; thread = konu (topic) parametresi."""
     if await is_staff_user(chat_id, user_id, channel):
@@ -1259,6 +1339,7 @@ async def apply_punishment(chat_id: str, user_id: int, username: str, reason: st
             conn.commit()
 
     settings = channel['settings']
+    actor_id = actor_id or BOT_ID
     warn_limit = int(settings.get('warn_limit', 5) or 5)
     who = mention(user) if user else html.escape(f"@{username}" if username else str(user_id))
     reason_h = html.escape(reason)
@@ -1266,12 +1347,13 @@ async def apply_punishment(chat_id: str, user_id: int, username: str, reason: st
     if warn_count < warn_limit:
         markup = mod_markup(chat_id, user_id, 'warn')
         try:
-            await bot.send_message(chat_id, f"⚠️ {who} {reason_h} → <b>{warn_count}/{warn_limit}</b> uyarı",
-                                   parse_mode=ParseMode.HTML, reply_markup=markup, **thread)
+            await safe_send_message(chat_id, f"{_emoji('warn', True)} {who} {reason_h} → <b>{warn_count}/{warn_limit}</b> uyarı",
+                                    parse_mode=ParseMode.HTML, reply_markup=markup, **thread)
         except Exception as e:
             logger.debug(f"Uyarı mesajı gönderilemedi: {e}")
-        await send_log(chat_id, f"⚠️ {who} {reason_h} | Uyarı: {warn_count}/{warn_limit} | {chat_id}", ParseMode.HTML,
+        await send_log(chat_id, f"{_emoji('warn', True)} {who} {reason_h} | Uyarı: {warn_count}/{warn_limit} | {chat_id}", ParseMode.HTML,
                        reply_markup=markup)
+        await log_mod_action(chat_id, 'warn', user_id, username or '', actor_id, actor_username or '', reason)
         return
 
     action = settings.get('warn_action', 'ban')
@@ -1305,7 +1387,7 @@ async def apply_punishment(chat_id: str, user_id: int, username: str, reason: st
                     conn.execute("""
                         INSERT OR REPLACE INTO ban_list (chat_id, user_id, username, reason, banned_at, banned_by)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (chat_id, user_id, username, reason, now, BOT_ID))
+                    """, (chat_id, user_id, username, reason, now, actor_id))
                 if action == 'tempban':
                     conn.execute("INSERT OR REPLACE INTO temp_bans (chat_id, user_id, username, unban_at) VALUES (?, ?, ?, ?)",
                                  (chat_id, user_id, username, int(now + duration)))
@@ -1313,16 +1395,16 @@ async def apply_punishment(chat_id: str, user_id: int, username: str, reason: st
                     conn.execute("""
                         INSERT OR REPLACE INTO mute_list (chat_id, user_id, username, until_date, muted_at, muted_by)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (chat_id, user_id, username, now + duration, now, BOT_ID))
+                    """, (chat_id, user_id, username, now + duration, now, actor_id))
                 conn.commit()
 
         kind = 'mute' if action == 'mute' else (None if action == 'kick' else 'ban')
         markup = mod_markup(chat_id, user_id, kind) if kind else None
         extra = "\n📨 İtiraz için bota özelden /itiraz yazabilir." if action in ('ban', 'tempban') else ""
-        await bot.send_message(chat_id, f"🚫 {who} {warn_limit} uyarıya ulaştı → <b>{label}</b> ({reason_h}){extra}",
-                               parse_mode=ParseMode.HTML, reply_markup=markup, **thread)
+        await safe_send_message(chat_id, f"{_emoji('ban', True)} {who} {warn_limit} uyarıya ulaştı → <b>{label}</b> ({reason_h}){extra}",
+                                parse_mode=ParseMode.HTML, reply_markup=markup, **thread)
         await send_log(chat_id, f"🚫 {who} {label} | Sebep: {reason_h} | {chat_id}", ParseMode.HTML, reply_markup=markup)
-        await log_mod_action(chat_id, label, user_id, username or '', BOT_ID, 'bot', reason)
+        await log_mod_action(chat_id, label, user_id, username or '', actor_id, actor_username or '', reason)
     except Exception as e:
         logger.error(f"Ceza uygulanamadı ({chat_id}/{user_id}): {e}")
 
@@ -1647,6 +1729,12 @@ async def mod_action_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     if not has_specific_permission(cid, clicker.id, MOD_BUTTON_PERMS[act]):
         await deny(update, MOD_BUTTON_PERMS[act])
+        return
+    if not await _is_real_chat_admin(cid, clicker.id):
+        await query.answer("Bu işlem için grupta yönetici olmalısın.", show_alert=True)
+        return
+    if not await _is_bot_admin(cid):
+        await query.answer("Bot bu grupta yönetici değil veya yetkileri yetersiz.", show_alert=True)
         return
     if act in ('mu', 'bn') and await is_staff_user(cid, target, channel):
         await query.answer("Yetkililere uygulanamaz.", show_alert=True)
@@ -3008,22 +3096,22 @@ async def unmute(update: Update, context):
         return
     try:
         await bot.restrict_chat_member(
-            chat_id=chat_id, user_id=user_id,
-            permissions=ChatPermissions(
-                can_send_messages=True,
-                can_send_other_messages=True,
-                can_add_web_page_previews=True, can_invite_users=True,
-            )
+            chat_id=chat_id,
+            user_id=user_id,
+            permissions=await _default_member_permissions(chat_id)
         )
         async with _db_lock:
             with get_db() as conn:
                 conn.execute("DELETE FROM mute_list WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
                 conn.commit()
         who = mention(member.user)
-        await update.message.reply_text(f"🔊 {who} unmute edildi!", parse_mode=ParseMode.HTML)
-        await send_log(chat_id, f"🔊 {who} unmute edildi | {chat_id}", ParseMode.HTML)
+        await update.message.reply_text(f"{_emoji('unmute', True)} {who} unmute edildi!", parse_mode=ParseMode.HTML)
+        await send_log(chat_id, f"{_emoji('unmute', True)} {who} unmute edildi | {chat_id}", ParseMode.HTML)
+        await log_mod_action(chat_id, 'unmute', user_id, member.user.username or member.user.first_name or '',
+                             update.effective_user.id, update.effective_user.username or '', 'manuel unmute')
     except Exception as e:
-        await update.message.reply_text(friendly_error(e))
+        logger.error(f"Unmute hatası ({chat_id}/{user_id}): {e}")
+        await update.message.reply_text(f"Unmute başarısız: {friendly_error(e)}")
 
 async def warn(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -3050,43 +3138,19 @@ async def warn(update: Update, context):
         reason = ' '.join(context.args[1:]) if len(context.args) > 1 else "Sebep belirtilmedi"
 
     username = member.user.username or member.user.first_name
-    who = mention(member.user)
-    reason_h = html.escape(reason)
     channel = get_channel_settings(chat_id)
 
-    async with _db_lock:
-        with get_db() as conn:
-            row = conn.execute(
-                "SELECT warn_count FROM warnings WHERE chat_id = ? AND user_id = ?",
-                (chat_id, user_id)
-            ).fetchone()
-            warn_count = (row['warn_count'] if row else 0) + 1
-            conn.execute("""
-                INSERT OR REPLACE INTO warnings (chat_id, user_id, warn_count, last_warn_at)
-                VALUES (?, ?, ?, ?)
-            """, (chat_id, user_id, warn_count, time.time()))
-            conn.commit()
-
-    warn_limit = channel['settings'].get('warn_limit', 5)
-    if warn_count >= warn_limit:
-        try:
-            await bot.ban_chat_member(chat_id, user_id)
-            channel['stats']['bans'] = channel['stats'].get('bans', 0) + 1
-            save_channel_settings(chat_id, channel)
-            async with _db_lock:
-                with get_db() as conn:
-                    conn.execute("DELETE FROM warnings WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
-                    conn.commit()
-            await update.message.reply_text(f"🚫 {who} {warn_limit} uyarıya ulaştı → banlandı!\nSebep: {reason_h}",
-                                            parse_mode=ParseMode.HTML, reply_markup=mod_markup(chat_id, user_id, 'ban'))
-            await send_log(chat_id, f"🚫 {who} {warn_limit} uyarı → ban | Sebep: {reason_h} | {chat_id}", ParseMode.HTML)
-        except Exception as e:
-            await update.message.reply_text(friendly_error(e))
-    else:
-        await update.message.reply_text(f"⚠️ {who} uyarıldı! Sebep: {reason_h} | Uyarı: {warn_count}/{warn_limit}",
-                                        parse_mode=ParseMode.HTML, reply_markup=mod_markup(chat_id, user_id, 'warn'))
-        await send_log(chat_id, f"⚠️ {who} uyarıldı ({warn_count}/{warn_limit}) | Sebep: {reason_h} | {chat_id}", ParseMode.HTML)
-        await log_mod_action(chat_id, 'warn', user_id, username, update.effective_user.id, update.effective_user.username or '', reason)
+    await apply_punishment(
+        chat_id,
+        user_id,
+        username,
+        reason,
+        channel,
+        user=member.user,
+        thread=thread_kw(update.effective_message, chat_id),
+        actor_id=update.effective_user.id,
+        actor_username=update.effective_user.username or update.effective_user.first_name or 'yetkili'
+    )
 
 async def unwarn(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -3108,11 +3172,20 @@ async def unwarn(update: Update, context):
         return
     async with _db_lock:
         with get_db() as conn:
-            conn.execute("DELETE FROM warnings WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
+            row = conn.execute("SELECT warn_count FROM warnings WHERE chat_id = ? AND user_id = ?", (chat_id, user_id)).fetchone()
+            current = row['warn_count'] if row else 0
+            new_count = max(0, current - 1)
+            if new_count > 0:
+                conn.execute("UPDATE warnings SET warn_count = ?, last_warn_at = ? WHERE chat_id = ? AND user_id = ?",
+                             (new_count, time.time(), chat_id, user_id))
+            else:
+                conn.execute("DELETE FROM warnings WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
             conn.commit()
     who = mention(member.user)
-    await update.message.reply_text(f"✅ {who} uyarıları temizlendi!", parse_mode=ParseMode.HTML)
-    await send_log(chat_id, f"🧹 {who} uyarıları temizlendi | {chat_id}", ParseMode.HTML)
+    await update.message.reply_text(f"{_emoji('success', True)} {who} uyarısı geri alındı ({new_count}/{get_channel_settings(chat_id)['settings'].get('warn_limit', 5)}).", parse_mode=ParseMode.HTML)
+    await send_log(chat_id, f"↩️ {who} uyarı geri alındı ({new_count}) | {chat_id}", ParseMode.HTML)
+    await log_mod_action(chat_id, 'unwarn', user_id, member.user.username or member.user.first_name or '',
+                         update.effective_user.id, update.effective_user.username or '', f"kalan:{new_count}")
 
 async def warns(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -3827,7 +3900,7 @@ async def profil(update: Update, context):
         ).fetchall()
 
     warn_count = warn_row['warn_count'] if warn_row else 0
-    last_warn = datetime.fromtimestamp(warn_row['last_warn_at']).strftime('%d.%m.%Y') if warn_row and warn_row['last_warn_at'] else "-"
+    last_warn = datetime.fromtimestamp(warn_row['last_warn_at'], TZ_TR).strftime('%d.%m.%Y %H:%M') if warn_row and warn_row['last_warn_at'] else "-"
 
     durum = "Normal"
     if ban_row:
@@ -4263,7 +4336,6 @@ async def check_expired_mutes(context: ContextTypes.DEFAULT_TYPE):
             conn.commit()
 
 async def check_temp_bans(context: ContextTypes.DEFAULT_TYPE):
-    
     now = time.time()
     with get_db() as conn:
         rows = conn.execute(
@@ -4274,24 +4346,29 @@ async def check_temp_bans(context: ContextTypes.DEFAULT_TYPE):
     if not rows:
         return
 
-    async with _db_lock:
-        with get_db() as conn:
-            for row in rows:
-                conn.execute(
-                    "DELETE FROM temp_bans WHERE chat_id = ? AND user_id = ?",
-                    (row['chat_id'], row['user_id'])
-                )
-                conn.execute(
-                    "DELETE FROM ban_list WHERE chat_id = ? AND user_id = ?",
-                    (row['chat_id'], row['user_id'])
-                )
-            conn.commit()
-
+    success = 0
     for row in rows:
-        who = mention_html(row['user_id'], row['username'] or str(row['user_id']))
-        await send_log(row['chat_id'], f"⏰ Geçici ban sona erdi → {who} unban edildi", ParseMode.HTML)
+        chat_id = row['chat_id']
+        user_id = row['user_id']
+        try:
+            await context.bot.unban_chat_member(chat_id=chat_id, user_id=user_id, only_if_banned=True)
+        except Exception as e:
+            logger.error(f"[TEMP BAN] Unban başarısız ({chat_id}/{user_id}): {e}")
+            await send_log(chat_id, f"{_emoji('error', True)} Geçici ban süresi doldu ama unban başarısız oldu: <code>{user_id}</code>", ParseMode.HTML)
+            continue
 
-    logger.info(f"[TEMP BAN] {len(rows)} geçici ban temizlendi.")
+        async with _db_lock:
+            with get_db() as conn:
+                conn.execute("DELETE FROM temp_bans WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
+                conn.execute("DELETE FROM ban_list WHERE chat_id = ? AND user_id = ?", (chat_id, user_id))
+                conn.commit()
+
+        success += 1
+        who = mention_html(user_id, row['username'] or str(user_id))
+        await send_log(chat_id, f"{_emoji('clock', True)} Geçici ban sona erdi → {who} unban edildi", ParseMode.HTML)
+
+    if success:
+        logger.info(f"[TEMP BAN] {success}/{len(rows)} geçici ban Telegram üzerinde başarıyla kaldırıldı.")
 
 # ═══════════════════════════ BUTONLU AYAR PANELİ ═══════════════════════════
 # Callback biçimi: s|<chat_id>|<işlem>|<argümanlar...>
@@ -4733,6 +4810,12 @@ async def settings_panel_callback(update: Update, context: ContextTypes.DEFAULT_
     uid = query.from_user.id
     if not has_permission(cid, uid, 50):
         await query.answer("Yetkin yok!", show_alert=True)
+        return
+    if not await _is_real_chat_admin(cid, uid):
+        await query.answer("Bu paneli kullanmak için grupta yönetici olmalısın.", show_alert=True)
+        return
+    if op != 'p' and not await _is_bot_admin(cid):
+        await query.answer("Bot bu grupta yönetici değil veya yetkileri yetersiz.", show_alert=True)
         return
     if op == 'x':
         await query.answer()
@@ -5231,7 +5314,10 @@ async def track_invite(update: Update, context):
     channel = get_channel_settings(chat_id)
     if not channel:
         return
-    inviter_id = update.message.from_user.id
+    inviter = update.message.from_user
+    if not inviter:
+        return
+    inviter_id = inviter.id
     is_staff = inviter_id == channel['owner'] or has_permission(chat_id, inviter_id, 50)
     if is_staff:
         invites = channel.get('invites', {})
@@ -7501,7 +7587,7 @@ async def help_command(update: Update, context):
         "/yetkim — Rütben ve yetkilerin\n\n"
         "⭐ Üst Admin ve üstü\n"
         "/ban @kullanici [sure] [sebep] · /unban — Ban\n"
-        "/unwarn @kullanici — Uyari sil\n"
+        "/unwarn @kullanici — 1 uyari geri al\n"
         "/temizle <sayi/all> · /slowmode <sn> — Toplu silme, yavas mod\n"
         "/pin · /unpin — Sabitleme\n"
         "/kilit [dk] · /medyakilit [dk] — Acil durum kilidi\n"
@@ -7606,7 +7692,7 @@ GROUP_USER_COMMANDS = [
     ("report", "Yanıtladığın mesajı yetkililere bildir"),
 ]
 GROUP_ADMIN_COMMANDS = [
-    ("settings", "Butonlu ayar paneli"), ("warn", "Uyarı ver"), ("unwarn", "Uyarıları sil"), ("warns", "Uyarıları gör"),
+    ("settings", "Butonlu ayar paneli"), ("warn", "Uyarı ver"), ("unwarn", "1 uyarı geri al"), ("warns", "Uyarıları gör"),
     ("mute", "Sustur"), ("unmute", "Susturmayı kaldır"), ("ban", "Banla"), ("unban", "Banı kaldır"),
     ("kick", "Gruptan at"), ("temizle", "Mesajları toplu sil"), ("pin", "Mesajı sabitle"), ("unpin", "Sabitlemeyi kaldır"),
     ("slowmode", "Yavaş mod"), ("banlist", "Ban listesi"), ("mutelist", "Mute listesi"), ("save", "Not kaydet"),
@@ -8843,9 +8929,43 @@ async def cmd_yedek(update: Update, context):
     await update.effective_message.reply_text("🗄 Yedek alınıyor...")
     await backup_job(context)
 
+def _cleanup_in_memory_caches(now: float) -> None:
+    # Süresiz büyüyebilen sözlükler için yaş temelli temizlik
+    for dct, ttl in ((_settings_cache, SETTINGS_CACHE_TTL * 5), (_tg_admin_cache, TG_ADMIN_CACHE_TTL * 5), (_title_cache, 3600)):
+        for k, v in list(dct.items()):
+            ts = v[0] if isinstance(v, tuple) and v else 0
+            if ts and now - ts > ttl:
+                dct.pop(k, None)
+
+    for dct, ttl in ((_report_last, 6 * 3600), (_unregistered_checked, 2 * 3600), (_demotion_alerted, 3600)):
+        for k, ts in list(dct.items()):
+            if isinstance(ts, (int, float)) and now - ts > ttl:
+                dct.pop(k, None)
+
+    for dct, ttl in ((_media_attack, 600), (_channel_media_hits, 1200), (_flood_data, 600)):
+        for k, vals in list(dct.items()):
+            if not isinstance(vals, list):
+                continue
+            fresh = [x for x in vals if isinstance(x, (int, float)) and now - x < ttl]
+            if fresh:
+                dct[k] = fresh
+            else:
+                dct.pop(k, None)
+
+    for k, vals in list(_demotions.items()):
+        if not isinstance(vals, list):
+            _demotions.pop(k, None)
+            continue
+        fresh = [(t, u) for t, u in vals if isinstance(t, (int, float)) and now - t < 1200]
+        if fresh:
+            _demotions[k] = fresh
+        else:
+            _demotions.pop(k, None)
+
 # ── Periyodik temizlik ──
 async def db_cleanup_job(context: ContextTypes.DEFAULT_TYPE):
     now = time.time()
+    msg_stats_cutoff = now - (MESSAGE_STATS_RETENTION_DAYS * 86400)
     async with _db_lock:
         with get_db() as conn:
             conn.execute("DELETE FROM flood_history WHERE timestamp < ?", (now - 86400,))
@@ -8857,7 +8977,9 @@ async def db_cleanup_job(context: ContextTypes.DEFAULT_TYPE):
             conn.execute("DELETE FROM appeals WHERE created_at < ? AND status != 'pending'", (now - 90 * 86400,))
             conn.execute("DELETE FROM msg_cache WHERE sent_at < ?", (now - 2 * 86400,))
             conn.execute("DELETE FROM reports WHERE created_at < ?", (now - 30 * 86400,))
+            conn.execute("DELETE FROM message_stats WHERE sent_at < ?", (msg_stats_cutoff,))
             conn.commit()
+    _cleanup_in_memory_caches(now)
 
 # ── Genel hata yakalayıcı ──
 _last_error_notify = 0.0
@@ -9001,6 +9123,14 @@ async def checkpoint_job(context):
 
 async def post_shutdown(application):
     await checkpoint_job(None)
+    global userbot
+    if userbot:
+        try:
+            await userbot.disconnect()
+        except Exception as e:
+            logger.debug(f"Telethon kapanış hatası: {e}")
+        userbot = None
+    logger.info("ULUS botu düzgün şekilde kapatıldı.")
 
 async def post_init(application):
     global BOT_ID, userbot
@@ -9022,6 +9152,10 @@ async def post_init(application):
 
 def main():
     global bot
+    if not FOUNDER_ID_VALID:
+        logger.error("FOUNDER_ID ayarı geçersiz veya boş. Lütfen .env dosyasına sayısal bir FOUNDER_ID yazın.")
+        raise SystemExit("FOUNDER_ID ayarı zorunlu ve geçerli olmalıdır.")
+
     app = (
         Application.builder()
         .token(TOKEN)
@@ -9234,6 +9368,20 @@ def main():
         for h in handlers:
             if isinstance(h, CommandHandler):
                 h.filters = h.filters & ~filters.UpdateType.EDITED
+    def _signal_handler(signum, _frame):
+        sig_name = signal.Signals(signum).name if signum else str(signum)
+        logger.info(f"Kapatma sinyali alındı: {sig_name}. Bot güvenli şekilde durduruluyor...")
+        try:
+            app.stop_running()
+        except Exception as e:
+            logger.debug(f"stop_running hatası: {e}")
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, _signal_handler)
+        except Exception as e:
+            logger.debug(f"Signal handler atanamadı ({sig}): {e}")
+
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
