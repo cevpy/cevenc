@@ -666,7 +666,12 @@ def init_db():
                 first_name TEXT,
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at REAL NOT NULL,
-                decided_at REAL
+                decided_at REAL,
+                bot_id INTEGER,
+                token TEXT,
+                bot_username TEXT,
+                bot_name TEXT,
+                admin_msg_id INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS clone_bans (
@@ -832,6 +837,11 @@ def _migrate_installer():
             conn.execute("ALTER TABLE channels ADD COLUMN added_by INTEGER")
         if 'bot_id' not in cols:  # sohbeti yöneten bot (NULL = ana bot)
             conn.execute("ALTER TABLE channels ADD COLUMN bot_id INTEGER")
+        rcols = {r[1] for r in conn.execute("PRAGMA table_info(clone_requests)")}
+        for col, typedef in (('bot_id', 'INTEGER'), ('token', 'TEXT'), ('bot_username', 'TEXT'), ('bot_name', 'TEXT'),
+                             ('admin_msg_id', 'INTEGER')):
+            if col not in rcols:  # eski sürüm: istek = sadece izin; yeni: istek = token ile açılacak bot
+                conn.execute(f"ALTER TABLE clone_requests ADD COLUMN {col} {typedef}")
         if FOUNDER_ID:
             rows = conn.execute("""
                 SELECT c.chat_id FROM channels c JOIN roles r ON r.chat_id = c.chat_id
@@ -7851,7 +7861,8 @@ async def help_command(update: Update, context):
         "/admin (/addadmin) · /basadmin @kullanici [etiket] — Rütbe ver\n"
         "/remove @kullanici — Rütbeyi al\n"
         "/yetkiler — Kişiye özel yetki paneli (bota özelden)\n"
-        "/uyeetiketi @kullanici <etiket> — Admin etiketi\n\n"
+        "/uyeetiketi @kullanici <etiket> — Admin etiketi\n"
+        "/reload — Admin listesini Telegram'dan yenile (elle/başka botla verilen yetkiler)\n\n"
         "👑 Sadece Kurucu\n"
         "/yardimcikurucu @kullanici — Yardimci kurucu yap\n"
         "/setlog — Log kanali · Grup agi · Yedek admin kurtarma\n\n"
@@ -7946,7 +7957,7 @@ GROUP_USER_COMMANDS = [
     ("report", "Yanıtladığın mesajı yetkililere bildir"),
 ]
 GROUP_ADMIN_COMMANDS = [
-    ("settings", "Butonlu ayar paneli"), ("warn", "Uyarı ver"), ("unwarn", "1 uyarı geri al"), ("warns", "Uyarıları gör"),
+    ("settings", "Butonlu ayar paneli"), ("reload", "Admin listesini yenile"), ("warn", "Uyarı ver"), ("unwarn", "1 uyarı geri al"), ("warns", "Uyarıları gör"),
     ("mute", "Sustur"), ("unmute", "Susturmayı kaldır"), ("ban", "Banla"), ("unban", "Banı kaldır"),
     ("kick", "Gruptan at"), ("temizle", "Mesajları toplu sil"), ("pin", "Mesajı sabitle"), ("unpin", "Sabitlemeyi kaldır"),
     ("slowmode", "Yavaş mod"), ("banlist", "Ban listesi"), ("mutelist", "Mute listesi"), ("save", "Not kaydet"),
@@ -9583,8 +9594,8 @@ async def filter_reply_handler(update: Update, context):
         logger.debug(f"Filtre yanıtı gönderilemedi {chat_id}: {e}")
 
 # ═══════════════════════════ KLON BOT ═══════════════════════════
-# Akış: kullanıcı ana botta 🤖 Klon → "İzin iste" → bot sahibine bilgileriyle Onayla/Reddet gelir → onaylanınca kullanıcı
-# BotFather token'ını gönderir → klon aynı altyapıyla hemen çalışır. Klon sahibi marka adı, karşılama metni, destek
+# Akış: kullanıcı ana botta 🤖 Klon → BotFather token'ını gönderir → bot sahibine isteyen kişi, token ve bot ismi
+# Onayla/Reddet ile gelir → onaylanırsa klon aynı altyapıyla açılır, reddedilirse açılmaz. Klon sahibi marka adı, karşılama metni, destek
 # linki ve yardım başlığını değiştirebilir; kendi botunda /duyuru, /gban, /panel kullanır.
 CLONE_TOKEN_RE = re.compile(r'^\d{6,12}:[A-Za-z0-9_-]{30,50}$')
 CLONE_LIMIT_PER_USER = 1
@@ -9605,14 +9616,34 @@ def user_clones(user_id: int) -> list:
         return [dict(r) for r in conn.execute(
             "SELECT * FROM clones WHERE owner_id = ? AND status != 'deleted' ORDER BY created_at", (user_id,))]
 
-def clone_permission(user_id: int) -> str | None:
-    """'approved' / 'pending' / 'rejected' / None"""
-    if user_id == FOUNDER_ID:
-        return 'approved'
+def pending_request(user_id: int) -> dict | None:
+    """Kullanıcının bot sahibinin onayını bekleyen klon isteği."""
     with get_db() as conn:
-        r = conn.execute("SELECT status FROM clone_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-                         (user_id,)).fetchone()
-    return r['status'] if r else None
+        r = conn.execute("SELECT * FROM clone_requests WHERE user_id = ? AND status = 'pending' AND token IS NOT NULL "
+                         "ORDER BY created_at DESC LIMIT 1", (user_id,)).fetchone()
+    return dict(r) if r else None
+
+def _mask_token(token: str | None) -> str:
+    return f"{(token or '').split(':')[0]}:••••••" if token else "-"
+
+def _clone_req_text(r: dict, decided: str = '') -> str:
+    """Bot sahibine giden onay mesajı. Karar verilince token gizlenir."""
+    who = f"@{html.escape(r['username'])}" if r.get('username') else html.escape(r.get('first_name') or 'Kullanıcı')
+    tok = _mask_token(r.get('token')) if decided else (r.get('token') or '-')
+    text = (f"🤖 <b>Klon bot onayı</b> #{r['id']}\n\n"
+            f"👤 Botu açmak isteyen kişi: {who} — ID: <code>{r['user_id']}</code>\n"
+            f"🔑 Bot token: <code>{html.escape(tok)}</code>\n"
+            f"🏷 Bot ismi: {html.escape(r.get('bot_name') or '-')} (@{html.escape(r.get('bot_username') or '?')})")
+    return text + (f"\n\n— {decided}" if decided else "")
+
+async def _edit_req_msg(r: dict, decided: str):
+    if not r.get('admin_msg_id'):
+        return
+    try:
+        await (MAIN_BOT or bot).edit_message_text(_clone_req_text(r, decided), chat_id=FOUNDER_ID,
+                                                  message_id=r['admin_msg_id'], parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logger.debug(f"Klon isteği mesajı güncellenemedi: {e}")
 
 async def _main_send(chat_id, text, **kw):
     """Ana bottan mesaj (klon bildirimleri, bot sahibine istekler). Gönderilemezse sessizce geçer."""
@@ -9719,21 +9750,16 @@ async def clone_health_job(context):
             pass
 
 def _clone_menu(user_id: int):
-    perm = clone_permission(user_id)
     mine = user_clones(user_id)
+    pend = pending_request(user_id)
     rows = []
-    if perm != 'approved':
-        state = {'pending': "⏳ İsteğin bot sahibinde, onay bekleniyor.", 'rejected': "❌ Önceki isteğin reddedildi."}.get(perm, "")
-        text = ("🤖 <b>Klon bot</b>\n\nKendi bot adınla, ULUS altyapısını kullanan bir koruma botu aç.\n"
-                "1) İzin iste → bot sahibi onaylar\n2) @BotFather'dan /newbot ile bot oluştur, token'ı buraya gönder\n"
-                "3) Botun hemen çalışmaya başlar\n\n" + state)
-        if perm != 'pending':
-            rows.append([ibtn("📨 İzin iste", "cl|req", GREEN)])
-        return text, InlineKeyboardMarkup(rows) if rows else None
+    wait = (f"\n\n⏳ <b>@{html.escape(pend.get('bot_username') or '?')}</b> bot sahibinin onayını bekliyor. "
+            "Onaylanınca açılacak.") if pend else ""
     if not mine:
-        text = ("🤖 <b>Klon bot</b>\n\n✅ Klon açma iznin var.\n@BotFather'da /newbot ile botunu oluştur ve aldığın "
-                "<b>token</b>'ı aşağıdaki butona basıp gönder.")
-        rows.append([ibtn("🔑 Token gönder", "cl|tok", GREEN)])
+        text = ("🤖 <b>Klon bot</b>\n\nKendi bot adınla, ULUS altyapısını kullanan bir koruma botu aç.\n"
+                "1) @BotFather'da /newbot ile bot oluştur\n2) Aldığın token'ı aşağıdaki butonla gönder\n"
+                "3) Bot sahibi onaylayınca botun çalışmaya başlar" + wait)
+        rows.append([ibtn("↩️ İsteği geri çek", "cl|cancel", RED)] if pend else [ibtn("🔑 Token gönder", "cl|tok", GREEN)])
         return text, InlineKeyboardMarkup(rows)
     c = mine[0]
     st = {'active': "🟢 Çalışıyor", 'stopped': "⏸ Durduruldu", 'invalid': "⚠️ Token geçersiz"}.get(c['status'], c['status'])
@@ -9743,12 +9769,12 @@ def _clone_menu(user_id: int):
             f"🏷 Marka: <b>{html.escape(c.get('brand') or c.get('name') or '-')}</b>\n"
             f"🔗 Destek: {html.escape(c.get('support_link') or '-')}\n"
             f"❓ Yardım başlığı: {html.escape(c.get('help_title') or '-')}\n"
-            f"👋 Karşılama: {html.escape((c.get('start_text') or 'varsayılan')[:80])}")
+            f"👋 Karşılama: {html.escape((c.get('start_text') or 'varsayılan')[:80])}" + wait)
     b = c['bot_id']
     rows = [[ibtn(CLONE_FIELDS[f][0], f"cl|ed|{b}|{f}", BLUE) for f in ('brand', 'start_text')],
             [ibtn(CLONE_FIELDS[f][0], f"cl|ed|{b}|{f}", BLUE) for f in ('support_link', 'help_title')],
             [ibtn("⏸ Durdur", f"cl|stop|{b}", RED) if c['status'] == 'active' else ibtn("▶️ Başlat", f"cl|go|{b}", GREEN),
-             ibtn("🔑 Token değiştir", "cl|tok", BLUE)],
+             ibtn("↩️ İsteği geri çek", "cl|cancel", RED) if pend else ibtn("🔑 Token değiştir", "cl|tok", BLUE)],
             [ibtn("🗑 Klonu sil", f"cl|del|{b}", RED)]]
     return text, InlineKeyboardMarkup(rows)
 
@@ -9760,22 +9786,48 @@ async def cmd_klon(update: Update, context):
     text, markup = _clone_menu(update.effective_user.id)
     await update.effective_message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
 
-async def _clone_request(query, user):
-    async with _db_lock:
+async def _decide_clone_request(query, rid: int, approve: bool):
+    """Bot sahibi Onayla/Reddet'e bastı. Onay → klon açılır; red → açılmaz, token silinir."""
+    with get_db() as conn:
+        r = conn.execute("SELECT * FROM clone_requests WHERE id = ?", (rid,)).fetchone()
+    r = dict(r) if r else None
+    if not r or r['status'] != 'pending':
+        await query.answer("Bu istek zaten işlendi.", show_alert=True)
+        return
+    if not r.get('token'):  # eski sürümden kalan izin isteği
         with get_db() as conn:
-            rid = conn.execute("INSERT INTO clone_requests (user_id, username, first_name, status, created_at) "
-                               "VALUES (?, ?, ?, 'pending', ?)", (user.id, user.username, user.first_name, time.time())).lastrowid
-            groups = conn.execute("SELECT COUNT(DISTINCT chat_id) FROM roles WHERE user_id = ?", (user.id,)).fetchone()[0]
+            conn.execute("UPDATE clone_requests SET status = 'cancelled', decided_at = ? WHERE id = ?", (time.time(), rid))
             conn.commit()
-    text = (f"📨 <b>Klon izin isteği</b> #{rid}\n\n👤 {mention(user)}\n🆔 <code>{user.id}</code>\n"
-            f"🔗 Kullanıcı adı: {('@' + html.escape(user.username)) if user.username else '-'}\n"
-            f"🌐 Dil: {html.escape(getattr(user, 'language_code', None) or '-')} · Premium: {'evet' if getattr(user, 'is_premium', False) else 'hayır'}\n"
-            f"🛡 Botta yetkili olduğu grup: {groups}")
-    try:
-        await _main_send(FOUNDER_ID, text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(
-            [[ibtn("✅ Onayla", f"cl|ok|{rid}", GREEN), ibtn("❌ Reddet", f"cl|no|{rid}", RED)]]))
-    except TelegramError as e:
-        logger.warning(f"Klon isteği bot sahibine gönderilemedi: {e}")
+        await query.answer("Eski sürümden kalan istek; kullanıcı /klon ile token göndermeli.", show_alert=True)
+        await _main_send(r['user_id'], "🤖 Klon sistemi yenilendi: /klon yazıp bot token'ını gönder, bot sahibi onaylayınca botun açılır.")
+        return
+    if approve:
+        err, me_username = await _activate_clone(r['user_id'], r['token'], r['bot_id'])
+        if err:
+            with get_db() as conn:
+                conn.execute("UPDATE clone_requests SET status = 'failed', token = NULL, decided_at = ? WHERE id = ?",
+                             (time.time(), rid))
+                conn.commit()
+            await query.answer(f"Açılamadı: {err}"[:190], show_alert=True)
+            await _edit_req_msg(r, f"⚠️ Açılamadı: {html.escape(err)}")
+            await _main_send(r['user_id'], f"⚠️ Klon botun açılamadı: {html.escape(err)}\n/klon ile yeni token gönderebilirsin.",
+                             parse_mode=ParseMode.HTML)
+            return
+        status, decided = 'approved', "✅ Onaylandı, bot açıldı"
+    else:
+        status, decided = 'rejected', "❌ Reddedildi"
+    with get_db() as conn:
+        conn.execute("UPDATE clone_requests SET status = ?, token = NULL, decided_at = ? WHERE id = ?", (status, time.time(), rid))
+        conn.commit()
+    await query.answer(decided)
+    await _edit_req_msg(r, decided)
+    if approve:
+        await _main_send(r['user_id'],
+            f"✅ <b>Klon botun onaylandı ve açıldı!</b> @{html.escape(me_username)}\n\n"
+            f"Gruba eklemek için: https://t.me/{me_username}?startgroup=ulus&admin={ADMIN_RIGHTS_GROUP}\n"
+            "Ad, karşılama metni ve destek linki için: /klon", parse_mode=ParseMode.HTML)
+    else:
+        await _main_send(r['user_id'], f"❌ @{r.get('bot_username') or '?'} için klon bot isteğin reddedildi.")
 
 async def clone_callback(update: Update, context):
     """cl|... — klon menüsü ve bot sahibinin onay/yönetim butonları."""
@@ -9783,40 +9835,32 @@ async def clone_callback(update: Update, context):
     parts = query.data.split('|')
     op = parts[1]
     uid = query.from_user.id
-    if op == 'req':
-        if clone_permission(uid) in ('pending', 'approved'):
-            await query.answer("İsteğin zaten var.", show_alert=True)
-            return
-        await _clone_request(query, query.from_user)
-        await query.answer("📨 İstek gönderildi")
+    if op == 'req':  # eski sürümün "izin iste" butonu
+        await query.answer("Artık izin istemene gerek yok: token'ı gönder, bot sahibi onaylayınca botun açılır.", show_alert=True)
     elif op in ('ok', 'no'):
         if uid != FOUNDER_ID:
             await query.answer("Bu işlemi sadece bot sahibi yapabilir.", show_alert=True)
             return
-        rid = int(parts[2])
-        with get_db() as conn:
-            r = conn.execute("SELECT * FROM clone_requests WHERE id = ?", (rid,)).fetchone()
-        if not r or r['status'] != 'pending':
-            await query.answer("Bu istek zaten işlendi.", show_alert=True)
-            return
-        status = 'approved' if op == 'ok' else 'rejected'
-        with get_db() as conn:
-            conn.execute("UPDATE clone_requests SET status = ?, decided_at = ? WHERE id = ?", (status, time.time(), rid))
-            conn.commit()
-        await query.answer("Onaylandı" if op == 'ok' else "Reddedildi")
-        await query.edit_message_text(f"{query.message.text_html}\n\n— {'✅ Onaylandı' if op == 'ok' else '❌ Reddedildi'}",
-                                      parse_mode=ParseMode.HTML)
-        try:
-            await _main_send(r['user_id'],
-                "✅ Klon bot iznin onaylandı! /klon yazıp token'ını gönderebilirsin." if op == 'ok'
-                else "❌ Klon bot isteğin reddedildi.")
-        except TelegramError as e:
-            logger.debug(f"Klon kararı bildirilemedi: {e}")
+        await _decide_clone_request(query, int(parts[2]), op == 'ok')
+        if query.message and query.message.chat.id == uid and len(parts) > 3:  # /klonlar listesinden basıldıysa
+            text, markup = _clones_admin_view()
+            try:
+                await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+            except BadRequest:
+                pass
         return
+    elif op == 'cancel':
+        pend = pending_request(uid)
+        if not pend:
+            await query.answer("Bekleyen isteğin yok.", show_alert=True)
+        else:
+            with get_db() as conn:
+                conn.execute("UPDATE clone_requests SET status = 'cancelled', token = NULL, decided_at = ? WHERE id = ?",
+                             (time.time(), pend['id']))
+                conn.commit()
+            await _edit_req_msg(pend, "↩️ Kullanıcı isteği geri çekti")
+            await query.answer("↩️ İstek geri çekildi")
     elif op == 'tok':
-        if clone_permission(uid) != 'approved':
-            await query.answer("Önce izin almalısın.", show_alert=True)
-            return
         context.user_data['await_clone'] = {'field': 'token', 'expires': time.time() + 600}
         await query.answer()
         await query.message.reply_text("🔑 @BotFather'dan aldığın bot token'ını yaz (ör. <code>123456789:ABC...</code>).\n"
@@ -9843,6 +9887,9 @@ async def clone_callback(update: Update, context):
             await stop_clone(bid)
             await query.answer("⏸ Durduruldu")
         elif op == 'go':
+            if row['status'] == 'deleted' or not row['token']:
+                await query.answer("Bu klon silinmiş.", show_alert=True)
+                return
             err = await start_clone(row)
             if err:
                 await query.answer(err[:190], show_alert=True)
@@ -9862,10 +9909,7 @@ async def clone_callback(update: Update, context):
                 conn.commit()
             await query.answer("🗑 Silindi")
             if uid != row['owner_id']:
-                try:
-                    await _main_send(row['owner_id'], f"🗑 Klon botun @{row.get('username')} bot sahibi tarafından silindi.")
-                except TelegramError:
-                    pass
+                await _main_send(row['owner_id'], f"🗑 Klon botun @{row.get('username')} bot sahibi tarafından silindi.")
         else:
             await query.answer()
         if uid == FOUNDER_ID and uid != row['owner_id']:
@@ -9904,7 +9948,7 @@ async def clone_input_handler(update: Update, context):
             await msg.delete()  # token sohbette açık kalmasın
         except TelegramError:
             pass
-        reply = await _register_clone_token(uid, text)
+        reply = await _submit_clone_token(update.effective_user, text)
         await context.bot.send_message(uid, reply, parse_mode=ParseMode.HTML)
         t, mk = _clone_menu(uid)
         await context.bot.send_message(uid, t, reply_markup=mk, parse_mode=ParseMode.HTML)
@@ -9930,9 +9974,9 @@ async def clone_input_handler(update: Update, context):
     await msg.reply_text(t, reply_markup=mk, parse_mode=ParseMode.HTML)
     raise ApplicationHandlerStop
 
-async def _register_clone_token(uid: int, token: str) -> str:
-    if clone_permission(uid) != 'approved':
-        return "❌ Klon açma iznin yok."
+async def _submit_clone_token(user, token: str) -> str:
+    """Token'ı doğrular ve bot sahibine onaya gönderir (bot sahibinin kendi klonu doğrudan açılır)."""
+    uid = user.id
     if not CLONE_TOKEN_RE.match(token):
         return "❌ Bu bir bot token'ına benzemiyor. @BotFather'daki tam token'ı gönder."
     if token == TOKEN:
@@ -9943,14 +9987,62 @@ async def _register_clone_token(uid: int, token: str) -> str:
         return "❌ Token geçersiz. @BotFather'dan doğru token'ı kopyala."
     except TelegramError as e:
         return friendly_error(e)
+    if me.id == BOT_ID:
+        return "❌ Bu ana botun token'ı."
     existing = clone_row(me.id)
-    mine = [c for c in user_clones(uid) if c['bot_id'] != me.id]
     if existing and existing['owner_id'] != uid and existing['status'] != 'deleted':
         return "❌ Bu bot zaten başka birinin klonu."
+    with get_db() as conn:
+        other = conn.execute("SELECT 1 FROM clone_requests WHERE bot_id = ? AND status = 'pending' AND user_id != ?",
+                             (me.id, uid)).fetchone()
+    if other:
+        return "❌ Bu bot için başka birinin bekleyen isteği var."
+    if uid == FOUNDER_ID:
+        err, uname = await _activate_clone(uid, token, me.id)
+        if err:
+            return f"❌ Bot başlatılamadı: {html.escape(err)}"
+        return (f"✅ <b>Klon botun hazır!</b> @{html.escape(uname)}\n\n"
+                f"Gruba eklemek için: https://t.me/{uname}?startgroup=ulus&admin={ADMIN_RIGHTS_GROUP}")
+    old = pending_request(uid)
+    async with _db_lock:
+        with get_db() as conn:
+            if old:  # aynı kişinin önceki bekleyen isteği: yenisi geçerli
+                conn.execute("UPDATE clone_requests SET status = 'cancelled', token = NULL, decided_at = ? WHERE id = ?",
+                             (time.time(), old['id']))
+            rid = conn.execute("""INSERT INTO clone_requests (user_id, username, first_name, status, created_at,
+                                  bot_id, token, bot_username, bot_name) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)""",
+                               (uid, user.username, user.first_name, time.time(), me.id, token, me.username,
+                                me.first_name)).lastrowid
+            conn.commit()
+            r = dict(conn.execute("SELECT * FROM clone_requests WHERE id = ?", (rid,)).fetchone())
+    if old:
+        await _edit_req_msg(old, "↩️ Yerine yeni istek gönderildi")
+    sent = await _main_send(FOUNDER_ID, _clone_req_text(r), parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(
+        [[ibtn("✅ Onayla", f"cl|ok|{rid}", GREEN), ibtn("❌ Reddet", f"cl|no|{rid}", RED)]]))
+    if sent is not None and getattr(sent, 'message_id', None):
+        with get_db() as conn:
+            conn.execute("UPDATE clone_requests SET admin_msg_id = ? WHERE id = ?", (sent.message_id, rid))
+            conn.commit()
+    return (f"📨 <b>@{html.escape(me.username)}</b> için isteğin bot sahibine gönderildi.\n"
+            "Onaylanınca botun açılacak ve sana haber vereceğim.")
+
+async def _activate_clone(uid: int, token: str, bot_id: int):
+    """Onaylanan token ile klonu kaydeder ve başlatır. Dönüş: (hata | None, kullanıcı adı)."""
+    try:
+        me = await Bot(token).get_me()
+    except (InvalidToken, Forbidden):
+        return "Token geçersiz veya iptal edilmiş.", ''
+    except TelegramError as e:
+        return friendly_error(e), ''
+    if me.id != bot_id:
+        return "Token başka bir bota ait.", ''
+    existing = clone_row(me.id)
+    if existing and existing['owner_id'] != uid and existing['status'] != 'deleted':
+        return "Bu bot zaten başka birinin klonu.", ''
+    mine = [c for c in user_clones(uid) if c['bot_id'] != me.id]
     old = mine[0] if mine else None
     if old and uid != FOUNDER_ID and len(mine) >= CLONE_LIMIT_PER_USER:
-        # token değiştir = eski klonun yerine yenisi
-        await stop_clone(old['bot_id'], 'deleted')
+        await stop_clone(old['bot_id'], 'deleted')  # token değiştir = eski klonun yerine yenisi
     async with _db_lock:
         with get_db() as conn:
             conn.execute("""INSERT INTO clones (bot_id, owner_id, token, username, name, status, created_at)
@@ -9961,25 +10053,29 @@ async def _register_clone_token(uid: int, token: str) -> str:
             if old:
                 for col in ('brand', 'start_text', 'support_link', 'help_title'):
                     conn.execute(f"UPDATE clones SET {col} = COALESCE({col}, ?) WHERE bot_id = ?", (old.get(col), me.id))
+                if uid != FOUNDER_ID:
+                    conn.execute("UPDATE clones SET token = '' WHERE bot_id = ?", (old['bot_id'],))
             conn.commit()
     if me.id in CLONE_APPS:  # aynı bot yeni token'la: yeniden başlat
         await stop_clone(me.id, 'active')
     err = await start_clone(clone_row(me.id))
-    if err:
-        return f"❌ Bot başlatılamadı: {html.escape(err)}"
-    return (f"✅ <b>Klon botun hazır!</b> @{html.escape(me.username)}\n\n"
-            f"Gruba eklemek için: https://t.me/{me.username}?startgroup=ulus&admin={ADMIN_RIGHTS_GROUP}\n"
-            "Adını ve fotoğrafını @BotFather'dan değiştirebilirsin.")
+    return err, me.username
 
 def _clones_admin_view():
     with get_db() as conn:
         rows = [dict(r) for r in conn.execute("SELECT * FROM clones WHERE status != 'deleted' ORDER BY created_at")]
-        pend = conn.execute("SELECT COUNT(*) FROM clone_requests WHERE status = 'pending'").fetchone()[0]
+        pend = [dict(r) for r in conn.execute("SELECT * FROM clone_requests WHERE status = 'pending' AND token IS NOT NULL "
+                                              "ORDER BY created_at")]
     icon = {'active': "🟢", 'stopped': "⏸", 'invalid': "⚠️"}
     lines = [f"{icon.get(r['status'], '•')} @{html.escape(r.get('username') or '?')} — sahip <code>{r['owner_id']}</code>"
              for r in rows]
-    text = (f"🤖 <b>Klon botlar</b> ({len(rows)}) · Bekleyen istek: {pend}\n\n" + ("\n".join(lines) or "Henüz klon yok."))
+    plines = [f"⏳ @{html.escape(p.get('bot_username') or '?')} — isteyen <code>{p['user_id']}</code>" for p in pend]
+    text = (f"🤖 <b>Klon botlar</b> ({len(rows)}) · Onay bekleyen: {len(pend)}\n\n" + ("\n".join(lines) or "Henüz klon yok.")
+            + ("\n\n<b>Onay bekleyenler</b>\n" + "\n".join(plines) if plines else ""))
     kb = []
+    for p in pend[:10]:
+        kb.append([ibtn(f"⏳ @{(p.get('bot_username') or '?')[:18]}", f"cl|ok|{p['id']}|l", GREEN),
+                   ibtn("❌", f"cl|no|{p['id']}|l", RED)])
     for r in rows[:30]:
         b = r['bot_id']
         kb.append([ibtn(f"@{(r.get('username') or '?')[:20]}", f"cl|adm|{b}"),
@@ -10142,9 +10238,93 @@ async def _tell_user_about_error(update) -> None:
         pass
 
 async def chat_member_cache_handler(update: Update, context):
-    """Admin atama/alma olduğunda admin önbelleğini temizler."""
-    if update.chat_member:
-        invalidate_admin_cache(str(update.chat_member.chat.id))
+    """Admin atama/alma olduğunda admin önbelleğini temizler. Telegram'dan elle ya da başka bir botla yönetici yapılan
+    kişiye rütbe verilir (yetki alma rütbeyi otomatik silmez: toplu düşürme saldırısında rütbeler kaybolmasın; /reload siler)."""
+    cm = update.chat_member
+    if not cm:
+        return
+    chat_id = str(cm.chat.id)
+    invalidate_admin_cache(chat_id)
+    new = cm.new_chat_member
+    if (new.status == 'administrator' and cm.old_chat_member.status != 'administrator' and not new.user.is_bot
+            and get_channel_settings(chat_id) and not user_level(chat_id, new.user.id)):
+        role = await auto_assign_role(chat_id, new.user.id, new)
+        logger.info(f"Telegram'dan yönetici yapıldı, rütbe verildi {chat_id}/{new.user.id}: {role}")
+
+RELOAD_COOLDOWN = 30
+_reload_last: dict = {}
+
+async def reload_admins(chat_id: str):
+    """Telegram'daki güncel yönetici listesini bot kaydına işler: kurucu eşitlenir, rütbesi olmayan yöneticiye rütbe
+    verilir, artık yönetici olmayanın rütbesi alınır (kurucu, botu ekleyen ve acil kilitte yetkisi alınanlar hariç).
+    Dönüş: (eklenenler, kaldırılanlar, yönetici sayısı) veya liste alınamazsa None."""
+    chat_id = str(chat_id)
+    invalidate_admin_cache(chat_id)
+    try:
+        admins = await bot.get_chat_administrators(chat_id)
+    except TelegramError as e:
+        logger.debug(f"/reload admin listesi alınamadı {chat_id}: {e}")
+        return None
+    await sync_creator(chat_id, admins)
+    people = [a for a in admins if not a.user.is_bot]
+    added = []
+    for a in people:
+        if a.status == 'administrator' and not user_level(chat_id, a.user.id):
+            await auto_assign_role(chat_id, a.user.id, a)
+            added.append(a.user.id)
+    keep = {a.user.id for a in people}
+    with get_db() as conn:
+        ch = conn.execute("SELECT owner_id, added_by FROM channels WHERE chat_id = ?", (chat_id,)).fetchone()
+    if ch:
+        keep |= {ch['owner_id'], ch['added_by']}
+    try:
+        keep |= set(json.loads(get_channel_cfg(chat_id).get('lockdown_saved_admins') or '[]'))
+    except (ValueError, TypeError):
+        pass
+    async with _db_lock:
+        with get_db() as conn:
+            stale = [r['user_id'] for r in conn.execute(
+                "SELECT user_id FROM roles WHERE chat_id = ? AND role != 'kurucu'", (chat_id,)) if r['user_id'] not in keep]
+            for uid in stale:
+                conn.execute("DELETE FROM roles WHERE chat_id = ? AND user_id = ?", (chat_id, uid))
+            conn.commit()
+    _invalidate_settings(chat_id)
+    invalidate_admin_cache(chat_id)
+    _tg_admin_cache[chat_id] = (time.time(), {a.user.id for a in admins})
+    return added, stale, len(people)
+
+async def cmd_reload(update: Update, context):
+    """/reload — admin listesini Telegram'dan yeniden yükler (elle veya başka botlarla verilen/alınan yetkiler)."""
+    msg = update.effective_message
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile grup seç!")
+        return
+    uid = update.effective_user.id if update.effective_user else 0
+    is_anon = uid == GROUP_ANON_BOT_ID or (msg.sender_chat is not None and str(msg.sender_chat.id) == str(chat_id))
+    if not (is_anon or user_level(chat_id, uid) or await _is_real_chat_admin(chat_id, uid)):
+        await msg.reply_text("⛔ Bu komutu sadece yöneticiler kullanabilir.")
+        return
+    now = time.time()
+    if now - _reload_last.get(chat_id, 0) < RELOAD_COOLDOWN:
+        await msg.reply_text(f"⏳ Admin listesi az önce yenilendi. {RELOAD_COOLDOWN} sn sonra tekrar dene.")
+        return
+    _reload_last[chat_id] = now
+    res = await reload_admins(chat_id)
+    if res is None:
+        await msg.reply_text("⚠️ Admin listesi alınamadı. Bot bu grupta yönetici mi?")
+        return
+    added, removed, total = res
+    lines = [f"🔄 <b>Admin listesi yenilendi</b> — {total} yönetici"]
+    if added:
+        lines.append("➕ Rütbe verildi: " + ", ".join(f"<code>{u}</code>" for u in added[:20]))
+    if removed:
+        lines.append("➖ Rütbesi alındı (artık yönetici değil): " + ", ".join(f"<code>{u}</code>" for u in removed[:20]))
+    if not added and not removed:
+        lines.append("Kayıt zaten güncel.")
+    await msg.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    if added or removed:
+        await send_log(chat_id, f"🔄 /reload: +{len(added)} / −{len(removed)} | {mention(update.effective_user)}", ParseMode.HTML)
 
 
 async def _startup_report(b):
@@ -10305,6 +10485,7 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('kanal', kanal, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler('setlog', setlog, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler('staff', staff))
+    app.add_handler(CommandHandler(['reload', 'admincache', 'yenile'], cmd_reload))
     app.add_handler(CommandHandler('yetkiler', yetkiler, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler('menu', cmd_menu, filters=filters.ChatType.PRIVATE))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Text(sorted(DM_MENU_TEXTS)), dm_menu_handler))
