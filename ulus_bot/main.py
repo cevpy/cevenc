@@ -13,6 +13,7 @@ from telegram.ext import (
     CallbackQueryHandler,
     ChatJoinRequestHandler,
     TypeHandler,
+    JobQueue,
 )
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, Bot, MessageEntity,
@@ -22,7 +23,7 @@ from telegram import (
 )
 from telegram.constants import ParseMode, KeyboardButtonStyle
 from telegram.ext import ContextTypes
-from telegram.error import TelegramError, Forbidden, BadRequest
+from telegram.error import TelegramError, Forbidden, BadRequest, InvalidToken
 from telegram.helpers import mention_html
 import sqlite3
 import json
@@ -34,6 +35,7 @@ import traceback
 import unicodedata
 from datetime import datetime, timedelta, timezone, time as dtime
 import asyncio
+import contextvars
 import functools
 import logging
 import os
@@ -135,7 +137,142 @@ async def get_userbot() -> TelegramClient:
 
 # Uygulama oluşturulunca main() içinde application.bot ile değiştirilir
 # (rate limiter dahil tek bot nesnesi kullanılır).
-bot: Bot = None
+# ═══════════════════════════ ÇOKLU BOT (ANA BOT + KLONLAR) ═══════════════════════════
+# Tüm botlar tek süreçte, aynı veritabanıyla çalışır. Modüldeki `bot` bir vekildir: işlem bir gruba/kanala
+# yönelikse o sohbeti yöneten botu (channels.bot_id), değilse güncellemenin geldiği botu, o da yoksa ana botu kullanır.
+_ctx_bot: contextvars.ContextVar = contextvars.ContextVar('ulus_ctx_bot', default=None)
+MAIN_BOT: Bot = None
+RUNNING_BOTS: dict = {}     # bot_id -> Bot (ana bot + çalışan klonlar)
+CLONES: dict = {}           # bot_id -> klon kaydı (dict)
+CLONE_APPS: dict = {}       # bot_id -> Application
+_chat_bot_map: dict = {}    # chat_id -> yöneten bot_id (0 = eski kayıt → ana bot, -1 = sahipsiz)
+
+def chat_bot_id(chat_id) -> int | None:
+    """Sohbeti yöneten botun ID'si (bilinmiyorsa None)."""
+    cid = str(chat_id)
+    if cid not in _chat_bot_map:
+        try:
+            with get_db() as conn:
+                row = conn.execute("SELECT bot_id FROM channels WHERE chat_id = ?", (cid,)).fetchone()
+        except sqlite3.Error:
+            row = None
+        _chat_bot_map[cid] = (row['bot_id'] or 0) if row else None
+    v = _chat_bot_map[cid]
+    if v is None or v == -1:
+        return None
+    return v or BOT_ID or None
+
+def set_chat_bot(chat_id, bot_id: int):
+    with get_db() as conn:
+        conn.execute("UPDATE channels SET bot_id = ? WHERE chat_id = ?", (bot_id, str(chat_id)))
+        conn.commit()
+    _chat_bot_map.pop(str(chat_id), None)
+
+def cur_bot_id() -> int:
+    """Şu an işlem yapan botun ID'si (güncellemenin geldiği bot; yoksa ana bot)."""
+    b = _ctx_bot.get()
+    return b.id if b is not None else BOT_ID
+
+def bot_id_for(chat_id) -> int:
+    """Bu sohbette işlem yapan botun ID'si (sohbeti yöneten çalışan bot; yoksa şu anki bot)."""
+    b = chat_bot_id(chat_id)
+    return b if b in RUNNING_BOTS else cur_bot_id()
+
+def current_clone() -> dict | None:
+    bid = cur_bot_id()
+    return CLONES.get(bid) if bid and bid != BOT_ID else None
+
+def bot_owner_id() -> int:
+    c = current_clone()
+    return c['owner_id'] if c else FOUNDER_ID
+
+def is_bot_owner(user_id: int) -> bool:
+    """Bu botun sahibi mi? Ana botta FOUNDER_ID; klonda klon sahibi (FOUNDER_ID her yerde yetkili)."""
+    return bool(user_id) and user_id in (bot_owner_id(), FOUNDER_ID)
+
+def brand() -> str:
+    c = current_clone()
+    return (c.get('brand') or c.get('name') or 'ULUS') if c else 'ULUS'
+
+def _help_title() -> str:
+    c = current_clone()
+    return (c.get('help_title') or f"{brand()} Security Bot") if c else "ULUS Security Bot"
+
+def brand_footer() -> str:
+    """Klonlarda /start ve /help mesajının en altına ana bot imzası."""
+    if not current_clone() or not MAIN_BOT:
+        return ''
+    try:
+        return f"\n\n⚡ Main bot : @{MAIN_BOT.username}"
+    except RuntimeError:
+        return ''
+
+def bot_chat_ids(bot_id: int | None = None) -> list:
+    """Bu botun yönettiği kayıtlı sohbetler (ana bot için eski kayıtlar dahil)."""
+    bid = bot_id or cur_bot_id()
+    with get_db() as conn:
+        if bid == BOT_ID:
+            rows = conn.execute("SELECT chat_id FROM channels WHERE bot_id IS NULL OR bot_id IN (0, ?)", (bid,))
+        else:
+            rows = conn.execute("SELECT chat_id FROM channels WHERE bot_id = ?", (bid,))
+        return [r['chat_id'] for r in rows]
+
+class _BotProxy:
+    """`bot.xxx(...)` çağrılarını doğru bota yönlendirir (bkz. yukarıdaki açıklama)."""
+    def _pick(self, args, kwargs):
+        cid = kwargs.get('chat_id', args[0] if args else None)
+        if isinstance(cid, (int, str)) and str(cid).startswith('-'):
+            b = RUNNING_BOTS.get(chat_bot_id(cid) or 0)
+            if b is not None:
+                return b
+        return _ctx_bot.get() or MAIN_BOT
+
+    def __getattr__(self, name):
+        base = _ctx_bot.get() or MAIN_BOT
+        if base is None:
+            raise AttributeError(name)
+        attr = getattr(base, name)
+        if not asyncio.iscoroutinefunction(attr):
+            return attr
+        pick = self._pick
+
+        async def call(*args, **kwargs):
+            return await getattr(pick(args, kwargs), name)(*args, **kwargs)
+        return call
+
+    def __bool__(self):
+        return (_ctx_bot.get() or MAIN_BOT) is not None
+
+bot = _BotProxy()
+
+class UlusJobQueue(JobQueue):
+    """Zamanlanmış işler, kuyruğun ait olduğu botun adına çalışır (bir klonun güncellemesi sırasında
+    kurulan zamanlayıcı yüzünden ana botun işleri klon bağlamına kaymasın)."""
+    @staticmethod
+    async def job_callback(job_queue, job) -> None:
+        _ctx_bot.set(job_queue.application.bot)  # her iş kendi görevinde çalışır; ayar sadece o işe özel
+        await job.run(job_queue.application)
+
+async def bot_context_handler(update: Update, context):
+    """Her güncellemenin en başında: hangi botla çalışıldığını işaretler; başka botumuzun yönettiği sohbetin
+    güncellemelerini (aynı grupta iki botumuz varsa çift işlem olmasın diye) yok sayar."""
+    _ctx_bot.set(context.bot)
+    chat = update.effective_chat
+    if not chat or chat.type == 'private' or update.my_chat_member:
+        return
+    cid = str(chat.id)
+    if cid not in _chat_bot_map:
+        chat_bot_id(cid)
+    raw = _chat_bot_map.get(cid)
+    if raw is None:
+        return
+    if raw == -1:  # sahipsiz kalmış sohbet: ilk gelen botumuz sahiplenir
+        set_chat_bot(cid, context.bot.id)
+        return
+    owner = raw or BOT_ID
+    if owner != context.bot.id and owner in RUNNING_BOTS:
+        raise ApplicationHandlerStop
+
 
 _db_lock = asyncio.Lock()
 
@@ -149,9 +286,17 @@ class _ClosingConnection(sqlite3.Connection):
             self.close()
 
 
+def _sql_mybot(bot_id) -> int:
+    """SQL: mybot(channels.bot_id) — sohbet şu an çalışan bota mı ait (ana bot: NULL/0/-1/kendi ID'si)."""
+    cur = cur_bot_id()
+    if cur == BOT_ID or not cur:
+        return int(bot_id in (None, 0, -1, BOT_ID))
+    return int(bot_id == cur)
+
 def get_db():
     conn = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False, factory=_ClosingConnection)
     conn.row_factory = sqlite3.Row
+    conn.create_function('mybot', 1, _sql_mybot, deterministic=False)  # bu botun sohbeti mi? (klon filtreleri)
     conn.execute("PRAGMA busy_timeout = 30000")
     conn.execute("PRAGMA synchronous = NORMAL")
     return conn
@@ -500,6 +645,39 @@ def init_db():
                 PRIMARY KEY (chat_id, user_id)
             );
 
+            CREATE TABLE IF NOT EXISTS clones (
+                bot_id INTEGER PRIMARY KEY,
+                owner_id INTEGER NOT NULL,
+                token TEXT NOT NULL,
+                username TEXT,
+                name TEXT,
+                status TEXT NOT NULL DEFAULT 'active',
+                brand TEXT,
+                start_text TEXT,
+                support_link TEXT,
+                help_title TEXT,
+                created_at REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS clone_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                username TEXT,
+                first_name TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at REAL NOT NULL,
+                decided_at REAL
+            );
+
+            CREATE TABLE IF NOT EXISTS clone_bans (
+                bot_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                reason TEXT,
+                banned_by INTEGER,
+                banned_at REAL NOT NULL,
+                PRIMARY KEY (bot_id, user_id)
+            );
+
             CREATE TABLE IF NOT EXISTS chat_filters (
                 chat_id TEXT NOT NULL,
                 trigger_norm TEXT NOT NULL,
@@ -652,6 +830,8 @@ def _migrate_installer():
         cols = {r[1] for r in conn.execute("PRAGMA table_info(channels)")}
         if 'added_by' not in cols:
             conn.execute("ALTER TABLE channels ADD COLUMN added_by INTEGER")
+        if 'bot_id' not in cols:  # sohbeti yöneten bot (NULL = ana bot)
+            conn.execute("ALTER TABLE channels ADD COLUMN bot_id INTEGER")
         if FOUNDER_ID:
             rows = conn.execute("""
                 SELECT c.chat_id FROM channels c JOIN roles r ON r.chat_id = c.chat_id
@@ -834,7 +1014,7 @@ def hierarchy_block(chat_id: str, caller_id: int, target_id: int) -> str | None:
     """Moderasyon hedefi uygun değilse kibar açıklama, uygunsa None."""
     if target_id == caller_id:
         return "Bu işlemi kendine uygulayamazsın."
-    if target_id in (BOT_ID, GROUP_ANON_BOT_ID, TELEGRAM_SERVICE_ID):
+    if target_id in (cur_bot_id(), GROUP_ANON_BOT_ID, TELEGRAM_SERVICE_ID):
         return "Bu hesaba işlem uygulanamaz."
     if not can_act_on(chat_id, caller_id, target_id):
         role = role_of_level(user_level(chat_id, target_id))
@@ -863,10 +1043,10 @@ async def _is_real_chat_admin(chat_id: str, user_id: int) -> bool:
         return False
 
 async def _is_bot_admin(chat_id: str) -> bool:
-    if not BOT_ID:
+    if not cur_bot_id():
         return True
     try:
-        me = await bot.get_chat_member(chat_id, BOT_ID)
+        me = await bot.get_chat_member(chat_id, bot_id_for(chat_id))
         return me.status in ('administrator', 'creator')
     except Exception:
         return False
@@ -1074,7 +1254,7 @@ async def is_staff_user(chat_id: str, user_id: int, channel: dict | None = None)
     """Bot rolleri + Telegram adminleri + muaf liste."""
     if not user_id:
         return False
-    if user_id in (TELEGRAM_SERVICE_ID, GROUP_ANON_BOT_ID, BOT_ID):
+    if user_id in (TELEGRAM_SERVICE_ID, GROUP_ANON_BOT_ID, cur_bot_id()):
         return True
     if has_permission(chat_id, user_id, 50):
         return True
@@ -1186,16 +1366,18 @@ async def _register_chat(chat_id: str, owner_id: int, chat_type: str, added_by: 
             if not existing:
                 conn.execute("""
                     INSERT INTO channels
-                    (chat_id, owner_id, log_chat_id, chat_type, settings, stats, invites, added_by)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (chat_id, owner_id, log_chat_id, chat_type, settings, stats, invites, added_by, bot_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     chat_id, owner_id, None,
                     chat_type,
                     json.dumps(default_settings, ensure_ascii=False),
                     json.dumps(default_stats),
                     json.dumps({}),
-                    added_by or None
+                    added_by or None,
+                    cur_bot_id() if cur_bot_id() != BOT_ID else None
                 ))
+                _chat_bot_map.pop(str(chat_id), None)
                 for uid in {owner_id, added_by} - {0, None}:
                     conn.execute("INSERT OR REPLACE INTO roles (chat_id, user_id, role) VALUES (?, ?, 'kurucu')",
                                  (chat_id, uid))
@@ -1225,7 +1407,11 @@ async def handle_my_chat_member(update: Update, context):
             logger.debug(f"Engelli sohbetten çıkılamadı {chat_id}: {e}")
         return
 
+    if new_status in ('left', 'kicked') and chat_bot_id(chat_id) == context.bot.id and get_channel_settings(chat_id):
+        set_chat_bot(chat_id, -1)  # yöneten bot çıkarıldı: gruptaki diğer botumuz sahiplenebilir
     if new_status in ['member', 'administrator']:
+        if get_channel_settings(chat_id) and chat_bot_id(chat_id) != context.bot.id:
+            set_chat_bot(chat_id, context.bot.id if context.bot.id != BOT_ID else 0)  # son eklenen botumuz yönetir
         owner_id = member_update.from_user.id if member_update.from_user else 0
         chat_type = chat.type
         is_new = await _register_chat(chat_id, owner_id, chat_type)
@@ -1355,7 +1541,7 @@ async def apply_punishment(chat_id: str, user_id: int, username: str, reason: st
             conn.commit()
 
     settings = channel['settings']
-    actor_id = actor_id or BOT_ID
+    actor_id = actor_id or cur_bot_id()
     warn_limit = int(settings.get('warn_limit', 5) or 5)
     who = mention(user) if user else html.escape(f"@{username}" if username else str(user_id))
     reason_h = html.escape(reason)
@@ -1458,7 +1644,7 @@ async def enforce_action(chat_id: str, msg, channel: dict, prot: str, reason: st
                     conn.execute("""
                         INSERT OR REPLACE INTO mute_list (chat_id, user_id, username, until_date, muted_at, muted_by)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (chat_id, user.id, username, until, now, BOT_ID))
+                    """, (chat_id, user.id, username, until, now, cur_bot_id()))
                     conn.commit()
             text = f"🔇 {who} {reason_h} → {human_duration(minutes * 60)} susturuldu"
             stat, markup = 'mutes', mod_markup(chat_id, user.id, 'mute')
@@ -1473,7 +1659,7 @@ async def enforce_action(chat_id: str, msg, channel: dict, prot: str, reason: st
                     conn.execute("""
                         INSERT OR REPLACE INTO ban_list (chat_id, user_id, username, reason, banned_at, banned_by)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (chat_id, user.id, username, reason, now, BOT_ID))
+                    """, (chat_id, user.id, username, reason, now, cur_bot_id()))
                     conn.commit()
             text = f"🚫 {who} {reason_h} → banlandı\n📨 İtiraz için bota özelden /itiraz yazabilir."
             stat, markup = 'bans', mod_markup(chat_id, user.id, 'ban')
@@ -1490,7 +1676,7 @@ async def enforce_action(chat_id: str, msg, channel: dict, prot: str, reason: st
         except Exception as e:
             logger.debug(f"Ceza duyurusu gönderilemedi: {e}")
     await send_log(chat_id, f"{text} | {chat_id}", ParseMode.HTML, reply_markup=markup)
-    await log_mod_action(chat_id, f"{prot}:{action}", user.id, username, BOT_ID, 'bot', reason)
+    await log_mod_action(chat_id, f"{prot}:{action}", user.id, username, cur_bot_id(), 'bot', reason)
 
 # ═══════════════════════════ RAPOR SİSTEMİ (/report, @admin) ═══════════════════════════
 REPORT_COOLDOWN = 60
@@ -2136,7 +2322,7 @@ async def _nsfw_scan_task(msg, chat_id: str, uid: str, scan_id: str, context):
     _nsfw_cache[uid] = bool(detail)
     if not detail:
         return
-    block_media(chat_id, uid, 'file', f"yapay zeka: {detail}", BOT_ID)
+    block_media(chat_id, uid, 'file', f"yapay zeka: {detail}", cur_bot_id())
     channel = get_channel_settings(chat_id)
     if channel:
         await _bad_media_hit(msg, channel, chat_id, f"uygunsuz içerik ({detail})", context)
@@ -3940,7 +4126,7 @@ async def profil(update: Update, context):
         msg += "\n\nSon Islemler:\n"
         for row in log_rows:
             tarih = datetime.fromtimestamp(row['timestamp'], TZ_TR).strftime('%d.%m %H:%M')
-            if row['by_user_id'] and row['by_user_id'] != BOT_ID:
+            if row['by_user_id'] and row['by_user_id'] != cur_bot_id():
                 by = mention_html(row['by_user_id'], row['by_username'] or str(row['by_user_id']))
             else:
                 by = "sistem"
@@ -4695,7 +4881,7 @@ async def render_settings(cid: str, page: str = 'main'):
         if s.get('anti_raid'):
             active.append("🚨 Raid")
         nm = get_nightmod(cid)
-        text = (f"⚙️ <b>ULUS — Grup Ayarları</b>\n👥 <b>{title}</b>\n\n"
+        text = (f"⚙️ <b>{html.escape(brand())} — Grup Ayarları</b>\n👥 <b>{title}</b>\n\n"
                 f"🛡 Aktif korumalar: {', '.join(active) if active else 'yok'}\n"
                 f"🚪 Captcha: {'✅' if s.get('captcha_enabled') else '❌'} · Özelden doğrulama: {'✅' if s.get('join_captcha') else '❌'}\n"
                 f"⚠️ Uyarı: {s.get('warn_limit', 5)} → {WARN_ACTION_LABELS.get(s.get('warn_action', 'ban'))}\n"
@@ -5216,8 +5402,8 @@ async def help_settings_callback(update: Update, context: ContextTypes.DEFAULT_T
     await send_settings_panel(query.message, chat_id)
 
 async def duyuru(update: Update, context):
-    if update.effective_user.id != FOUNDER_ID:
-        await update.message.reply_text("Bu komut sadece botun kurucusu tarafından kullanılabilir!")
+    if not is_bot_owner(update.effective_user.id):
+        await update.message.reply_text("Bu komut sadece botun sahibi tarafından kullanılabilir!")
         return
     if not context.args:
         await update.message.reply_text("Kullanım: /duyuru <mesaj>")
@@ -5227,7 +5413,7 @@ async def duyuru(update: Update, context):
     sent_count = 0
     failed_count = 0
     with get_db() as conn:
-        rows = conn.execute("SELECT chat_id FROM channels").fetchall()
+        rows = conn.execute("SELECT chat_id FROM channels WHERE mybot(bot_id)").fetchall()
     for row in rows:
         try:
             await bot.send_message(row['chat_id'], duyuru_msg)
@@ -5282,7 +5468,7 @@ async def new_member_handler(update: Update, context):
                     conn.commit()
         username = user.username or user.first_name
 
-        if is_gbanned(user.id) and user.id != FOUNDER_ID:
+        if is_gbanned(user.id, chat_id) and user.id != FOUNDER_ID:
             try:
                 await bot.ban_chat_member(chat_id, user.id)
                 await send_log(chat_id, f"🌐 Global banlı kullanıcı katıldı ve banlandı: {mention(user)}", ParseMode.HTML)
@@ -6005,7 +6191,7 @@ async def save_admin_list(chat_id: str):
 async def enter_lockdown(chat_id: str, reason: str, spam_admin_id: int = 0):
     cfg = get_channel_cfg(chat_id)
     managers = get_channel_managers(chat_id)
-    protected = set(managers + [BOT_ID or 0])
+    protected = set(managers + [cur_bot_id() or 0])
     if spam_admin_id:
         protected.discard(spam_admin_id)
 
@@ -6167,7 +6353,7 @@ async def network_ban_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     user = cm.new_chat_member.user
     old, new = cm.old_chat_member.status, cm.new_chat_member.status
-    if user.id == BOT_ID or user.is_bot:
+    if user.id == cur_bot_id() or user.is_bot:
         return
     if new == 'kicked' and old != 'kicked':
         if context.job_queue:
@@ -6272,7 +6458,7 @@ async def restore_snapshot(chat_id: str, snap_id: int):
     if not row:
         return 0, ["kayıt bulunamadı"]
     try:
-        me = await bot.get_chat_member(chat_id, BOT_ID)
+        me = await bot.get_chat_member(chat_id, bot_id_for(chat_id))
     except Exception as e:
         return 0, [f"bot bilgisi alınamadı: {e}"]
     ok, failed = 0, []
@@ -6302,7 +6488,7 @@ async def demotion_watch_handler(update: Update, context: ContextTypes.DEFAULT_T
     if not cm or not cm.from_user:
         return
     old, new = cm.old_chat_member, cm.new_chat_member
-    if old.status != 'administrator' or new.status == 'administrator' or new.user.is_bot or cm.from_user.id == BOT_ID:
+    if old.status != 'administrator' or new.status == 'administrator' or new.user.is_bot or cm.from_user.id == cur_bot_id():
         return
     chat_id, by = str(cm.chat.id), cm.from_user
     channel = get_channel_settings(chat_id)
@@ -6601,7 +6787,7 @@ async def handle_chat_member_protection(update: Update, context):
     by_name = by_user.username or by_user.first_name
 
     if new.status == 'administrator' and old.status != 'administrator':
-        if not new.user.is_bot and by_user.id != BOT_ID:
+        if not new.user.is_bot and by_user.id != cur_bot_id():
             await auto_assign_role(chat_id, new.user.id, new)
         if new.user.is_bot and cfg.get('bot_add_protection'):
             try:
@@ -6614,7 +6800,7 @@ async def handle_chat_member_protection(update: Update, context):
             await log_channel_action(chat_id, 'bot_add_blocked', new.user.id, new.user.username or '', f'Ekleyen: {by_name}')
             return
 
-        if not new.user.is_bot and by_user.id not in managers and by_user.id != BOT_ID:
+        if not new.user.is_bot and by_user.id not in managers and by_user.id != cur_bot_id():
             bot_given = get_bot_given_admins(chat_id)
             if new.user.id not in bot_given:
                 await notify_managers(
@@ -6963,13 +7149,22 @@ def is_blocked(entity_id) -> bool:
         _load_block_caches()
     return str(entity_id) in _blocked_cache
 
-def is_gbanned(user_id) -> bool:
+def is_gbanned(user_id, chat_id=None) -> bool:
+    """Global ban (bot sahibinin, tüm botlarda) ya da chat_id verilirse o sohbeti yöneten klonun ban listesi."""
     if _gban_cache is None:
         _load_block_caches()
     try:
-        return int(user_id) in _gban_cache
+        uid = int(user_id)
     except (TypeError, ValueError):
         return False
+    if uid in _gban_cache:
+        return True
+    if chat_id is not None:
+        bid = chat_bot_id(chat_id)
+        if bid and bid != BOT_ID:
+            with get_db() as conn:
+                return conn.execute("SELECT 1 FROM clone_bans WHERE bot_id = ? AND user_id = ?", (bid, uid)).fetchone() is not None
+    return False
 
 async def blocklist_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Tüm güncellemelerden önce çalışır: engellenen kullanıcı/sohbetleri ve global banlıları durdurur."""
@@ -6991,7 +7186,7 @@ async def blocklist_guard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
         raise ApplicationHandlerStop
-    if user and chat and chat.type in ('group', 'supergroup') and is_gbanned(user.id) and update.effective_message:
+    if user and chat and chat.type in ('group', 'supergroup') and is_gbanned(user.id, chat.id) and update.effective_message:
         if get_channel_settings(str(chat.id)):
             try:
                 await context.bot.ban_chat_member(chat.id, user.id)
@@ -7150,16 +7345,16 @@ async def cmd_yardimci_kurucu(update: Update, context):
     await _cmd_set_role(update, context, 'yardimci_kurucu')
 
 async def cmd_panel(update: Update, context):
-    if update.effective_user.id != FOUNDER_ID:
+    if not is_bot_owner(update.effective_user.id):
         return
     if update.effective_chat.type != 'private':
         await update.message.reply_text("Bu komut sadece DM'de calisir!")
         return
 
     with get_db() as conn:
-        total_groups = conn.execute("SELECT COUNT(*) as c FROM channels WHERE chat_type IN ('group','supergroup')").fetchone()['c']
-        total_channels = conn.execute("SELECT COUNT(*) as c FROM channels WHERE chat_type='channel'").fetchone()['c']
-        total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats").fetchone()['c']
+        total_groups = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')").fetchone()['c']
+        total_channels = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type='channel'").fetchone()['c']
+        total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
 
     keyboard = InlineKeyboardMarkup([
         [
@@ -7172,7 +7367,7 @@ async def cmd_panel(update: Update, context):
         ],
     ])
     await update.message.reply_text(
-        f"🤖 ULUS Security Bot Paneli\n\n"
+        f"🤖 {brand()} Security Bot Paneli\n\n"
         f"📊 İstatistikler:\n"
         f"├ Toplam Grup: {total_groups}\n"
         f"├ Toplam Kanal: {total_channels}\n"
@@ -7182,7 +7377,7 @@ async def cmd_panel(update: Update, context):
 
 async def panel_callback(update: Update, context):
     query = update.callback_query
-    if query.from_user.id != FOUNDER_ID:
+    if not is_bot_owner(query.from_user.id):
         await query.answer("Yetkisiz!", show_alert=True)
         return
     await query.answer()
@@ -7193,7 +7388,7 @@ async def panel_callback(update: Update, context):
 
     if action == 'channels':
         with get_db() as conn:
-            rows = conn.execute("SELECT chat_id, settings FROM channels WHERE chat_type='channel'").fetchall()
+            rows = conn.execute("SELECT chat_id, settings FROM channels WHERE mybot(bot_id) AND chat_type='channel'").fetchall()
         if not rows:
             await query.message.edit_text("Kayitli kanal yok.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]]))
             return
@@ -7220,7 +7415,7 @@ async def panel_callback(update: Update, context):
 
     elif action == 'groups':
         with get_db() as conn:
-            rows = conn.execute("SELECT chat_id FROM channels WHERE chat_type IN ('group','supergroup')").fetchall()
+            rows = conn.execute("SELECT chat_id FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')").fetchall()
         if not rows:
             await query.message.edit_text("Kayitli grup yok.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]]))
             return
@@ -7275,6 +7470,10 @@ async def panel_callback(update: Update, context):
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]])
         await query.message.edit_text(text, reply_markup=keyboard)
 
+    elif action == 'blocked' and query.from_user.id != FOUNDER_ID:
+        await query.message.edit_text("Engelli listesi sadece ana bot sahibine açıktır.",
+                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]]))
+
     elif action == 'blocked':
         with get_db() as conn:
             rows = conn.execute("SELECT entity_id, entity_type, reason FROM blocked_entities LIMIT 20").fetchall()
@@ -7288,11 +7487,11 @@ async def panel_callback(update: Update, context):
 
     elif action == 'stats':
         with get_db() as conn:
-            total_groups = conn.execute("SELECT COUNT(*) as c FROM channels WHERE chat_type IN ('group','supergroup')").fetchone()['c']
-            total_channels = conn.execute("SELECT COUNT(*) as c FROM channels WHERE chat_type='channel'").fetchone()['c']
-            total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats").fetchone()['c']
-            total_msgs = conn.execute("SELECT COUNT(*) as c FROM message_stats").fetchone()['c']
-            total_bans = conn.execute("SELECT COUNT(*) as c FROM ban_list").fetchone()['c']
+            total_groups = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')").fetchone()['c']
+            total_channels = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type='channel'").fetchone()['c']
+            total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
+            total_msgs = conn.execute("SELECT COUNT(*) as c FROM message_stats WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
+            total_bans = conn.execute("SELECT COUNT(*) as c FROM ban_list WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
         text = (
             f"📊 Bot İstatistikleri\n\n"
             f"├ Toplam Grup: {total_groups}\n"
@@ -7305,9 +7504,9 @@ async def panel_callback(update: Update, context):
 
     elif action == 'back':
         with get_db() as conn:
-            total_groups = conn.execute("SELECT COUNT(*) as c FROM channels WHERE chat_type IN ('group','supergroup')").fetchone()['c']
-            total_channels = conn.execute("SELECT COUNT(*) as c FROM channels WHERE chat_type='channel'").fetchone()['c']
-            total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats").fetchone()['c']
+            total_groups = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')").fetchone()['c']
+            total_channels = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type='channel'").fetchone()['c']
+            total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
         keyboard = InlineKeyboardMarkup([
             [
                 ibtn("📢 Kanallar", "panel|channels", BLUE),
@@ -7319,7 +7518,7 @@ async def panel_callback(update: Update, context):
             ],
         ])
         await query.message.edit_text(
-            f"🤖 ULUS Security Bot Paneli\n\n"
+            f"🤖 {brand()} Security Bot Paneli\n\n"
             f"📊 İstatistikler:\n"
             f"├ Toplam Grup: {total_groups}\n"
             f"├ Toplam Kanal: {total_channels}\n"
@@ -7536,9 +7735,21 @@ async def help_command(update: Update, context):
         return
 
     if chat.type == 'private':
-        if user.id == FOUNDER_ID:
+        if current_clone() and is_bot_owner(user.id):
+            await update.message.reply_text(parse_mode=ParseMode.HTML, text=fold(
+                f"🤖 {_help_title()} — Bot Sahibi Komutlari\n\n"
+                "/panel — Botunun gruplari ve istatistikleri\n"
+                "/duyuru <mesaj> — Botunun tum gruplarina duyuru\n"
+                "/gban <id|@kullanici> [sebep] — Botunun tum gruplarinda banla\n"
+                "/ungban <id|@kullanici> — Bani kaldir\n"
+                "/gbanlist — Ban listesi\n"
+                "/kanal — Grup sec\n"
+            ) + brand_footer())
+        elif user.id == FOUNDER_ID:
             await update.message.reply_text(parse_mode=ParseMode.HTML, text=fold(
                 "🤖 Bot Sahibi Komutlari\n\n"
+                "/klonlar — Klon botlari yonet (durdur/baslat/sil)\n"
+                "/klon — Kendi klon botun\n"
                 "/panel — Yonetim paneli\n"
                 "/engelle <id> [sebep] — Engelle\n"
                 "/engelkaldir <id> — Engel kaldir\n"
@@ -7554,7 +7765,8 @@ async def help_command(update: Update, context):
             ))
         else:
             await update.message.reply_text(parse_mode=ParseMode.HTML, text=fold(
-                "ULUS Security Bot\n\n"
+                f"{_help_title()}\n\n"
+                + ("" if current_clone() else "/klon — Kendi adinla klon bot ac\n") +
                 "/start — Baslat\n"
                 "/menu — Alt menuyu goster\n"
                 "/settings — Secili grubun butonlu ayar paneli\n"
@@ -7563,7 +7775,7 @@ async def help_command(update: Update, context):
                 "/kanal — Kanal baglantisi\n"
                 "/itiraz <aciklama> — Ban itirazi gonder\n"
                 "/kurtar — Admin kurtarma (guvenilir kisiler icin)\n"
-            ))
+            ) + brand_footer())
         return
 
     chat_id = str(chat.id)
@@ -7604,7 +7816,7 @@ async def help_command(update: Update, context):
     )
 
     if not is_admin:
-        await update.message.reply_text(fold(user_section), parse_mode=ParseMode.HTML)
+        await update.message.reply_text(fold(user_section) + brand_footer(), parse_mode=ParseMode.HTML)
         return
 
     level = user_level(chat_id, user.id)
@@ -7652,13 +7864,14 @@ async def help_command(update: Update, context):
         [ibtn("⚙️ Ayarlar Paneli", "help_settings", BLUE)]
     ])
     await update.message.reply_text(
-        fold(admin_section) + "\n\n" + fold(user_section),
+        fold(admin_section) + "\n\n" + fold(user_section) + brand_footer(),
         reply_markup=keyboard, parse_mode=ParseMode.HTML
     )
 
 # ─────────────────────────── ÖZEL MENÜ, GRUP SEÇME, KOMUT MENÜSÜ ───────────────────────────
 MENU_SETTINGS, MENU_GROUPS, MENU_STATS, MENU_HELP = "⚙️ Ayarlar", "🛡 Gruplarım", "📊 İstatistik", "❓ Yardım"
-DM_MENU_TEXTS = {MENU_SETTINGS, MENU_GROUPS, MENU_STATS, MENU_HELP}
+MENU_CLONE = "🤖 Klon bot"
+DM_MENU_TEXTS = {MENU_SETTINGS, MENU_GROUPS, MENU_STATS, MENU_HELP, MENU_CLONE}
 REQ_PICK_GROUP, REQ_PICK_CHANNEL = 1, 2
 ADMIN_RIGHTS_GROUP = "change_info+delete_messages+restrict_members+invite_users+pin_messages+promote_members+manage_video_chats"
 ADMIN_RIGHTS_CHANNEL = "change_info+post_messages+edit_messages+delete_messages+invite_users+promote_members"
@@ -7671,7 +7884,8 @@ def dm_menu_keyboard() -> ReplyKeyboardMarkup:
          [KeyboardButton("🔗 Grup seç", request_chat=KeyboardButtonRequestChat(
               request_id=REQ_PICK_GROUP, chat_is_channel=False, bot_is_member=True, request_title=True)),
           KeyboardButton("📢 Kanal seç", request_chat=KeyboardButtonRequestChat(
-              request_id=REQ_PICK_CHANNEL, chat_is_channel=True, bot_is_member=True, request_title=True))]],
+              request_id=REQ_PICK_CHANNEL, chat_is_channel=True, bot_is_member=True, request_title=True))]]
+        + ([] if current_clone() else [[KeyboardButton(MENU_CLONE)]]),
         resize_keyboard=True, is_persistent=True, input_field_placeholder="Menüden seç veya komut yaz…")
 
 def add_to_chat_markup(bot_username: str) -> InlineKeyboardMarkup:
@@ -7692,6 +7906,10 @@ async def dm_menu_handler(update: Update, context):
         return
     if text == MENU_GROUPS:
         await kanal(update, context)
+        return
+    if text == MENU_CLONE:
+        if not current_clone():
+            await cmd_klon(update, context)
         return
     chat_id = context.user_data.get('selected_channel')
     if not chat_id or not get_channel_settings(chat_id):
@@ -7743,7 +7961,11 @@ PRIVATE_COMMANDS = [
     ("settings", "Seçili grubun ayarları"), ("itiraz", "Ban itirazı gönder"), ("help", "Yardım"), ("id", "ID göster"),
     ("kurtar", "Admin kurtarma (güvenilir kişiler)"), ("kurulum", "Seçili grup için hızlı kurulum"),
 ]
-FOUNDER_COMMANDS = [
+CLONE_OWNER_COMMANDS = [
+    ("panel", "Botunun grupları ve istatistikleri"), ("duyuru", "Tüm gruplarına duyuru"),
+    ("gban", "Botunun gruplarında banla"), ("ungban", "Banı kaldır"), ("gbanlist", "Ban listesi"),
+]
+FOUNDER_COMMANDS = [("klonlar", "Klon botları yönet"), 
     ("panel", "Yönetim paneli"), ("gban", "Global ban"), ("ungban", "Global banı kaldır"),
     ("gbanlist", "Global ban listesi"), ("engelle", "Kullanıcı/sohbet engelle"), ("engelkaldir", "Engeli kaldır"),
     ("duyuru", "Tüm gruplara duyuru"), ("yedek", "Veritabanı yedeği"),
@@ -7759,12 +7981,17 @@ async def setup_bot_profile(b):
         await b.set_my_commands(cmds(GROUP_ADMIN_COMMANDS + GROUP_USER_COMMANDS),
                                 scope=BotCommandScopeAllChatAdministrators())
         await b.set_my_commands(cmds(PRIVATE_COMMANDS), scope=BotCommandScopeAllPrivateChats())
-        if FOUNDER_ID:
-            await b.set_my_commands(cmds(PRIVATE_COMMANDS + FOUNDER_COMMANDS), scope=BotCommandScopeChat(FOUNDER_ID))
-        await b.set_my_short_description("ULUS — grup ve kanal koruma botu: spam, link, flood, raid ve captcha.")
+        clone = current_clone()
+        owner = bot_owner_id()
+        if owner:
+            extra = CLONE_OWNER_COMMANDS if clone else FOUNDER_COMMANDS
+            await b.set_my_commands(cmds(PRIVATE_COMMANDS + extra), scope=BotCommandScopeChat(owner))
+        name = brand()
+        footer = f"\n\n⚡ Main bot: @{MAIN_BOT.username}" if clone and MAIN_BOT else ""
+        await b.set_my_short_description(f"{name} — grup ve kanal koruma botu: spam, link, flood, raid ve captcha."[:120])
         await b.set_my_description(
-            "🛡 ULUS Security Bot\n\nGrubunu ve kanalını spam, link, flood, raid ve sahte hesaplara karşı korur. "
-            "Tüm ayarlar butonlu panelden yapılır.\n\nBaşlamak için /start")
+            (f"🛡 {name} Security Bot\n\nGrubunu ve kanalını spam, link, flood, raid ve sahte hesaplara karşı korur. "
+             "Tüm ayarlar butonlu panelden yapılır.\n\nBaşlamak için /start" + footer)[:512])
     except Exception as e:
         logger.warning(f"Komut menüsü / bot açıklaması ayarlanamadı: {e}")
 
@@ -7925,7 +8152,7 @@ async def handle_join_request(update: Update, context):
     save_channel_settings(chat_id, channel)
     settings = channel['settings']
 
-    if is_gbanned(user_id):
+    if is_gbanned(user_id, chat_id):
         try:
             await bot.decline_chat_join_request(chat_id, user_id)
         except Exception as e:
@@ -7975,7 +8202,7 @@ TG_KEYS = list(TG_RIGHTS)
 
 def rank_error(chat_id: str, caller_id: int, target_id: int, role: str | None = None) -> str | None:
     """Rütbe verme/alma/düzenleme kuralları. Hata yoksa None."""
-    if target_id in (BOT_ID, caller_id):
+    if target_id in (cur_bot_id(), caller_id):
         return "Bu kişiye işlem yapamazsın."
     if not has_specific_permission(chat_id, caller_id, 'can_manage_roles'):
         return f"⛔ Rütbe yönetimi için {ROLE_NAMES['yardimci_kurucu']} ve üstü gerekli."
@@ -7987,7 +8214,7 @@ def rank_error(chat_id: str, caller_id: int, target_id: int, role: str | None = 
 
 async def _bot_rights(chat_id: str) -> set:
     try:
-        me = await bot.get_chat_member(chat_id, BOT_ID)
+        me = await bot.get_chat_member(chat_id, bot_id_for(chat_id))
     except TelegramError:
         return set()
     return {k for k in TG_KEYS if getattr(me, k, False)}
@@ -8303,13 +8530,19 @@ async def start(update: Update, context):
         return
     if not args or not args[0].startswith("aup_"):
         if update.effective_chat.type != 'private':
-            await update.message.reply_text("🛡 ULUS aktif! Ayarlar için /settings, komutlar için /help.")
+            await update.message.reply_text(f"🛡 {html.escape(brand())} aktif! Ayarlar için /settings, komutlar için /help.")
             return
-        await update.message.reply_text(
-            "🛡 <b>ULUS Security Bot</b>\n\nGrup ve kanalların için spam, link, flood, raid ve captcha koruması.\n\n"
-            "1️⃣ Aşağıdaki butonla botu grubuna gerekli yetkilerle ekle.\n"
-            "2️⃣ Alttaki menüden grubunu seç, ⚙️ Ayarlar ile her şeyi butonlarla yönet.",
-            parse_mode=ParseMode.HTML, reply_markup=add_to_chat_markup(context.bot.username))
+        c = current_clone()
+        if c and c.get('start_text'):
+            body = html.escape(c['start_text'])
+        else:
+            body = (f"🛡 <b>{html.escape(brand())} Security Bot</b>\n\nGrup ve kanalların için spam, link, flood, raid ve "
+                    "captcha koruması.\n\n1️⃣ Aşağıdaki butonla botu grubuna gerekli yetkilerle ekle.\n"
+                    "2️⃣ Alttaki menüden grubunu seç, ⚙️ Ayarlar ile her şeyi butonlarla yönet.")
+        markup = add_to_chat_markup(context.bot.username)
+        if c and c.get('support_link'):
+            markup = InlineKeyboardMarkup(list(markup.inline_keyboard) + [[InlineKeyboardButton("💬 Destek", url=c['support_link'])]])
+        await update.message.reply_text(body + brand_footer(), parse_mode=ParseMode.HTML, reply_markup=markup)
         await update.message.reply_text("Menü aşağıda 👇", reply_markup=dm_menu_keyboard())
         return
     try:
@@ -8349,7 +8582,7 @@ async def kanal(update: Update, context):
     owned, unknown = [], []
     with get_db() as conn:
         all_chats = conn.execute(
-            "SELECT chat_id, chat_type, owner_id FROM channels"
+            "SELECT chat_id, chat_type, owner_id FROM channels WHERE mybot(bot_id)"
         ).fetchall()
         for row in all_chats:
             cid = row['chat_id']
@@ -8553,25 +8786,36 @@ async def _resolve_target_id(update: Update, context) -> tuple[int | None, str]:
     return None, ''
 
 async def cmd_gban(update: Update, context):
-    if update.effective_user.id != FOUNDER_ID:
+    """/gban — bot sahibi: tüm botlarda (klonlar dahil) global ban. Klon sahibi: sadece kendi klonunun gruplarında."""
+    uid = update.effective_user.id
+    if not is_bot_owner(uid):
         return
     target_id, reason = await _resolve_target_id(update, context)
     if not target_id:
         await update.effective_message.reply_text("Kullanım: /gban <id|@kullanıcı> [sebep] (veya mesaja yanıt)")
         return
-    if target_id == FOUNDER_ID:
-        await update.effective_message.reply_text("Kendini banlayamazsın.")
+    if target_id in (FOUNDER_ID, uid, bot_owner_id()):
+        await update.effective_message.reply_text("Bu kişi banlanamaz.")
         return
+    scope = None if uid == FOUNDER_ID else cur_bot_id()
     async with _db_lock:
         with get_db() as conn:
-            conn.execute("INSERT OR REPLACE INTO global_bans (user_id, reason, banned_by, banned_at) VALUES (?, ?, ?, ?)",
-                         (target_id, reason, update.effective_user.id, time.time()))
+            if scope is None:
+                conn.execute("INSERT OR REPLACE INTO global_bans (user_id, reason, banned_by, banned_at) VALUES (?, ?, ?, ?)",
+                             (target_id, reason, uid, time.time()))
+            else:
+                conn.execute("INSERT OR REPLACE INTO clone_bans (bot_id, user_id, reason, banned_by, banned_at) "
+                             "VALUES (?, ?, ?, ?, ?)", (scope, target_id, reason, uid, time.time()))
             conn.commit()
     invalidate_block_caches()
-    status = await update.effective_message.reply_text(f"🌐 {target_id} global banlanıyor...")
-    with get_db() as conn:
-        chats = [r['chat_id'] for r in conn.execute(
-            "SELECT chat_id FROM channels WHERE chat_type IN ('group','supergroup','channel')").fetchall()]
+    where = "tüm botlarda" if scope is None else f"{brand()} gruplarında"
+    status = await update.effective_message.reply_text(f"🌐 {target_id} {where} banlanıyor...")
+    if scope is None:
+        with get_db() as conn:
+            chats = [r['chat_id'] for r in conn.execute(
+                "SELECT chat_id FROM channels WHERE chat_type IN ('group','supergroup','channel')").fetchall()]
+    else:
+        chats = bot_chat_ids(scope)
     ok = fail = 0
     for cid in chats:
         try:
@@ -8579,41 +8823,56 @@ async def cmd_gban(update: Update, context):
             ok += 1
         except Exception:
             fail += 1
-    await status.edit_text(f"🌐 {target_id} global banlandı.\n✅ {ok} sohbet | ❌ {fail} (yetki yok/üye değil)\nSebep: {reason or '-'}")
+    await status.edit_text(f"🌐 {target_id} {where} banlandı.\n✅ {ok} sohbet | ❌ {fail} (yetki yok/üye değil)\nSebep: {reason or '-'}")
 
 async def cmd_ungban(update: Update, context):
-    if update.effective_user.id != FOUNDER_ID:
+    uid = update.effective_user.id
+    if not is_bot_owner(uid):
         return
     target_id, _ = await _resolve_target_id(update, context)
     if not target_id:
         await update.effective_message.reply_text("Kullanım: /ungban <id|@kullanıcı>")
         return
+    scope = None if uid == FOUNDER_ID else cur_bot_id()
     async with _db_lock:
         with get_db() as conn:
-            conn.execute("DELETE FROM global_bans WHERE user_id = ?", (target_id,))
+            if scope is None:
+                conn.execute("DELETE FROM global_bans WHERE user_id = ?", (target_id,))
+            else:
+                conn.execute("DELETE FROM clone_bans WHERE bot_id = ? AND user_id = ?", (scope, target_id))
             conn.commit()
     invalidate_block_caches()
-    with get_db() as conn:
-        chats = [r['chat_id'] for r in conn.execute("SELECT chat_id FROM channels").fetchall()]
+    if scope is None:
+        with get_db() as conn:
+            chats = [r['chat_id'] for r in conn.execute("SELECT chat_id FROM channels").fetchall()]
+    else:
+        chats = bot_chat_ids(scope)
     for cid in chats:
         try:
             await bot.unban_chat_member(cid, target_id, only_if_banned=True)
         except Exception:
             pass
-    await update.effective_message.reply_text(f"✅ {target_id} global banı kaldırıldı.")
+    await update.effective_message.reply_text(f"✅ {target_id} {'global ' if scope is None else ''}banı kaldırıldı.")
 
 async def cmd_gbanlist(update: Update, context):
-    if update.effective_user.id != FOUNDER_ID:
+    uid = update.effective_user.id
+    if not is_bot_owner(uid):
         return
+    scope = None if uid == FOUNDER_ID and not current_clone() else cur_bot_id()
     with get_db() as conn:
-        rows = conn.execute("SELECT user_id, reason, banned_at FROM global_bans ORDER BY banned_at DESC LIMIT 50").fetchall()
+        if scope is None:
+            rows = conn.execute("SELECT user_id, reason, banned_at FROM global_bans ORDER BY banned_at DESC LIMIT 50").fetchall()
+        else:
+            rows = conn.execute("SELECT user_id, reason, banned_at FROM clone_bans WHERE bot_id = ? "
+                                "ORDER BY banned_at DESC LIMIT 50", (scope,)).fetchall()
     if not rows:
-        await update.effective_message.reply_text("Global ban listesi boş.")
+        await update.effective_message.reply_text("Ban listesi boş.")
         return
     lines = [f"• <code>{r['user_id']}</code> — {html.escape(r['reason'] or '-')} "
              f"({datetime.fromtimestamp(r['banned_at'], TZ_TR):%d.%m.%Y})" for r in rows]
+    title = "Global Ban Listesi" if scope is None else f"{html.escape(brand())} Ban Listesi"
     await update.effective_message.reply_text(
-        "🌐 <b>Global Ban Listesi</b> (son 50):\n<blockquote expandable>" + "\n".join(lines) + "</blockquote>",
+        f"🌐 <b>{title}</b> (son 50):\n<blockquote expandable>" + "\n".join(lines) + "</blockquote>",
         parse_mode=ParseMode.HTML)
 
 # ── Ayar komutları ──
@@ -9323,6 +9582,419 @@ async def filter_reply_handler(update: Update, context):
     except TelegramError as e:
         logger.debug(f"Filtre yanıtı gönderilemedi {chat_id}: {e}")
 
+# ═══════════════════════════ KLON BOT ═══════════════════════════
+# Akış: kullanıcı ana botta 🤖 Klon → "İzin iste" → bot sahibine bilgileriyle Onayla/Reddet gelir → onaylanınca kullanıcı
+# BotFather token'ını gönderir → klon aynı altyapıyla hemen çalışır. Klon sahibi marka adı, karşılama metni, destek
+# linki ve yardım başlığını değiştirebilir; kendi botunda /duyuru, /gban, /panel kullanır.
+CLONE_TOKEN_RE = re.compile(r'^\d{6,12}:[A-Za-z0-9_-]{30,50}$')
+CLONE_LIMIT_PER_USER = 1
+CLONE_FIELDS = {  # alan: (etiket, istem, en fazla uzunluk)
+    'brand':        ("🏷 Marka adı", "Botunun mesajlarda görünecek adını yaz (ör. Alfa Guard).", 32),
+    'start_text':   ("👋 Karşılama metni", "/start yazınca görünecek karşılama metnini yaz.", 800),
+    'support_link': ("🔗 Destek linki", "Destek grubu/kanal linkini yaz (https://t.me/...). Kaldırmak için: -", 120),
+    'help_title':   ("❓ Yardım başlığı", "Yardım menüsünün başlığını yaz.", 60),
+}
+
+def clone_row(bot_id: int) -> dict | None:
+    with get_db() as conn:
+        r = conn.execute("SELECT * FROM clones WHERE bot_id = ?", (bot_id,)).fetchone()
+    return dict(r) if r else None
+
+def user_clones(user_id: int) -> list:
+    with get_db() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT * FROM clones WHERE owner_id = ? AND status != 'deleted' ORDER BY created_at", (user_id,))]
+
+def clone_permission(user_id: int) -> str | None:
+    """'approved' / 'pending' / 'rejected' / None"""
+    if user_id == FOUNDER_ID:
+        return 'approved'
+    with get_db() as conn:
+        r = conn.execute("SELECT status FROM clone_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+                         (user_id,)).fetchone()
+    return r['status'] if r else None
+
+async def _main_send(chat_id, text, **kw):
+    """Ana bottan mesaj (klon bildirimleri, bot sahibine istekler). Gönderilemezse sessizce geçer."""
+    try:
+        return await (MAIN_BOT or bot).send_message(chat_id, text, **kw)
+    except Exception as e:
+        logger.debug(f"Ana bot mesajı gönderilemedi {chat_id}: {e}")
+
+async def start_clone(row: dict) -> str | None:
+    """Klonu başlatır. Hata metni ya da None döner."""
+    bid = row['bot_id']
+    if bid in CLONE_APPS:
+        return None
+    app = (Application.builder().token(row['token']).rate_limiter(UlusRateLimiter(max_retries=3))
+           .job_queue(UlusJobQueue()).build())
+    register_handlers(app, main_bot=False)
+    try:
+        await app.initialize()
+    except (InvalidToken, Forbidden) as e:
+        logger.warning(f"Klon başlatılamadı {bid}: {e}")
+        return "Token geçersiz veya iptal edilmiş."
+    except TelegramError as e:
+        logger.warning(f"Klon başlatılamadı {bid}: {e}")
+        return friendly_error(e)
+    if app.bot.id != bid:
+        await app.shutdown()
+        return "Token başka bir bota ait."
+    CLONES[bid] = row
+    RUNNING_BOTS[bid] = app.bot
+    CLONE_APPS[bid] = app
+    token = _ctx_bot.set(app.bot)
+    try:
+        await setup_bot_profile(app.bot)
+    finally:
+        _ctx_bot.reset(token)
+    await app.start()
+    await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    with get_db() as conn:
+        conn.execute("UPDATE clones SET status = 'active', username = ?, name = ? WHERE bot_id = ?",
+                     (app.bot.username, app.bot.first_name, bid))
+        conn.commit()
+    CLONES[bid] = clone_row(bid)
+    logger.info(f"Klon çalışıyor: @{app.bot.username} (sahip {row['owner_id']})")
+    return None
+
+async def stop_clone(bid: int, status: str = 'stopped'):
+    app = CLONE_APPS.pop(bid, None)
+    RUNNING_BOTS.pop(bid, None)
+    CLONES.pop(bid, None)
+    if app:
+        try:
+            if app.updater and app.updater.running:
+                await app.updater.stop()
+            if app.running:
+                await app.stop()
+            await app.shutdown()
+        except Exception as e:
+            logger.debug(f"Klon durdurma {bid}: {e}")
+    with get_db() as conn:
+        conn.execute("UPDATE clones SET status = ? WHERE bot_id = ?", (status, bid))
+        conn.commit()
+
+async def start_all_clones():
+    with get_db() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM clones WHERE status = 'active'")]
+    for row in rows:
+        err = await start_clone(row)
+        if err:
+            await _clone_invalid(row, err)
+
+async def stop_all_clones():
+    for bid in list(CLONE_APPS):
+        app = CLONE_APPS.pop(bid)
+        RUNNING_BOTS.pop(bid, None)
+        try:
+            if app.updater and app.updater.running:
+                await app.updater.stop()
+            if app.running:
+                await app.stop()
+            await app.shutdown()
+        except Exception as e:
+            logger.debug(f"Klon kapatma {bid}: {e}")
+
+async def _clone_invalid(row: dict, why: str):
+    await stop_clone(row['bot_id'], 'invalid')
+    text = (f"⚠️ Klon botun @{html.escape(row.get('username') or str(row['bot_id']))} durduruldu: {html.escape(why)}\n"
+            "BotFather'dan yeni token alıp 🤖 Klon menüsünden <b>Token değiştir</b> ile tekrar başlatabilirsin.")
+    for uid in {row['owner_id'], FOUNDER_ID}:
+        try:
+            await _main_send(uid, text, parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.debug(f"Klon uyarısı gönderilemedi {uid}: {e}")
+
+async def clone_health_job(context):
+    """Token iptal edilmiş/silinmiş klonları durdurur ve sahibine haber verir."""
+    for bid, app in list(CLONE_APPS.items()):
+        try:
+            await app.bot.get_me()
+        except (InvalidToken, Forbidden) as e:
+            row = CLONES.get(bid) or clone_row(bid)
+            if row:
+                await _clone_invalid(row, f"token geçersiz ({e})")
+        except TelegramError:
+            pass
+
+def _clone_menu(user_id: int):
+    perm = clone_permission(user_id)
+    mine = user_clones(user_id)
+    rows = []
+    if perm != 'approved':
+        state = {'pending': "⏳ İsteğin bot sahibinde, onay bekleniyor.", 'rejected': "❌ Önceki isteğin reddedildi."}.get(perm, "")
+        text = ("🤖 <b>Klon bot</b>\n\nKendi bot adınla, ULUS altyapısını kullanan bir koruma botu aç.\n"
+                "1) İzin iste → bot sahibi onaylar\n2) @BotFather'dan /newbot ile bot oluştur, token'ı buraya gönder\n"
+                "3) Botun hemen çalışmaya başlar\n\n" + state)
+        if perm != 'pending':
+            rows.append([ibtn("📨 İzin iste", "cl|req", GREEN)])
+        return text, InlineKeyboardMarkup(rows) if rows else None
+    if not mine:
+        text = ("🤖 <b>Klon bot</b>\n\n✅ Klon açma iznin var.\n@BotFather'da /newbot ile botunu oluştur ve aldığın "
+                "<b>token</b>'ı aşağıdaki butona basıp gönder.")
+        rows.append([ibtn("🔑 Token gönder", "cl|tok", GREEN)])
+        return text, InlineKeyboardMarkup(rows)
+    c = mine[0]
+    st = {'active': "🟢 Çalışıyor", 'stopped': "⏸ Durduruldu", 'invalid': "⚠️ Token geçersiz"}.get(c['status'], c['status'])
+    with get_db() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM channels WHERE bot_id = ?", (c['bot_id'],)).fetchone()[0]
+    text = (f"🤖 <b>Klon botun</b>: @{html.escape(c.get('username') or '?')}\nDurum: {st} · Grup/kanal: {n}\n\n"
+            f"🏷 Marka: <b>{html.escape(c.get('brand') or c.get('name') or '-')}</b>\n"
+            f"🔗 Destek: {html.escape(c.get('support_link') or '-')}\n"
+            f"❓ Yardım başlığı: {html.escape(c.get('help_title') or '-')}\n"
+            f"👋 Karşılama: {html.escape((c.get('start_text') or 'varsayılan')[:80])}")
+    b = c['bot_id']
+    rows = [[ibtn(CLONE_FIELDS[f][0], f"cl|ed|{b}|{f}", BLUE) for f in ('brand', 'start_text')],
+            [ibtn(CLONE_FIELDS[f][0], f"cl|ed|{b}|{f}", BLUE) for f in ('support_link', 'help_title')],
+            [ibtn("⏸ Durdur", f"cl|stop|{b}", RED) if c['status'] == 'active' else ibtn("▶️ Başlat", f"cl|go|{b}", GREEN),
+             ibtn("🔑 Token değiştir", "cl|tok", BLUE)],
+            [ibtn("🗑 Klonu sil", f"cl|del|{b}", RED)]]
+    return text, InlineKeyboardMarkup(rows)
+
+async def cmd_klon(update: Update, context):
+    """/klon — klon bot menüsü (sadece ana botta, özelden)."""
+    if update.effective_chat.type != 'private':
+        await update.effective_message.reply_text("Klon işlemleri bota özelden yapılır.")
+        return
+    text, markup = _clone_menu(update.effective_user.id)
+    await update.effective_message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+
+async def _clone_request(query, user):
+    async with _db_lock:
+        with get_db() as conn:
+            rid = conn.execute("INSERT INTO clone_requests (user_id, username, first_name, status, created_at) "
+                               "VALUES (?, ?, ?, 'pending', ?)", (user.id, user.username, user.first_name, time.time())).lastrowid
+            groups = conn.execute("SELECT COUNT(DISTINCT chat_id) FROM roles WHERE user_id = ?", (user.id,)).fetchone()[0]
+            conn.commit()
+    text = (f"📨 <b>Klon izin isteği</b> #{rid}\n\n👤 {mention(user)}\n🆔 <code>{user.id}</code>\n"
+            f"🔗 Kullanıcı adı: {('@' + html.escape(user.username)) if user.username else '-'}\n"
+            f"🌐 Dil: {html.escape(getattr(user, 'language_code', None) or '-')} · Premium: {'evet' if getattr(user, 'is_premium', False) else 'hayır'}\n"
+            f"🛡 Botta yetkili olduğu grup: {groups}")
+    try:
+        await _main_send(FOUNDER_ID, text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(
+            [[ibtn("✅ Onayla", f"cl|ok|{rid}", GREEN), ibtn("❌ Reddet", f"cl|no|{rid}", RED)]]))
+    except TelegramError as e:
+        logger.warning(f"Klon isteği bot sahibine gönderilemedi: {e}")
+
+async def clone_callback(update: Update, context):
+    """cl|... — klon menüsü ve bot sahibinin onay/yönetim butonları."""
+    query = update.callback_query
+    parts = query.data.split('|')
+    op = parts[1]
+    uid = query.from_user.id
+    if op == 'req':
+        if clone_permission(uid) in ('pending', 'approved'):
+            await query.answer("İsteğin zaten var.", show_alert=True)
+            return
+        await _clone_request(query, query.from_user)
+        await query.answer("📨 İstek gönderildi")
+    elif op in ('ok', 'no'):
+        if uid != FOUNDER_ID:
+            await query.answer("Bu işlemi sadece bot sahibi yapabilir.", show_alert=True)
+            return
+        rid = int(parts[2])
+        with get_db() as conn:
+            r = conn.execute("SELECT * FROM clone_requests WHERE id = ?", (rid,)).fetchone()
+        if not r or r['status'] != 'pending':
+            await query.answer("Bu istek zaten işlendi.", show_alert=True)
+            return
+        status = 'approved' if op == 'ok' else 'rejected'
+        with get_db() as conn:
+            conn.execute("UPDATE clone_requests SET status = ?, decided_at = ? WHERE id = ?", (status, time.time(), rid))
+            conn.commit()
+        await query.answer("Onaylandı" if op == 'ok' else "Reddedildi")
+        await query.edit_message_text(f"{query.message.text_html}\n\n— {'✅ Onaylandı' if op == 'ok' else '❌ Reddedildi'}",
+                                      parse_mode=ParseMode.HTML)
+        try:
+            await _main_send(r['user_id'],
+                "✅ Klon bot iznin onaylandı! /klon yazıp token'ını gönderebilirsin." if op == 'ok'
+                else "❌ Klon bot isteğin reddedildi.")
+        except TelegramError as e:
+            logger.debug(f"Klon kararı bildirilemedi: {e}")
+        return
+    elif op == 'tok':
+        if clone_permission(uid) != 'approved':
+            await query.answer("Önce izin almalısın.", show_alert=True)
+            return
+        context.user_data['await_clone'] = {'field': 'token', 'expires': time.time() + 600}
+        await query.answer()
+        await query.message.reply_text("🔑 @BotFather'dan aldığın bot token'ını yaz (ör. <code>123456789:ABC...</code>).\n"
+                                       "Vazgeçmek için: iptal", parse_mode=ParseMode.HTML,
+                                       reply_markup=ForceReply(input_field_placeholder="123456789:ABC..."))
+        return
+    elif op in ('ed', 'stop', 'go', 'del', 'delok', 'adm'):
+        bid = int(parts[2])
+        row = clone_row(bid)
+        if not row or (row['owner_id'] != uid and uid != FOUNDER_ID):
+            await query.answer("Bu klon senin değil.", show_alert=True)
+            return
+        if op == 'ed':
+            field = parts[3]
+            if field not in CLONE_FIELDS:
+                await query.answer("Geçersiz.", show_alert=True)
+                return
+            context.user_data['await_clone'] = {'field': field, 'bot_id': bid, 'expires': time.time() + 600}
+            await query.answer()
+            await query.message.reply_text(f"{CLONE_FIELDS[field][1]}\nVazgeçmek için: iptal",
+                                           reply_markup=ForceReply(input_field_placeholder=CLONE_FIELDS[field][0]))
+            return
+        if op == 'stop':
+            await stop_clone(bid)
+            await query.answer("⏸ Durduruldu")
+        elif op == 'go':
+            err = await start_clone(row)
+            if err:
+                await query.answer(err[:190], show_alert=True)
+                return
+            await query.answer("▶️ Başlatıldı")
+        elif op == 'del':
+            await query.answer()
+            await query.edit_message_text(f"🗑 @{html.escape(row.get('username') or '')} klonu silinsin mi? Bot durur, "
+                                          "gruplardaki ayarlar kalır.", parse_mode=ParseMode.HTML,
+                                          reply_markup=InlineKeyboardMarkup([[ibtn("🗑 Evet, sil", f"cl|delok|{bid}", RED),
+                                                                              ibtn("↩️ Vazgeç", f"cl|adm|{bid}")]]))
+            return
+        elif op == 'delok':
+            await stop_clone(bid, 'deleted')
+            with get_db() as conn:
+                conn.execute("UPDATE clones SET token = '' WHERE bot_id = ?", (bid,))
+                conn.commit()
+            await query.answer("🗑 Silindi")
+            if uid != row['owner_id']:
+                try:
+                    await _main_send(row['owner_id'], f"🗑 Klon botun @{row.get('username')} bot sahibi tarafından silindi.")
+                except TelegramError:
+                    pass
+        else:
+            await query.answer()
+        if uid == FOUNDER_ID and uid != row['owner_id']:
+            text, markup = _clones_admin_view()
+        else:
+            text, markup = _clone_menu(uid)
+        await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+        return
+    else:
+        await query.answer()
+        return
+    text, markup = _clone_menu(uid)
+    try:
+        await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+    except BadRequest:
+        pass
+
+async def clone_input_handler(update: Update, context):
+    """Klon için beklenen metin girişi (token / özelleştirme alanı). Sadece özelden ve bekleyen giriş varsa."""
+    pend = context.user_data.get('await_clone')
+    msg = update.effective_message
+    if not pend or update.effective_chat.type != 'private' or not msg or not msg.text:
+        return
+    if time.time() > pend['expires']:
+        context.user_data.pop('await_clone', None)
+        return
+    text = msg.text.strip()
+    if text.lower() in ('iptal', 'vazgeç', 'vazgec', '/iptal'):
+        context.user_data.pop('await_clone', None)
+        await msg.reply_text("Vazgeçildi.")
+        raise ApplicationHandlerStop
+    uid = update.effective_user.id
+    if pend['field'] == 'token':
+        context.user_data.pop('await_clone', None)
+        try:
+            await msg.delete()  # token sohbette açık kalmasın
+        except TelegramError:
+            pass
+        reply = await _register_clone_token(uid, text)
+        await context.bot.send_message(uid, reply, parse_mode=ParseMode.HTML)
+        t, mk = _clone_menu(uid)
+        await context.bot.send_message(uid, t, reply_markup=mk, parse_mode=ParseMode.HTML)
+        raise ApplicationHandlerStop
+    field, bid = pend['field'], pend['bot_id']
+    row = clone_row(bid)
+    if not row or (row['owner_id'] != uid and uid != FOUNDER_ID):
+        context.user_data.pop('await_clone', None)
+        raise ApplicationHandlerStop
+    limit = CLONE_FIELDS[field][2]
+    value = '' if text == '-' else text[:limit]
+    if field == 'support_link' and value and not re.match(r'^https://t\.me/[\w/+\-]+$', value):
+        await msg.reply_text("Link https://t.me/ ile başlamalı. Tekrar yaz ya da iptal.")
+        raise ApplicationHandlerStop
+    with get_db() as conn:
+        conn.execute(f"UPDATE clones SET {field} = ? WHERE bot_id = ?", (value or None, bid))
+        conn.commit()
+    if bid in CLONES:
+        CLONES[bid] = clone_row(bid)
+    context.user_data.pop('await_clone', None)
+    await msg.reply_text(f"✅ {CLONE_FIELDS[field][0]} güncellendi.")
+    t, mk = _clone_menu(row['owner_id'] if uid == FOUNDER_ID else uid)
+    await msg.reply_text(t, reply_markup=mk, parse_mode=ParseMode.HTML)
+    raise ApplicationHandlerStop
+
+async def _register_clone_token(uid: int, token: str) -> str:
+    if clone_permission(uid) != 'approved':
+        return "❌ Klon açma iznin yok."
+    if not CLONE_TOKEN_RE.match(token):
+        return "❌ Bu bir bot token'ına benzemiyor. @BotFather'daki tam token'ı gönder."
+    if token == TOKEN:
+        return "❌ Bu ana botun token'ı."
+    try:
+        me = await Bot(token).get_me()
+    except (InvalidToken, Forbidden):
+        return "❌ Token geçersiz. @BotFather'dan doğru token'ı kopyala."
+    except TelegramError as e:
+        return friendly_error(e)
+    existing = clone_row(me.id)
+    mine = [c for c in user_clones(uid) if c['bot_id'] != me.id]
+    if existing and existing['owner_id'] != uid and existing['status'] != 'deleted':
+        return "❌ Bu bot zaten başka birinin klonu."
+    old = mine[0] if mine else None
+    if old and uid != FOUNDER_ID and len(mine) >= CLONE_LIMIT_PER_USER:
+        # token değiştir = eski klonun yerine yenisi
+        await stop_clone(old['bot_id'], 'deleted')
+    async with _db_lock:
+        with get_db() as conn:
+            conn.execute("""INSERT INTO clones (bot_id, owner_id, token, username, name, status, created_at)
+                            VALUES (?, ?, ?, ?, ?, 'active', ?)
+                            ON CONFLICT(bot_id) DO UPDATE SET token = excluded.token, owner_id = excluded.owner_id,
+                            username = excluded.username, name = excluded.name, status = 'active'""",
+                         (me.id, uid, token, me.username, me.first_name, time.time()))
+            if old:
+                for col in ('brand', 'start_text', 'support_link', 'help_title'):
+                    conn.execute(f"UPDATE clones SET {col} = COALESCE({col}, ?) WHERE bot_id = ?", (old.get(col), me.id))
+            conn.commit()
+    if me.id in CLONE_APPS:  # aynı bot yeni token'la: yeniden başlat
+        await stop_clone(me.id, 'active')
+    err = await start_clone(clone_row(me.id))
+    if err:
+        return f"❌ Bot başlatılamadı: {html.escape(err)}"
+    return (f"✅ <b>Klon botun hazır!</b> @{html.escape(me.username)}\n\n"
+            f"Gruba eklemek için: https://t.me/{me.username}?startgroup=ulus&admin={ADMIN_RIGHTS_GROUP}\n"
+            "Adını ve fotoğrafını @BotFather'dan değiştirebilirsin.")
+
+def _clones_admin_view():
+    with get_db() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM clones WHERE status != 'deleted' ORDER BY created_at")]
+        pend = conn.execute("SELECT COUNT(*) FROM clone_requests WHERE status = 'pending'").fetchone()[0]
+    icon = {'active': "🟢", 'stopped': "⏸", 'invalid': "⚠️"}
+    lines = [f"{icon.get(r['status'], '•')} @{html.escape(r.get('username') or '?')} — sahip <code>{r['owner_id']}</code>"
+             for r in rows]
+    text = (f"🤖 <b>Klon botlar</b> ({len(rows)}) · Bekleyen istek: {pend}\n\n" + ("\n".join(lines) or "Henüz klon yok."))
+    kb = []
+    for r in rows[:30]:
+        b = r['bot_id']
+        kb.append([ibtn(f"@{(r.get('username') or '?')[:20]}", f"cl|adm|{b}"),
+                   ibtn("⏸" if r['status'] == 'active' else "▶️", f"cl|{'stop' if r['status'] == 'active' else 'go'}|{b}",
+                        RED if r['status'] == 'active' else GREEN),
+                   ibtn("🗑", f"cl|del|{b}", RED)])
+    return text, InlineKeyboardMarkup(kb) if kb else None
+
+async def cmd_klonlar(update: Update, context):
+    """/klonlar — bot sahibi: tüm klonları listele, durdur/başlat/sil."""
+    if update.effective_user.id != FOUNDER_ID:
+        return
+    text, markup = _clones_admin_view()
+    await update.effective_message.reply_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+
 # ── Veritabanı yedekleme ──
 def _make_backup() -> str:
     os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -9432,7 +10104,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
         if isinstance(update, Update) and update.effective_chat:
             where = f"Sohbet: {update.effective_chat.id}\n"
         try:
-            await context.bot.send_message(FOUNDER_ID, f"⚠️ Bot hatası\n{where}<pre>{html.escape(tb)}</pre>",
+            await (MAIN_BOT or context.bot).send_message(FOUNDER_ID, f"⚠️ Bot hatası\n{where}<pre>{html.escape(tb)}</pre>",
                                            parse_mode=ParseMode.HTML)
         except Exception:
             pass
@@ -9506,7 +10178,7 @@ async def ensure_registered(chat_id: str, chat_type: str | None = None) -> bool:
         return False
     _unregistered_checked[chat_id] = time.time()
     try:
-        me = await bot.get_chat_member(chat_id, BOT_ID)
+        me = await bot.get_chat_member(chat_id, bot_id_for(chat_id))
         if me.status != 'administrator':
             return False
         admins = await bot.get_chat_administrators(chat_id)
@@ -9552,6 +10224,7 @@ async def checkpoint_job(context):
         logger.debug(f"WAL checkpoint: {e}")
 
 async def post_shutdown(application):
+    await stop_all_clones()
     await checkpoint_job(None)
     global userbot
     if userbot:
@@ -9565,8 +10238,13 @@ async def post_shutdown(application):
 async def post_init(application):
     global BOT_ID, userbot
     BOT_ID = application.bot.id
+    RUNNING_BOTS[BOT_ID] = application.bot
     await setup_bot_profile(application.bot)
     await _startup_report(application.bot)
+    try:
+        await start_all_clones()
+    except Exception as e:
+        logger.error(f"Klonlar başlatılamadı: {e}")
 
     if not (USERBOT_API_ID and USERBOT_API_HASH):
         logger.info("API_ID / API_HASH boş — Telethon kapalı (kullanıcı adı çözme ve toplu istek onayı Bot API ile yapılır).")
@@ -9580,22 +10258,9 @@ async def post_init(application):
         logger.error(f"Telethon başlatılamadı: {e}")
         userbot = None
 
-def main():
-    global bot
-    if not FOUNDER_ID_VALID:
-        logger.error("FOUNDER_ID ayarı geçersiz veya boş. Lütfen .env dosyasına sayısal bir FOUNDER_ID yazın.")
-        raise SystemExit("FOUNDER_ID ayarı zorunlu ve geçerli olmalıdır.")
-
-    app = (
-        Application.builder()
-        .token(TOKEN)
-        .rate_limiter(UlusRateLimiter(max_retries=3))
-        .post_init(post_init)
-        .post_shutdown(post_shutdown)
-        .build()
-    )
-    bot = app.bot  # tüm modül tek (rate limiter'lı) bot nesnesini kullanır
-
+def register_handlers(app, main_bot: bool = True):
+    """Ana bot ve her klon aynı handler'ları kullanır. Klon yönetimi ve periyodik işler sadece ana bottadır."""
+    app.add_handler(TypeHandler(Update, bot_context_handler), group=-1000)
     # Her güncellemeden önce: engelli sohbet/kullanıcı ve global ban kontrolü
     app.add_handler(TypeHandler(Update, blocklist_guard), group=-100)
     app.add_handler(TypeHandler(Update, auto_register_handler), group=-99)
@@ -9780,6 +10445,42 @@ def main():
     app.add_handler(CallbackQueryHandler(appeal_callback, pattern=r'^appeal(pick)?\|'))
     app.add_handler(CallbackQueryHandler(help_settings_callback, pattern=r'^help_settings$'))
 
+    if main_bot:
+        app.add_handler(CommandHandler('klon', cmd_klon, filters=filters.ChatType.PRIVATE))
+        app.add_handler(CommandHandler('klonlar', cmd_klonlar, filters=filters.ChatType.PRIVATE))
+        app.add_handler(CallbackQueryHandler(clone_callback, pattern=r'^cl\|'))
+        app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, clone_input_handler),
+                        group=-60)
+    # Eski/bozuk buton verisi (ör. önceki sürümden kalan butonlar) çökme yerine kibar uyarı versin
+    for handlers in app.handlers.values():
+        for h in handlers:
+            if isinstance(h, CallbackQueryHandler):
+                h.callback = guard_callback(h.callback)
+    # Düzenlenen komut mesajı komutu tekrar çalıştırmasın (çift ban/uyarı ve update.message=None hataları)
+    for handlers in app.handlers.values():
+        for h in handlers:
+            if isinstance(h, CommandHandler):
+                h.filters = h.filters & ~filters.UpdateType.EDITED
+
+def main():
+    global MAIN_BOT
+    if not FOUNDER_ID_VALID:
+        logger.error("FOUNDER_ID ayarı geçersiz veya boş. Lütfen .env dosyasına sayısal bir FOUNDER_ID yazın.")
+        raise SystemExit("FOUNDER_ID ayarı zorunlu ve geçerli olmalıdır.")
+
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .rate_limiter(UlusRateLimiter(max_retries=3))
+        .job_queue(UlusJobQueue())
+        .post_init(post_init)
+        .post_shutdown(post_shutdown)
+        .build()
+    )
+    MAIN_BOT = app.bot  # modüldeki `bot` vekili ana botu ve çalışan klonları buradan seçer
+
+    register_handlers(app, main_bot=True)
+
     job_queue = app.job_queue
     job_queue.run_repeating(check_captcha_timeouts, interval=15, first=15)
     job_queue.run_repeating(check_join_captcha_timeouts, interval=15, first=20)
@@ -9791,22 +10492,13 @@ def main():
     job_queue.run_repeating(check_expired_mutes, interval=300, first=120)
     job_queue.run_repeating(db_cleanup_job, interval=3600, first=600)
     job_queue.run_repeating(checkpoint_job, interval=600, first=60)
+    job_queue.run_repeating(clone_health_job, interval=600, first=300)
     job_queue.run_repeating(spam_memory_cleanup, interval=3600, first=3600)
     job_queue.run_repeating(weekly_log_cleanup, interval=86400, first=3600)
     job_queue.run_daily(backup_job, time=dtime(4, 0, tzinfo=TZ_TR))
     job_queue.run_daily(run_daily_scheduler, time=dtime(0, 0, tzinfo=TZ_TR))
 
     logger.info("✅ Bot çalışıyor...")
-    # Eski/bozuk buton verisi (ör. önceki sürümden kalan butonlar) çökme yerine kibar uyarı versin
-    for handlers in app.handlers.values():
-        for h in handlers:
-            if isinstance(h, CallbackQueryHandler):
-                h.callback = guard_callback(h.callback)
-    # Düzenlenen komut mesajı komutu tekrar çalıştırmasın (çift ban/uyarı ve update.message=None hataları)
-    for handlers in app.handlers.values():
-        for h in handlers:
-            if isinstance(h, CommandHandler):
-                h.filters = h.filters & ~filters.UpdateType.EDITED
     def _signal_handler(signum, _frame):
         sig_name = signal.Signals(signum).name if signum else str(signum)
         logger.info(f"Kapatma sinyali alındı: {sig_name}. Bot güvenli şekilde durduruluyor...")
