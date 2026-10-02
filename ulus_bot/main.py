@@ -253,6 +253,21 @@ class UlusJobQueue(JobQueue):
         _ctx_bot.set(job_queue.application.bot)  # her iş kendi görevinde çalışır; ayar sadece o işe özel
         await job.run(job_queue.application)
 
+_main_absent_checked: dict = {}
+
+async def _main_bot_absent(cid: str, via) -> bool:
+    """Ana bot bu grupta değil mi? (klonun gözünden, sohbet başına 1 saatte bir kontrol)"""
+    if time.time() - _main_absent_checked.get(cid, 0) < 3600:
+        return False
+    _main_absent_checked[cid] = time.time()
+    try:
+        m = await via.get_chat_member(cid, BOT_ID)
+    except TelegramError:
+        return True
+    except Exception:
+        return False
+    return getattr(m, 'status', 'left') in ('left', 'kicked')
+
 async def bot_context_handler(update: Update, context):
     """Her güncellemenin en başında: hangi botla çalışıldığını işaretler; başka botumuzun yönettiği sohbetin
     güncellemelerini (aynı grupta iki botumuz varsa çift işlem olmasın diye) yok sayar."""
@@ -267,6 +282,10 @@ async def bot_context_handler(update: Update, context):
     if raw is None:
         return
     if raw == -1:  # sahipsiz kalmış sohbet: ilk gelen botumuz sahiplenir
+        set_chat_bot(cid, context.bot.id)
+        return
+    if raw == 0 and BOT_ID and context.bot.id != BOT_ID and await _main_bot_absent(cid, context.bot):
+        # eski sürümde ayar kaydı bot_id'yi siliyordu: ana botun olmadığı bu grubu klon geri sahiplenir
         set_chat_bot(cid, context.bot.id)
         return
     owner = raw or BOT_ID
@@ -683,6 +702,49 @@ def init_db():
                 PRIMARY KEY (bot_id, user_id)
             );
 
+            CREATE TABLE IF NOT EXISTS rich_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                value TEXT NOT NULL,
+                UNIQUE (chat_id, kind, value)
+            );
+
+            CREATE TABLE IF NOT EXISTS auto_delete (
+                chat_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                delete_at REAL NOT NULL,
+                PRIMARY KEY (chat_id, message_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_autodel_at ON auto_delete(delete_at);
+
+            CREATE TABLE IF NOT EXISTS scheduled_msgs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id TEXT NOT NULL,
+                rich TEXT NOT NULL,
+                interval INTEGER NOT NULL,
+                next_at REAL NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                delete_prev INTEGER NOT NULL DEFAULT 1,
+                last_msg_ids TEXT,
+                created_by INTEGER,
+                created_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_sched_next ON scheduled_msgs(enabled, next_at);
+
+            CREATE TABLE IF NOT EXISTS afk (
+                user_id INTEGER PRIMARY KEY,
+                reason TEXT,
+                since REAL NOT NULL,
+                name TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS tag_optout (
+                chat_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                PRIMARY KEY (chat_id, user_id)
+            );
+
             CREATE TABLE IF NOT EXISTS chat_filters (
                 chat_id TEXT NOT NULL,
                 trigger_norm TEXT NOT NULL,
@@ -837,6 +899,12 @@ def _migrate_installer():
             conn.execute("ALTER TABLE channels ADD COLUMN added_by INTEGER")
         if 'bot_id' not in cols:  # sohbeti yöneten bot (NULL = ana bot)
             conn.execute("ALTER TABLE channels ADD COLUMN bot_id INTEGER")
+        ucols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        if 'left_at' not in ucols:  # gruptan ayrılan üye (/etiket listesine girmez; tekrar yazınca/katılınca silinir)
+            conn.execute("ALTER TABLE users ADD COLUMN left_at REAL")
+        fcols = {r[1] for r in conn.execute("PRAGMA table_info(chat_filters)")}
+        if 'is_html' not in fcols:  # eski filtreler düz metin; yeniler biçimli (HTML) kaydedilir
+            conn.execute("ALTER TABLE chat_filters ADD COLUMN is_html INTEGER DEFAULT 0")
         rcols = {r[1] for r in conn.execute("PRAGMA table_info(clone_requests)")}
         for col, typedef in (('bot_id', 'INTEGER'), ('token', 'TEXT'), ('bot_username', 'TEXT'), ('bot_name', 'TEXT'),
                              ('admin_msg_id', 'INTEGER')):
@@ -932,6 +1000,7 @@ PERMS = {
     'can_manage_settings': ('⚙️ Koruma ayarları', LVL_YARDIMCI),
     'can_manage_roles':    ('👑 Rütbe verme / alma', LVL_YARDIMCI),
     'can_filters':         ('🧩 Filtre (otomatik yanıt) yönetimi', LVL_ADMIN),
+    'can_tag':             ('🏷 Toplu etiketleme (/etiket)', LVL_ADMIN),
 }
 
 # Rütbeye göre Telegram admin hakları. Admin'e kısıtlama hakkı verilmez (Telegram'da ban'ı da kapsar);
@@ -1142,10 +1211,14 @@ def save_channel_settings(chat_id: str, data: dict):
     stats_json = json.dumps(data.get('stats', {}))
     invites_json = json.dumps(data.get('invites', {}))
     with get_db() as conn:
+        # REPLACE satırı silip yeniden yazar ve added_by / bot_id / created_at sıfırlanırdı: sadece bu sütunlar güncellenir
         conn.execute("""
-            INSERT OR REPLACE INTO channels
+            INSERT INTO channels
             (chat_id, owner_id, log_chat_id, chat_type, settings, stats, invites)
             VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(chat_id) DO UPDATE SET owner_id = excluded.owner_id, log_chat_id = excluded.log_chat_id,
+                chat_type = excluded.chat_type, settings = excluded.settings, stats = excluded.stats,
+                invites = excluded.invites
         """, (
             chat_id, data['owner'], data.get('log_chat_id'),
             data.get('chat_type'), settings_json, stats_json, invites_json
@@ -1356,6 +1429,13 @@ def _default_channel_settings():
         'reports_enabled': True,
         # Admin kurtarma: güvenilir kişiler (en fazla 3)
         'recovery_ids': [], 'recovery_autorestore': False,
+        # Karşılama ekstraları: eskisini sil, X dk sonra sil (0 = kapalı), toplu katılımda tek mesaj, özelden gönder
+        'welcome_clean': False, 'welcome_autodel': 0, 'welcome_batch': True, 'welcome_dm': False,
+        'goodbye_enabled': False,
+        # Kanal zorunluluğu
+        'fsub_enabled': False, 'fsub_channel': None, 'fsub_title': None, 'fsub_link': None,
+        # /etiket: bir mesajda kaç kişi, isim/emoji, sadece son 7 günün aktifleri
+        'tag_size': 5, 'tag_style': 'name', 'tag_active_only': False,
     }
 
 async def _register_chat(chat_id: str, owner_id: int, chat_type: str, added_by: int | None = -1):
@@ -2108,11 +2188,12 @@ async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             perms = await _default_member_permissions(chat_id)
             await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=perms)
-            await query.edit_message_text(f"✅ {who} doğrulandı! Gruba hoş geldin.", parse_mode=ParseMode.HTML)
+            await query.edit_message_text(f"✅ {who} doğrulandı!", parse_mode=ParseMode.HTML)
             await send_log(chat_id, f"✅ Captcha geçti: {who} | {chat_id}", ParseMode.HTML)
             if context.job_queue:
                 context.job_queue.run_once(_delete_message_job, 15,
                                            data={'chat_id': chat_id, 'message_id': query.message.message_id})
+            await send_welcome(chat_id, [query.from_user])  # captcha'dan geçene hoş geldin
         except Exception as e:
             logger.error(f"Captcha doğrulama hata: {e}")
     else:
@@ -3722,35 +3803,6 @@ async def set_auto_reject_bot(update: Update, context):
     save_channel_settings(chat_id, channel)
     await update.message.reply_text(f"Bot/sahte hesap reddi {'açıldı' if state else 'kapatıldı'}!")
 
-async def set_welcome(update: Update, context):
-    chat_id = _get_effective_chat_id(update, context)
-    if not chat_id or not get_channel_settings(chat_id):
-        await update.message.reply_text("Once /kanal ile sec!")
-        return
-    channel = get_channel_settings(chat_id)
-    if channel['chat_type'] == 'channel':
-        await update.message.reply_text("Kanallarda hosgeldin mesaji kullanilamaz!")
-        return
-    if not await require(update, chat_id, 'can_content'):
-        return
-    if not context.args:
-        current = channel['settings'].get('welcome_msg', '')
-        await update.message.reply_text(
-            "Kullanim: /setwelcome <mesaj>\n\n"
-            "Degiskenler:\n"
-            "{kullanici} — Ad\n"
-            "{username} — @kullanici adi\n"
-            "{id} — Kullanici ID\n"
-            "{kanal} — Grup adi\n"
-            "{uye_sayisi} — Toplam uye sayisi\n\n"
-            f"Mevcut: {current or 'Ayarlanmamis'}"
-        )
-        return
-    welcome_msg = ' '.join(context.args)
-    channel['settings']['welcome_msg'] = welcome_msg
-    save_channel_settings(chat_id, channel)
-    await update.message.reply_text(f"Hosgeldin mesaji ayarlandi:\n{welcome_msg}")
-
 async def stats(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
     if not chat_id or not get_channel_settings(chat_id):
@@ -4621,19 +4673,31 @@ NUMERIC = {
                                                  7 * 86400, 30 * 86400], None),
     'media_lock_minutes':    (5, 1440, [5, 10, 15, 30, 60, 120, 360, 720, 1440], "{} dk"),
     'edit_guard_minutes':    (1, 1440, [1, 2, 3, 5, 10, 15, 30, 60, 120, 360, 1440], "{} dk"),
+    'welcome_autodel':       (0, 1440, [0, 1, 2, 5, 10, 30, 60, 180, 720, 1440], "{} dk"),
+    'tag_size':              (1, 10, [1, 3, 5, 10], "{} kişi"),
 }
 TOGGLE_KEYS = {v[1] for v in PROTECTIONS.values()} | {
     'anti_raid', 'captcha_enabled', 'join_captcha', 'auto_accept', 'auto_reject', 'auto_reject_bot',
     'restrict_no_username', 'welcome_enabled', 'nsfw_scan', 'file_block', 'media_autolock', 'edit_guard',
-    'edit_notify', 'reports_enabled', 'recovery_autorestore'}
+    'edit_notify', 'reports_enabled', 'recovery_autorestore', 'welcome_clean', 'welcome_batch', 'welcome_dm',
+    'goodbye_enabled', 'fsub_enabled', 'tag_active_only'}
 NIGHT_RESTRICTIONS = [('block_messages', "Mesaj"), ('block_media', "Foto/Video"), ('block_voice', "Ses/Video not"),
                       ('block_sticker', "Sticker/GIF"), ('block_links', "Link önizleme"), ('block_files', "Dosya/Müzik")]
 PAGE_SIZE = 8
 
+RICH_INPUT_KINDS = {'welcome', 'goodbye', 'rules', 'sched'}  # medya da kabul edilir
+
 INPUT_PROMPTS = {
-    'welcome': ("✏️ Yeni hoş geldin mesajını yaz.\nDeğişkenler: {kullanıcı} {username} {id} {kanal} {uye_sayisi}",
+    'welcome': ("✏️ Yeni hoş geldin mesajını yaz ya da fotoğraf/video/GIF gönder (açıklaması mesaj olur).\n"
+                "Butonlar: her satıra  Etiket - https://link  (yan yana: && ile)\n"
+                "Değişkenler: {kullanıcı} {ad} {username} {grup} {uye_sayisi} · Rastgele: mesajları %%% satırıyla ayır",
                 "Hoş geldin {kullanıcı}!"),
-    'rules': ("📜 Grup kurallarını yaz.", "1) Saygılı ol  2) Reklam yok"),
+    'goodbye': ("✏️ Veda mesajını yaz (medya ve butonlar da olur). Değişkenler: {ad} {kullanıcı} {grup}",
+                "👋 {ad} aramızdan ayrıldı."),
+    'rules': ("📜 Grup kurallarını yaz. Biçim (kalın, link) ve butonlar korunur.", "1) Saygılı ol  2) Reklam yok"),
+    'fsub': ("📢 Zorunlu kanalı yaz: @kanal, t.me/kanal ya da -100… ID. Bot o kanalda yönetici olmalı.", "@kanal"),
+    'sched': ("⏰ Önce süreyi, sonra mesajı yaz. Örn: 6sa Kuralları okumayı unutmayın!\n"
+              "Süre: 30dk, 6sa, 1g · Medya için fotoğrafın açıklamasına yaz.", "6sa Mesaj"),
     'word': ("🔤 Yasaklanacak kelimeleri yaz (her satıra bir tane). Regex için başına re: koy.", "kelime"),
     'link': ("🔗 İzin verilecek alan adlarını yaz (boşlukla ayır). Örn: youtube.com t.me/kanalim", "youtube.com"),
     'note': ("📝 Notu şu biçimde yaz: isim içerik", "kurallar Grup kuralları..."),
@@ -4656,7 +4720,7 @@ def _step_value(key: str, cur: int, up: bool) -> int:
     return max(lo, min(hi, cur + (step if up else -step)))
 
 def _fmt_numeric(key: str, val: int) -> str:
-    if key == 'newbie_minutes' and val == 0:
+    if key in ('newbie_minutes', 'welcome_autodel') and val == 0:
         return "Kapalı"
     fmt = NUMERIC[key][3]
     return human_duration(val) if fmt is None else fmt.format(val)
@@ -4787,19 +4851,11 @@ async def render_settings(cid: str, page: str = 'main'):
                 "forward gönderemez (mesajı silinir, uyarı gösterilir).")
         rows += [_num_row(cid, 'newbie_minutes', s, 'newbie', "Süre"), _back(cid, 'join')]
 
-    elif base == 'welcome':
-        welcome = s.get('welcome_msg') or ''
-        rules = (s.get('rules') or '').strip()
-        text = (f"👋 <b>Karşılama</b> — {title}\n\nHoş geldin mesajı: <b>{'Açık' if s.get('welcome_enabled', True) else 'Kapalı'}</b>\n"
-                f"<blockquote>{html.escape(welcome[:500]) or '—'}</blockquote>\n"
-                "Değişkenler: <code>{kullanıcı}</code> <code>{username}</code> <code>{id}</code> "
-                "<code>{kanal}</code> <code>{uye_sayisi}</code>\n\n📜 Kurallar:\n"
-                f"<blockquote expandable>{html.escape(rules[:1500]) or 'Henüz yok'}</blockquote>")
-        rows += [[toggle_btn("Hoş geldin mesajı", s.get('welcome_enabled', True), f"s|{cid}|t|welcome_enabled|welcome")],
-                 [ibtn("✏️ Mesajı değiştir", f"s|{cid}|i|welcome", BLUE), ibtn("📜 Kuralları yaz", f"s|{cid}|i|rules", BLUE)]]
-        if rules:
-            rows.append([ibtn("🗑 Kuralları sil", f"s|{cid}|rx", RED)])
-        rows.append(_back(cid))
+    elif base in ('welcome', 'goodbye', 'sched'):
+        text, rows = render_rich_page(cid, base, s, title)
+
+    elif base in ('fsub', 'tag'):
+        text, rows = render_fsub_tag_page(cid, base, s, title)
 
     elif base == 'warn':
         wa = s.get('warn_action', 'ban')
@@ -4900,7 +4956,8 @@ async def render_settings(cid: str, page: str = 'main'):
                 [ibtn("👋 Karşılama", f"s|{cid}|p|welcome", BLUE), ibtn("⚠️ Uyarılar", f"s|{cid}|p|warn", BLUE)],
                 [ibtn("🌙 Gece Modu", f"s|{cid}|p|night", BLUE), ibtn("🔗 Linkler", f"s|{cid}|p|links.0", BLUE)],
                 [ibtn("🔤 Kelimeler", f"s|{cid}|p|words.0", BLUE), ibtn("📝 Notlar", f"s|{cid}|p|notes.0", BLUE)],
-                [ibtn("🧩 Filtreler", f"s|{cid}|p|filters.0", BLUE)],
+                [ibtn("🧩 Filtreler", f"s|{cid}|p|filters.0", BLUE), ibtn("⏰ Zamanlı mesaj", f"s|{cid}|p|sched", BLUE)],
+                [ibtn("📢 Kanal zorunluluğu", f"s|{cid}|p|fsub", BLUE), ibtn("🏷 Etiket", f"s|{cid}|p|tag", BLUE)],
                 [ibtn("✏️ Düzenleme & Rapor", f"s|{cid}|p|edit", BLUE), ibtn("🧾 Log Kanalı", f"s|{cid}|p|log", BLUE)],
                 [ibtn("🌐 Grup Ağı", f"s|{cid}|p|net", BLUE), ibtn("🛟 Kurtarma", f"s|{cid}|p|rec", BLUE)],
                 [ibtn("✖️ Kapat", f"s|{cid}|x", RED)]]
@@ -5015,6 +5072,7 @@ async def _settings_change(cid: str, channel: dict, op: str, args: list, query, 
         return 'log', "Log kanalı kaldırıldı"
     if op == 'rx':
         s['rules'] = ''
+        s.pop('rules_rich', None)
         save_channel_settings(cid, channel)
         return 'welcome', "Kurallar silindi"
     if op == 'ru':
@@ -5024,6 +5082,8 @@ async def _settings_change(cid: str, channel: dict, op: str, args: list, query, 
         return 'raid', "🔓 Kilit açıldı" if ok else "Kilit açılamadı (bot yetkisi?)"
     if op in EXT_OPS:
         return await _settings_change_ext(cid, channel, op, args, query, context)
+    if op in RICH_OPS:
+        return await rich_panel_op(cid, channel, op, args, query)
     return 'main', ''
 
 async def settings_panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5091,12 +5151,14 @@ async def settings_input_handler(update: Update, context: ContextTypes.DEFAULT_T
     """Panelin istediği metni (ForceReply cevabı) yakalar; diğer mesajlara dokunmaz."""
     st = context.user_data.get('await_input') if context.user_data is not None else None
     msg = update.message
-    if not st or not msg or not msg.text or msg.chat_id != st['prompt_chat']:
+    if not st or not msg or msg.chat_id != st['prompt_chat']:
+        return
+    if not msg.text and not (st['kind'] in RICH_INPUT_KINDS and (msg.caption or msg_media(msg))):
         return
     if msg.chat.type != 'private' and not (msg.reply_to_message and msg.reply_to_message.message_id == st['prompt_id']):
         return
     context.user_data.pop('await_input', None)
-    if msg.text in DM_MENU_TEXTS:
+    if msg.text and msg.text in DM_MENU_TEXTS:
         return  # kullanıcı menüye bastı: giriş iptal, menü işleyicisi devam etsin
     try:
         await bot.delete_message(st['prompt_chat'], st['prompt_id'])
@@ -5105,7 +5167,7 @@ async def settings_input_handler(update: Update, context: ContextTypes.DEFAULT_T
     if time.time() > st['expires']:
         await msg.reply_text("⏰ Süre doldu, panelden tekrar dene.")
         raise ApplicationHandlerStop
-    if msg.text.strip().lower() in ('iptal', 'vazgeç', 'vazgec'):
+    if (msg.text or '').strip().lower() in ('iptal', 'vazgeç', 'vazgec'):
         await msg.reply_text("İptal edildi.")
         raise ApplicationHandlerStop
     cid = st['chat_id']
@@ -5126,16 +5188,41 @@ async def settings_input_handler(update: Update, context: ContextTypes.DEFAULT_T
 async def _apply_input(kind: str, cid: str, channel: dict, msg, user):
     """Metin girişini ayara uygular. Dönüş: (HTML bildirim, panel sayfası)"""
     s = channel['settings']
-    text = msg.text.strip()
-    if kind == 'welcome':
-        s['welcome_msg'] = text[:1000]
-        s['welcome_enabled'] = True
+    text = (msg.text or msg.caption or '').strip()
+    if kind in ('welcome', 'goodbye', 'rules'):
+        rich = build_rich(msg_html(msg), msg_media(msg))
+        if kind == 'rules' and not rich_plain(rich) and not rich.get('m'):
+            return "❌ Kurallar boş olamaz.", 'welcome'
+        store_rich(s, kind, rich)
+        if kind == 'welcome':
+            s['welcome_enabled'] = True
+        elif kind == 'goodbye':
+            s['goodbye_enabled'] = True
         save_channel_settings(cid, channel)
-        return "✅ Hoş geldin mesajı güncellendi.", 'welcome'
-    if kind == 'rules':
-        s['rules'] = text[:3500]
+        label = {'welcome': "Hoş geldin mesajı", 'goodbye': "Veda mesajı", 'rules': "Kurallar"}[kind]
+        await send_log(cid, f"✏️ {label} güncellendi | {mention(user)}", ParseMode.HTML)
+        return f"✅ {label} güncellendi ({html.escape(rich_summary(rich))}). Panelden 👁 Önizle ile bakabilirsin.", \
+            'goodbye' if kind == 'goodbye' else 'welcome'
+    if kind == 'fsub':
+        vals, err = await fsub_set_channel(cid, text)
+        if err:
+            return f"❌ {err}", 'fsub'
+        s.update(vals)
         save_channel_settings(cid, channel)
-        return "✅ Kurallar güncellendi.", 'welcome'
+        await send_log(cid, f"📢 Kanal zorunluluğu: {html.escape(vals['fsub_title'] or '')} | {mention(user)}", ParseMode.HTML)
+        return f"✅ Kanal zorunluluğu açık: <b>{html.escape(vals['fsub_title'] or '')}</b>", 'fsub'
+    if kind == 'sched':
+        first, _, _ = text.partition(' ')
+        interval = parse_interval(first)
+        err = _sched_check(cid, interval)
+        if err:
+            return f"❌ {err}", 'sched'
+        raw = msg.text or msg.caption or ''
+        rich = build_rich(html_after(msg, raw.find(first) + len(first)), msg_media(msg))
+        if not rich_plain(rich) and not rich.get('m'):
+            return "❌ Süreden sonra mesajı yaz. Örn: <code>6sa Kuralları okuyun!</code>", 'sched'
+        sid = sched_add(cid, rich, interval, user.id)
+        return f"✅ Zamanlanmış mesaj #{sid}: her {human_duration(interval)} bir.", 'sched'
     if kind == 'word':
         added, bad = [], []
         for w in (line.strip() for line in text.split('\n')):
@@ -5201,6 +5288,7 @@ async def _apply_input(kind: str, cid: str, channel: dict, msg, user):
 # ── Panel ekleri: uygunsuz medya, engelli medya listesi, düzenleme & rapor, grup ağı, kurtarma ──
 EXT_PAGES = {'bm', 'edit', 'net', 'rec', 'snapc'}
 EXT_OPS = {'mk', 'mo', 'bd', 'na', 'nr', 'nb', 'nc', 'ns', 'rd', 'sn', 'rg'}
+RICH_OPS = {'pv', 'wr', 'wm', 'zt', 'zp', 'zc', 'zd', 'ts'}
 
 def _badmedia_rows(cid: str, s: dict, page_id: str) -> list:
     ai = "🤖 Yapay zeka taraması" + ("" if nsfw_available() else " (kurulu değil)")
@@ -5441,7 +5529,8 @@ def upsert_user(chat_id: str, user):
                 username   = excluded.username,
                 first_name = excluded.first_name,
                 last_name  = excluded.last_name,
-                last_seen  = excluded.last_seen
+                last_seen  = excluded.last_seen,
+                left_at    = NULL
         """, (
             user.id, chat_id,
             user.username or '',
@@ -5467,6 +5556,7 @@ async def new_member_handler(update: Update, context):
 
     adder = update.message.from_user
     adder_is_staff = bool(adder) and await is_staff_user(chat_id, adder.id, channel)
+    to_welcome = []
 
     for user in update.message.new_chat_members:
         if not user.is_bot:
@@ -5518,26 +5608,15 @@ async def new_member_handler(update: Update, context):
             except Exception as e:
                 logger.debug(f"new_member_handler: {e}")
         else:
-            welcome_msg = html.escape(channel['settings'].get('welcome_msg') or 'Merhaba {kullanıcı}, {kanal} grubuna hoş geldin!', quote=False)
-            try:
-                member_count = await bot.get_chat_member_count(chat_id)
-            except Exception:
-                member_count = '?'
-            welcome_msg = (welcome_msg
-                .replace('{kullanıcı}', mention(user))
-                .replace('{kullanici}', mention(user))
-                .replace('{username}', html.escape(f"@{user.username}" if user.username else username))
-                .replace('{id}', str(user.id))
-                .replace('{kanal}', html.escape(update.message.chat.title or chat_id))
-                .replace('{uye_sayisi}', str(member_count))
-            )
-            try:
-                if channel['settings'].get('welcome_enabled', True):
-                    await update.message.reply_text(welcome_msg, parse_mode=ParseMode.HTML)
-            except Exception as e:
-                logger.debug(f"new_member_handler: {e}")
+            if not user.is_bot:
+                to_welcome.append(user)
             await send_log(chat_id, f"👋 {mention(user)} katıldı → {chat_id}", ParseMode.HTML)
 
+    if to_welcome and channel['settings'].get('welcome_enabled', True):
+        try:
+            await queue_welcome(chat_id, to_welcome, update.message, context)
+        except Exception as e:
+            logger.debug(f"Hoş geldin gönderilemedi {chat_id}: {e}")
     await track_invite(update, context)
 
 async def track_invite(update: Update, context):
@@ -6302,7 +6381,8 @@ async def restore_admins(chat_id: str, exclude_user_id: int = 0):
 # ═══════════════════════════ GRUP AĞI (çoklu grup yönetimi) ═══════════════════════════
 # Bir kurucu yönettiği grupları ağa bağlar: bir grupta ban diğerlerine yayılır (kick değil), ban kaldırma da.
 NETWORK_COPY_EXCLUDE = {'welcome_msg', 'rules', 'spam_whitelist', 'banned_words', 'link_whitelist', 'raid_lock',
-                        'media_lock', 'recovery_ids'}
+                        'media_lock', 'recovery_ids', 'welcome_rich', 'goodbye_rich', 'rules_rich', 'fsub_enabled',
+                        'fsub_channel', 'fsub_title', 'fsub_link'}
 
 def network_of(chat_id: str):
     with get_db() as conn:
@@ -6347,7 +6427,7 @@ def network_copy(source: str, owner_id: int, lists: bool) -> int:
         else:
             for key in _default_channel_settings():
                 if key not in NETWORK_COPY_EXCLUDE:
-                    ch['settings'][key] = copy.deepcopy(src.get(key))
+                    ch['settings'][key] = copy.deepcopy(src.get(key, _default_channel_settings()[key]))
         save_channel_settings(cid, ch)
         copied += 1
     return copied
@@ -7575,50 +7655,6 @@ async def cmd_engel_kaldir(update: Update, context):
     invalidate_block_caches()
     await update.message.reply_text(f"✅ {entity_id} engeli kaldirildi.")
 
-async def cmd_rules(update: Update, context):
-    chat_id = _get_effective_chat_id(update, context)
-    if not chat_id or not get_channel_settings(chat_id):
-        await update.message.reply_text("Once /kanal ile sec!")
-        return
-    channel = get_channel_settings(chat_id)
-    rules = channel['settings'].get('rules', '').strip()
-    if not rules:
-        msg = "Bu grupta henuz kural belirlenmemis."
-        if has_specific_permission(chat_id, update.effective_user.id, 'can_content'):
-            msg += "\n/setrules <kurallar> ile ekleyebilirsin."
-        await update.message.reply_text(msg)
-        return
-    try:
-        chat_info = await bot.get_chat(chat_id)
-        title = chat_info.title or chat_id
-    except Exception:
-        title = chat_id
-    await update.message.reply_text(
-        f"📜 {title} Kurallari\n\n{rules}\n\n"
-        "Bu kurallara uymayan kullanicilar yaptiriimla karsilasabilir."
-    )
-
-async def cmd_setrules(update: Update, context):
-    chat_id = _get_effective_chat_id(update, context)
-    if not chat_id or not get_channel_settings(chat_id):
-        await update.message.reply_text("Once /kanal ile sec!")
-        return
-    if not await require(update, chat_id, 'can_content'):
-        return
-    if not context.args:
-        channel = get_channel_settings(chat_id)
-        rules = channel['settings'].get('rules', '').strip()
-        if rules:
-            await update.message.reply_text(f"Mevcut kurallar:\n\n{rules}\n\nGuncellemek icin: /setrules <yeni kurallar>")
-        else:
-            await update.message.reply_text("Kullanim: /setrules <kurallar>")
-        return
-    rules_text = ' '.join(context.args)
-    channel = get_channel_settings(chat_id)
-    channel['settings']['rules'] = rules_text
-    save_channel_settings(chat_id, channel)
-    await update.message.reply_text(f"Kurallar ayarlandi:\n\n{rules_text}")
-
 async def cmd_setwarnlimit(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
     if not chat_id or not get_channel_settings(chat_id):
@@ -7810,7 +7846,9 @@ async def help_command(update: Update, context):
         "/top — Butonlu siralama menusu\n"
         "/info @kullanici — Kullanici istatistikleri\n"
         "/grupbilgi — Grup hakkinda bilgi\n"
-        "/rules — Grup kurallarini gor\n\n"
+        "/rules — Grup kurallarini gor\n"
+        "/afk [sebep] — AFK ol (etiketleyene bilgi verilir, yazınca kalkar)\n"
+        "/etiketme — /etiket listesinden çık (tekrar yazınca geri gir)\n\n"
         "📝 Notlar\n"
         "/notlar — Kayitli notlar\n"
         "#not — Notu getir (ornek: #kurallar)\n"
@@ -7840,8 +7878,10 @@ async def help_command(update: Update, context):
         "/unmute @kullanici — Susturmayi kaldir\n"
         "/kick @kullanici — Gruptan at\n"
         "/warns · /banlist · /mutelist — Listeler\n"
-        "/cekilis · /cekilis_bitir — Cekilis\n"        "/filter — Otomatik yanit (or. selam → Aleykum selam)\n"
+        "/cekilis · /cekilis_bitir — Cekilis\n"
+        "/filter — Otomatik yanit (or. selam → Aleykum selam; medya ve buton olur)\n"
         "/filters · /stop <kelime> · /stopall — Filtre listesi / sil\n"
+        "/etiket <mesaj> · /etiketdur — Üyeleri gruplar hâlinde etiketle / durdur\n"
         "/yetkim — Rütben ve yetkilerin\n\n"
         "⭐ Üst Admin ve üstü\n"
         "/ban @kullanici [sure] [sebep] · /unban — Ban\n"
@@ -7850,9 +7890,14 @@ async def help_command(update: Update, context):
         "/pin · /unpin — Sabitleme\n"
         "/kilit [dk] · /medyakilit [dk] — Acil durum kilidi\n"
         "/istekonayla — Katilim isteklerini onayla\n"
-        "/setrules · /setwelcome · /save · /notsil — Kurallar, karsilama, notlar\n\n"
+        "/setrules · /setwelcome · /setgoodbye · /save · /notsil — Kurallar, karşılama, veda, notlar\n"
+        "  (medya, butonlar, biçim ve rastgele mesaj desteklenir; /setwelcome yazınca yardımı çıkar)\n"
+        "/welcome · /goodbye · /resetwelcome — Önizle / varsayılana dön\n"
+        "/zamanla 6sa <mesaj> · /zamanlar — Zamanlanmış (tekrarlı) mesajlar\n\n"
         "🔱 Yardımcı Kurucu ve üstü\n"
-        "/settings — Butonlu ayar paneli (tum koruma ayarlari)\n"        "/kurulum — Hizli kurulum (paket + hos geldin + korumalar)\n"
+        "/settings — Butonlu ayar paneli (tum koruma ayarlari)\n"
+        "/kurulum — Hizli kurulum (paket + hos geldin + korumalar)\n"
+        "/kanalzorunlu @kanal — Yazmak için kanala katılma zorunluluğu (kapat: /kanalzorunlu kapat)\n"
         "/antispam · /antilink · /antiforward · /antimedia · /antiraid · /captcha on/off\n"
         "/antiraid_ac · /medyaac — Kilitleri ac\n"
         "/nightmod · /wordban · /wordlist · /whitelist · /linkizin · /yeniuye\n"
@@ -7954,7 +7999,7 @@ GROUP_USER_COMMANDS = [
     ("help", "Yardım menüsü"), ("rules", "Grup kuralları"), ("notlar", "Kayıtlı notlar"),
     ("profil", "Profilin ve uyarıların"), ("top", "Aktiflik sıralaması"), ("info", "Kullanıcı istatistikleri"),
     ("grupbilgi", "Grup bilgisi"), ("id", "ID göster"), ("zar", "Zar at"), ("yazitura", "Yazı tura at"),
-    ("report", "Yanıtladığın mesajı yetkililere bildir"),
+    ("report", "Yanıtladığın mesajı yetkililere bildir"), ("afk", "AFK ol"), ("etiketme", "Etiket listesinden çık"),
 ]
 GROUP_ADMIN_COMMANDS = [
     ("settings", "Butonlu ayar paneli"), ("reload", "Admin listesini yenile"), ("warn", "Uyarı ver"), ("unwarn", "1 uyarı geri al"), ("warns", "Uyarıları gör"),
@@ -7962,6 +8007,9 @@ GROUP_ADMIN_COMMANDS = [
     ("kick", "Gruptan at"), ("temizle", "Mesajları toplu sil"), ("pin", "Mesajı sabitle"), ("unpin", "Sabitlemeyi kaldır"),
     ("slowmode", "Yavaş mod"), ("banlist", "Ban listesi"), ("mutelist", "Mute listesi"), ("save", "Not kaydet"),
     ("notsil", "Not sil"), ("kurulum", "Hızlı kurulum"), ("filter", "Otomatik yanıt ekle"), ("filters", "Filtre listesi"), ("stop", "Filtre sil"),
+    ("setwelcome", "Hoş geldin mesajı (medya/buton)"), ("setgoodbye", "Veda mesajı"), ("setrules", "Kuralları yaz"),
+    ("zamanla", "Zamanlanmış mesaj ekle"), ("zamanlar", "Zamanlanmış mesajlar"), ("etiket", "Üyeleri etiketle"),
+    ("etiketdur", "Etiketlemeyi durdur"), ("kanalzorunlu", "Kanal zorunluluğu"),
     ("cekilis", "Çekiliş başlat"), ("cekilis_bitir", "Çekilişi bitir"),
     ("kilit", "Acil durum: grubu kilitle"), ("antiraid_ac", "Grup kilidini aç"), ("yetkim", "Rütben ve yetkilerin"), ("staff", "Yetkili listesi"), ("stats", "Grup istatistikleri"),
     ("medyaengel", "Yanıtlanan medyayı engelle"), ("paketengel", "Sticker paketini engelle"),
@@ -8539,6 +8587,9 @@ async def start(update: Update, context):
     if args and args[0].startswith("kurulum_"):
         await cmd_kurulum(update, context)
         return
+    if args and args[0].startswith("ra_"):
+        await show_rich_action(update, context, args[0][3:])
+        return
     if not args or not args[0].startswith("aup_"):
         if update.effective_chat.type != 'private':
             await update.message.reply_text(f"🛡 {html.escape(brand())} aktif! Ayarlar için /settings, komutlar için /help.")
@@ -9096,6 +9147,1238 @@ async def appeal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
     await send_log(chat_id, f"📨 İtiraz #{appeal_id} {status} | {mention(query.from_user)}", ParseMode.HTML)
 
+# ═══════════════════════════ ZENGİN MESAJ (medya + butonlar + biçim + değişkenler) ═══════════════════════════
+# Hoş geldin, veda, kurallar, notlar, /filter ve zamanlanmış mesajlar aynı biçimi kullanır:
+#   {'v': [{'text': HTML, 'buttons': [[{'t': etiket, 'k': url|rules|note|popup, 'v': değer, 'c': renk}]]}], 'm': medya}
+# Buton yazımı (satır satır, && ile yan yana):  Kanalımız - https://t.me/kanal && Kurallar - rules
+# Rose tarzı da olur: [Kanal](buttonurl://t.me/kanal)  [Yan](buttonurl://t.me/x:same)
+# Birden fazla mesaj (rastgele seçilir): aralarına tek başına %%% satırı.
+RICH_MEDIA = ('photo', 'video', 'animation', 'document', 'audio', 'voice', 'sticker', 'video_note')
+RICH_NO_CAPTION = ('sticker', 'video_note')
+RICH_MAX_VARIANTS = 10
+BTN_COLORS = {'yeşil': GREEN, 'yesil': GREEN, 'green': GREEN, 'kırmızı': RED, 'kirmizi': RED, 'red': RED,
+              'mavi': BLUE, 'blue': BLUE}
+_ROSE_BTN = re.compile(r'\[([^\[\]\n]{1,64})\]\(buttonurl:(?://)?([^)\s]+?)(:same)?\)')
+_VARIANT_SEP = re.compile(r'^[ \t]*%%%[ \t]*$', re.M)
+_DOMAIN_URL = re.compile(r'^[\w-]+(\.[\w-]+)*\.[a-zA-Z]{2,}(/\S*)?$')
+
+def _norm_url(u: str) -> str | None:
+    u = (u or '').strip()
+    if re.match(r'^(https?|tg)://\S+$', u, re.I):
+        return u
+    if re.fullmatch(r'@\w{4,32}', u):
+        return f"https://t.me/{u[1:]}"
+    if _DOMAIN_URL.match(u):
+        return f"https://{u}"
+    return None
+
+def _make_btn(label: str, target: str, color: str | None = None) -> dict | None:
+    label, target = (label or '').strip()[:64], (target or '').strip()
+    if not label or not target:
+        return None
+    c = BTN_COLORS.get((color or '').lower())
+    tl = target.lower()
+    if tl in ('rules', 'kurallar', 'kural'):
+        return {'t': label, 'k': 'rules', 'v': '', 'c': c}
+    if tl.startswith(('popup:', 'uyari:', 'uyarı:')):
+        txt = target.split(':', 1)[1].strip()
+        return {'t': label, 'k': 'popup', 'v': txt[:190], 'c': c} if txt else None
+    if tl.startswith(('note:', 'not:')) or target.startswith('#'):
+        name = target.split(':', 1)[1] if ':' in target else target
+        name = name.strip().lstrip('#').lower()
+        return {'t': label, 'k': 'note', 'v': name, 'c': c} if _NOTE_NAME.match(name) else None
+    url = _norm_url(target)
+    return {'t': label, 'k': 'url', 'v': url, 'c': c} if url else None
+
+def _parse_btn_part(part: str) -> dict | None:
+    """'Etiket - hedef [#renk]' → buton. Popup metninde ' - ' olabilir, o yüzden önce popup aranır."""
+    color = None
+    m = re.search(r'\s+#(\w+)\s*$', part)
+    if m and m.group(1).lower() in BTN_COLORS:
+        color, part = m.group(1), part[:m.start()]
+    m = re.match(r'^(.+?)\s+-\s+((?:popup|uyar[ıi]):.+)$', part, re.I | re.S)
+    if m:
+        return _make_btn(m.group(1), m.group(2), color)
+    if ' - ' not in part:
+        return None
+    label, target = part.rsplit(' - ', 1)
+    return _make_btn(label, target, color)
+
+def parse_buttons(text_html: str):
+    """Metindeki buton satırlarını ve Rose tarzı butonları ayıklar. Dönüş: (temiz HTML, buton satırları)."""
+    rows, kept = [], []
+    for line in (text_html or '').split('\n'):
+        plain = html.unescape(line).strip()
+        if plain and '<' not in line:
+            btns = [_parse_btn_part(p.strip()) for p in plain.split('&&')]
+            if all(btns):
+                rows.append(btns)
+                continue
+        kept.append(line)
+    text = '\n'.join(kept)
+    for m in _ROSE_BTN.finditer(text):
+        b = _make_btn(html.unescape(m.group(1)), html.unescape(m.group(2)))
+        if not b:
+            continue
+        if m.group(3) and rows:
+            rows[-1].append(b)
+        else:
+            rows.append([b])
+    text = _ROSE_BTN.sub('', text)
+    text = re.sub(r'\n{3,}', '\n\n', text).strip()
+    rows = [r[:8] for r in rows][:20]
+    return text, rows
+
+def build_rich(text_html: str, media: dict | None = None) -> dict:
+    """Admin mesajından zengin mesaj: %%% ile ayrılmış her parça bir seçenek (rastgele gönderilir)."""
+    variants = []
+    for part in _VARIANT_SEP.split(text_html or ''):
+        t, rows = parse_buttons(part.strip())
+        if t or rows:
+            variants.append({'text': t[:4000], 'buttons': rows})
+    return {'v': variants[:RICH_MAX_VARIANTS] or [{'text': '', 'buttons': []}], 'm': media}
+
+def rich_from_plain(text: str) -> dict:
+    """Eski düz metin ayarı (biçimsiz) → zengin mesaj."""
+    return build_rich(html.escape(text or '', quote=False))
+
+def msg_media(m) -> dict | None:
+    for ft in RICH_MEDIA:
+        obj = getattr(m, ft, None) if m is not None else None
+        if obj:
+            if ft == 'photo':  # en büyük boyut
+                return {'type': ft, 'id': max(obj, key=lambda p: getattr(p, 'width', 0) or 0).file_id}
+            return {'type': ft, 'id': obj.file_id}
+    return None
+
+def msg_html(m) -> str:
+    """Mesajın biçimli HTML'i (metin ya da medya açıklaması)."""
+    if m is None:
+        return ''
+    if getattr(m, 'text', None):
+        return getattr(m, 'text_html', None) or html.escape(m.text)
+    if getattr(m, 'caption', None):
+        return getattr(m, 'caption_html', None) or html.escape(m.caption)
+    return ''
+
+def html_after(m, plain_index: int) -> str:
+    """Mesajın plain_index karakterinden sonraki kısmının HTML'i (komut ve argümanlar atlanır, biçim korunur)."""
+    text = (getattr(m, 'text', None) or getattr(m, 'caption', None) or '')
+    th = msg_html(m)
+    pre = text[:plain_index]
+    for esc in (html.escape(pre), html.escape(pre, quote=False)):
+        if th.startswith(esc):
+            return th[len(esc):].strip()
+    return html.escape(text[plain_index:], quote=False).strip()
+
+def cmd_args_html(m, skip: int = 1) -> str:
+    """Komuttan (ve ilk skip-1 argümandan) sonraki metnin HTML'i; satır sonları korunur."""
+    text = (getattr(m, 'text', None) or getattr(m, 'caption', None) or '')
+    mt = re.match(r'^\s*' + r'\S+(?:\s+|$)' * skip, text)
+    return html_after(m, mt.end() if mt else len(text))
+
+def rich_plain(rich: dict | None, limit: int = 300) -> str:
+    """Panel önizlemesi için ilk seçeneğin düz metni."""
+    v = ((rich or {}).get('v') or [{}])[0]
+    t = html.unescape(re.sub(r'<[^>]+>', '', v.get('text') or ''))
+    return t[:limit] + ('…' if len(t) > limit else '')
+
+def rich_summary(rich: dict | None) -> str:
+    rich = rich or {}
+    media = rich.get('m')
+    nb = sum(len(r) for v in rich.get('v') or [] for r in v.get('buttons') or [])
+    parts = [f"🖼 {RICH_MEDIA_LABELS.get(media['type'], media['type'])}" if media else "🖼 medya yok",
+             f"🔘 {nb} buton", f"🎲 {len(rich.get('v') or [])} seçenek"]
+    return " · ".join(parts)
+
+RICH_MEDIA_LABELS = {'photo': "Fotoğraf", 'video': "Video", 'animation': "GIF", 'document': "Dosya", 'audio': "Müzik",
+                     'voice': "Ses", 'sticker': "Sticker", 'video_note': "Yuvarlak video"}
+
+def fill_rich_vars(text: str, users=(), title: str | None = None, count=None) -> str:
+    """{kullanıcı} {ad} {soyad} {username} {id} {grup} {uye_sayisi} {tarih} {saat} — metin HTML'dir, değerler kaçışlanır."""
+    users = [u for u in (users or ()) if u is not None]
+    now = datetime.now(TZ_TR)
+    esc = lambda v: html.escape(str(v or ''), quote=False)  # noqa: E731
+    mentions = ", ".join(mention(u) for u in users)
+    vals = {
+        'kullanıcı': mentions, 'kullanici': mentions, 'user': mentions, 'mention': mentions,
+        'ad': esc(", ".join(getattr(u, 'first_name', None) or '' for u in users)),
+        'isim': esc(", ".join(getattr(u, 'first_name', None) or '' for u in users)),
+        'soyad': esc(", ".join(getattr(u, 'last_name', None) or '' for u in users if getattr(u, 'last_name', None))),
+        'username': esc(", ".join(f"@{u.username}" if getattr(u, 'username', None) else (getattr(u, 'first_name', None) or '')
+                                  for u in users)),
+        'id': ", ".join(str(u.id) for u in users),
+        'grup': esc(title), 'kanal': esc(title), 'chat': esc(title), 'group': esc(title),
+        'uye_sayisi': esc(count if count is not None else '?'), 'üye_sayısı': esc(count if count is not None else '?'),
+        'tarih': now.strftime('%d.%m.%Y'), 'saat': now.strftime('%H:%M'),
+    }
+    return re.sub(r'\{(\w+)\}', lambda m: vals.get(m.group(1).lower(), m.group(0)), text or '')
+
+def rich_action_id(chat_id: str, kind: str, value: str) -> int:
+    with get_db() as conn:
+        row = conn.execute("SELECT id FROM rich_actions WHERE chat_id = ? AND kind = ? AND value = ?",
+                           (str(chat_id), kind, value)).fetchone()
+        if row:
+            return row['id']
+        rid = conn.execute("INSERT INTO rich_actions (chat_id, kind, value) VALUES (?, ?, ?)",
+                           (str(chat_id), kind, value)).lastrowid
+        conn.commit()
+        return rid
+
+def rich_markup(chat_id: str, rows: list) -> InlineKeyboardMarkup | None:
+    out = []
+    for row in rows or []:
+        r = []
+        for b in row:
+            if b['k'] == 'url':
+                r.append(ibtn(b['t'], url=b['v'], style=b.get('c')))
+            else:  # kurallar / not / popup: ra|id → bot özelden gösterir ya da uyarı penceresi açar
+                r.append(ibtn(b['t'], f"ra|{rich_action_id(chat_id, b['k'], b['v'])}", b.get('c')))
+        if r:
+            out.append(r)
+    return InlineKeyboardMarkup(out) if out else None
+
+def _strip_html(text: str) -> str:
+    return html.unescape(re.sub(r'<[^>]+>', '', text or ''))
+
+async def send_rich(chat_id, rich: dict | None, *, reply_msg=None, users=(), title: str | None = None,
+                    header: str = '', count=None, thread_id=None, variant: int | None = None) -> list:
+    """Zengin mesajı gönderir (rastgele seçenek, değişkenler, medya, butonlar). Biçim/buton hatasında sadeleştirip
+    yeniden dener. Dönüş: gönderilen mesajlar."""
+    rich = rich or {}
+    variants = rich.get('v') or [{'text': '', 'buttons': []}]
+    var = variants[variant % len(variants)] if variant is not None else random.choice(variants)
+    text = (header or '') + fill_rich_vars(var.get('text') or '', users, title, count)
+    markup = rich_markup(str(chat_id), var.get('buttons') or [])
+    media = rich.get('m')
+    if not text.strip() and not media:
+        if not markup:
+            return []
+        text = "👇"
+
+    async def _send(kind, payload, caption, mk, as_html=True):
+        kw = {'reply_markup': mk} if mk is not None else {}
+        if thread_id and reply_msg is None:
+            kw['message_thread_id'] = thread_id
+        if kind == 'text':
+            kw['disable_web_page_preview'] = True
+            if as_html:
+                kw['parse_mode'] = ParseMode.HTML
+            if reply_msg is not None:
+                return await reply_msg.reply_text(payload, **kw)
+            return await bot.send_message(chat_id, payload, **kw)
+        if caption and kind not in RICH_NO_CAPTION:
+            kw['caption'] = caption
+            if as_html:
+                kw['parse_mode'] = ParseMode.HTML
+        if reply_msg is not None:
+            return await getattr(reply_msg, f"reply_{kind}")(payload, **kw)
+        return await getattr(bot, f"send_{kind}")(chat_id, payload, **kw)
+
+    async def _safe(kind, payload, caption, mk):
+        try:
+            return await _send(kind, payload, caption, mk)
+        except BadRequest as e:
+            err = str(e).lower()
+            logger.debug(f"Zengin mesaj sadeleştiriliyor {chat_id}: {e}")
+            if mk is not None and any(w in err for w in ('button', 'url', 'keyboard', 'markup')):
+                mk = None
+            if kind == 'text':
+                payload = _strip_custom_emoji_tags(payload)
+            elif caption:
+                caption = _strip_custom_emoji_tags(caption)
+        try:
+            return await _send(kind, payload, caption, mk)
+        except BadRequest as e:
+            logger.debug(f"Zengin mesaj düz metne düşüyor {chat_id}: {e}")
+        if kind == 'text':
+            return await _send('text', _strip_html(payload), None, None, as_html=False)
+        return await _send(kind, payload, _strip_html(caption) if caption else None, None, as_html=False)
+
+    sent = []
+    try:
+        if not media:
+            sent.append(await _safe('text', text, None, markup))
+        elif media['type'] in RICH_NO_CAPTION or len(_strip_html(text)) > 1024:
+            sent.append(await _safe(media['type'], media['id'], None, None if text.strip() else markup))
+            if text.strip():
+                sent.append(await _safe('text', text, None, markup))
+        else:
+            sent.append(await _safe(media['type'], media['id'], text if text.strip() else None, markup))
+    except TelegramError as e:
+        logger.debug(f"Zengin mesaj gönderilemedi {chat_id}: {e}")
+    return [m for m in sent if m is not None]
+
+def schedule_delete(chat_id, messages, seconds: int):
+    """Mesajları seconds sonra siler (veritabanında tutulur; bot yeniden başlasa da silinir)."""
+    ids = [getattr(m, 'message_id', m) for m in messages or []]
+    ids = [i for i in ids if isinstance(i, int)]
+    if not ids or seconds <= 0:
+        return
+    with get_db() as conn:
+        conn.executemany("INSERT OR REPLACE INTO auto_delete (chat_id, message_id, delete_at) VALUES (?, ?, ?)",
+                         [(str(chat_id), i, time.time() + seconds) for i in ids])
+        conn.commit()
+
+async def auto_delete_job(context):
+    now = time.time()
+    with get_db() as conn:
+        rows = conn.execute("SELECT chat_id, message_id FROM auto_delete WHERE delete_at <= ? LIMIT 200", (now,)).fetchall()
+        conn.executemany("DELETE FROM auto_delete WHERE chat_id = ? AND message_id = ?",
+                         [(r['chat_id'], r['message_id']) for r in rows])
+        conn.commit()
+    by_chat: dict = {}
+    for r in rows:
+        by_chat.setdefault(r['chat_id'], []).append(r['message_id'])
+    for cid, ids in by_chat.items():
+        for i in range(0, len(ids), 100):
+            try:
+                await bot.delete_messages(cid, ids[i:i + 100])
+            except Exception as e:
+                logger.debug(f"Otomatik silme {cid}: {e}")
+
+async def rich_action_callback(update: Update, context):
+    """ra|id — popup uyarısı; kurallar / not ise bot özelden açılır (Telegram'ın start bağlantısıyla)."""
+    query = update.callback_query
+    try:
+        aid = int(query.data.split('|')[1])
+    except (IndexError, ValueError):
+        await query.answer()
+        return
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM rich_actions WHERE id = ?", (aid,)).fetchone()
+    if not row:
+        await query.answer("Bu buton artık geçerli değil.", show_alert=True)
+        return
+    if row['kind'] == 'popup':
+        await query.answer(row['value'][:200], show_alert=True)
+        return
+    await query.answer(url=f"https://t.me/{context.bot.username}?start=ra_{aid}")
+
+async def show_rich_action(update: Update, context, aid: str) -> None:
+    """/start ra_<id> — kurallar ya da notu özelden gösterir."""
+    msg = update.effective_message
+    try:
+        with get_db() as conn:
+            row = conn.execute("SELECT * FROM rich_actions WHERE id = ?", (int(aid),)).fetchone()
+    except ValueError:
+        row = None
+    if not row:
+        await msg.reply_text("Bu bağlantı artık geçerli değil.")
+        return
+    if row['kind'] == 'rules':
+        await send_rules(row['chat_id'], msg, update.effective_user)
+    elif row['kind'] == 'note':
+        if not await _send_note(row['chat_id'], row['value'], msg):
+            await msg.reply_text("Bu not artık yok.")
+    else:
+        await msg.reply_text(html.escape(row['value']), parse_mode=ParseMode.HTML)
+
+# ── Kayıtlı zengin mesajlar (ayarlarda) ──
+def welcome_rich(s: dict) -> dict:
+    return s.get('welcome_rich') or rich_from_plain(s.get('welcome_msg') or _default_channel_settings()['welcome_msg'])
+
+GOODBYE_DEFAULT = "👋 {ad} aramızdan ayrıldı. Yolun açık olsun!"
+
+def goodbye_rich(s: dict) -> dict:
+    return s.get('goodbye_rich') or rich_from_plain(GOODBYE_DEFAULT)
+
+def rules_rich(s: dict) -> dict | None:
+    if s.get('rules_rich'):
+        return s['rules_rich']
+    rules = (s.get('rules') or '').strip()
+    return rich_from_plain(rules) if rules else None
+
+def store_rich(s: dict, kind: str, rich: dict):
+    """kind: welcome / goodbye / rules — düz metin karşılığı da (eski ekranlar, ağ kopyası) güncellenir."""
+    plain = rich_plain(rich, 4000)
+    if kind == 'welcome':
+        s['welcome_rich'], s['welcome_msg'] = rich, plain[:1000]
+    elif kind == 'goodbye':
+        s['goodbye_rich'] = rich
+    elif kind == 'rules':
+        s['rules_rich'], s['rules'] = rich, plain[:3500]
+
+async def send_rules(chat_id: str, reply_msg, user=None) -> bool:
+    channel = get_channel_settings(chat_id)
+    rich = rules_rich(channel['settings']) if channel else None
+    if not rich:
+        await reply_msg.reply_text("Bu grupta henüz kural belirlenmemiş.")
+        return False
+    title = await _chat_title(chat_id)
+    await send_rich(reply_msg.chat_id, rich, reply_msg=reply_msg, users=[user] if user else (),
+                    title=title, header=f"📜 <b>{html.escape(title)} Kuralları</b>\n\n", variant=0)
+    return True
+
+def rich_from_command(msg, skip: int = 1) -> dict | None:
+    """/setwelcome metin  ·  medyaya/mesaja yanıt: /setwelcome [açıklama]  → zengin mesaj (None: içerik yok)."""
+    text_html = cmd_args_html(msg, skip)
+    reply = getattr(msg, 'reply_to_message', None)
+    media = msg_media(reply) if reply else None
+    if reply and not text_html:
+        text_html = msg_html(reply)
+    if not text_html and not media:
+        return None
+    return build_rich(text_html, media)
+
+RICH_HELP = (
+    "<b>Biçim:</b> mesajı Telegram'da nasıl yazarsan (kalın, italik, link, spoiler, alıntı) öyle kaydedilir.\n"
+    "<b>Medya:</b> fotoğraf/video/GIF/sticker'a yanıt verip komutu yaz.\n"
+    "<b>Butonlar</b> (her satır bir sıra, <code>&amp;&amp;</code> ile yan yana):\n"
+    "<code>Kanalımız - https://t.me/kanal &amp;&amp; Destek - @destek</code>\n"
+    "<code>Kuralları oku - rules</code> · <code>Bilgi - popup:Metin</code> · <code>Not - #isim</code>\n"
+    "Renk: satır sonuna <code>#yeşil</code> <code>#kırmızı</code> <code>#mavi</code> · "
+    "Rose tarzı: <code>[Kanal](buttonurl://t.me/kanal)</code>\n"
+    "<b>Değişkenler:</b> <code>{kullanıcı}</code> <code>{ad}</code> <code>{soyad}</code> <code>{username}</code> "
+    "<code>{id}</code> <code>{grup}</code> <code>{uye_sayisi}</code> <code>{tarih}</code> <code>{saat}</code>\n"
+    "<b>Rastgele:</b> birden fazla mesajı tek başına <code>%%%</code> satırıyla ayır.")
+
+# ── Hoş geldin / veda gönderimi ──
+WELCOME_BATCH_DELAY = 4      # sn: bu süre içinde katılanlar tek mesajda karşılanır
+_welcome_buffer: dict = {}   # chat_id -> {'users': [...], 'reply': mesaj, 'title': ad}
+_last_welcome: dict = {}     # chat_id -> son hoş geldin mesaj ID'leri (eskisini silmek için)
+
+async def send_welcome(chat_id: str, users: list, reply_msg=None, title: str | None = None) -> list:
+    """Ayarlara göre hoş geldin: özelden (olmazsa grupta), eskisini sil, X dk sonra sil."""
+    channel = get_channel_settings(chat_id)
+    if not channel or not users:
+        return []
+    s = channel['settings']
+    if not s.get('welcome_enabled', True):
+        return []
+    rich = welcome_rich(s)
+    title = title or await _chat_title(chat_id)
+    try:
+        count = await bot.get_chat_member_count(chat_id)
+    except Exception:
+        count = None
+    if s.get('welcome_dm'):
+        left = []
+        for u in users:
+            if not await send_rich(u.id, rich, users=[u], title=title, count=count):
+                left.append(u)  # bota hiç yazmamış kişiye özelden mesaj gidemez: grupta karşılanır
+        users = left
+        if not users:
+            return []
+    if s.get('welcome_clean') and _last_welcome.get(chat_id):
+        try:
+            await bot.delete_messages(chat_id, _last_welcome.pop(chat_id))
+        except Exception as e:
+            logger.debug(f"Eski hoş geldin silinemedi {chat_id}: {e}")
+    sent = await send_rich(chat_id, rich, reply_msg=reply_msg, users=users, title=title, count=count,
+                           thread_id=getattr(reply_msg, 'message_thread_id', None))
+    if sent:
+        _last_welcome[chat_id] = [m.message_id for m in sent if getattr(m, 'message_id', None)]
+        schedule_delete(chat_id, sent, int(s.get('welcome_autodel') or 0) * 60)
+    return sent
+
+async def _welcome_flush_job(context):
+    chat_id = context.job.data
+    buf = _welcome_buffer.pop(chat_id, None)
+    if buf:
+        await send_welcome(chat_id, buf['users'], None, buf['title'])
+
+async def queue_welcome(chat_id: str, users: list, msg, context):
+    """Toplu katılımda tek mesaj: kısa süre içinde gelenler biriktirilip birlikte karşılanır."""
+    if not users:
+        return
+    channel = get_channel_settings(chat_id)
+    jq = getattr(context, 'job_queue', None)
+    if not channel or not channel['settings'].get('welcome_batch', True) or jq is None:
+        await send_welcome(chat_id, users, msg if len(users) == 1 else None, getattr(msg.chat, 'title', None))
+        return
+    buf = _welcome_buffer.get(chat_id)
+    if buf and time.time() - buf['at'] < WELCOME_BATCH_DELAY + 30:
+        buf['users'] += [u for u in users if u.id not in {x.id for x in buf['users']}]
+        return
+    # (iş çalışmadan kalmış eski tampon varsa yenisiyle değiştirilir; kimse karşılamasız kalmaz)
+    _welcome_buffer[chat_id] = {'users': (buf['users'] if buf else []) + list(users),
+                                'title': getattr(msg.chat, 'title', None), 'at': time.time()}
+    jq.run_once(_welcome_flush_job, WELCOME_BATCH_DELAY, data=chat_id, name=f"welcome_{chat_id}")
+
+async def left_member_handler(update: Update, context):
+    """Veda mesajı: kendi isteğiyle çıkanlara (atılan/banlananlara değil)."""
+    msg = update.message
+    if not msg or not msg.left_chat_member:
+        return
+    user = msg.left_chat_member
+    if user.is_bot:
+        return
+    chat_id = str(msg.chat_id)
+    with get_db() as conn:
+        conn.execute("UPDATE users SET left_at = ? WHERE chat_id = ? AND user_id = ?", (time.time(), chat_id, user.id))
+        conn.commit()
+    channel = get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('goodbye_enabled'):
+        return
+    if msg.from_user and msg.from_user.id != user.id:
+        return
+    s = channel['settings']
+    sent = await send_rich(chat_id, goodbye_rich(s), users=[user], title=msg.chat.title,
+                           thread_id=getattr(msg, 'message_thread_id', None))
+    schedule_delete(chat_id, sent, int(s.get('welcome_autodel') or 0) * 60)
+
+# ── Komutlar: /setwelcome /setgoodbye /welcome /goodbye /resetwelcome /setrules /rules ──
+async def _rich_cmd_target(update: Update, context, perm: str = 'can_content'):
+    chat_id = _get_effective_chat_id(update, context)
+    msg = update.effective_message
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile grup seç!")
+        return None, None
+    channel = get_channel_settings(chat_id)
+    if channel['chat_type'] == 'channel':
+        await msg.reply_text("Kanallarda bu mesaj kullanılamaz.")
+        return None, None
+    if not await require(update, chat_id, perm):
+        return None, None
+    return chat_id, channel
+
+async def _set_rich_cmd(update: Update, context, kind: str):
+    chat_id, channel = await _rich_cmd_target(update, context)
+    if not chat_id:
+        return
+    msg = update.effective_message
+    rich = rich_from_command(msg)
+    label = {'welcome': "Hoş geldin", 'goodbye': "Veda", 'rules': "Kurallar"}[kind]
+    if not rich:
+        cmd = {'welcome': 'setwelcome', 'goodbye': 'setgoodbye', 'rules': 'setrules'}[kind]
+        await msg.reply_text(
+            f"✏️ <b>{label} mesajı</b>\nKullanım: <code>/{cmd} metin</code> ya da bir mesaja/medyaya yanıt: "
+            f"<code>/{cmd}</code>\n\n{RICH_HELP}", parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        return
+    s = channel['settings']
+    store_rich(s, kind, rich)
+    if kind == 'welcome':
+        s['welcome_enabled'] = True
+    elif kind == 'goodbye':
+        s['goodbye_enabled'] = True
+    save_channel_settings(chat_id, channel)
+    await msg.reply_text(f"✅ {label} mesajı kaydedildi ({rich_summary(rich)}). Önizleme:")
+    await send_rich(msg.chat_id, rich, reply_msg=msg, users=[update.effective_user], title=await _chat_title(chat_id))
+    await send_log(chat_id, f"✏️ {label} mesajı güncellendi | {mention(update.effective_user)}", ParseMode.HTML)
+
+async def set_welcome(update: Update, context):
+    await _set_rich_cmd(update, context, 'welcome')
+
+async def cmd_setgoodbye(update: Update, context):
+    await _set_rich_cmd(update, context, 'goodbye')
+
+async def cmd_setrules(update: Update, context):
+    await _set_rich_cmd(update, context, 'rules')
+
+async def cmd_rules(update: Update, context):
+    chat_id = _get_effective_chat_id(update, context)
+    msg = update.effective_message
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile grup seç!")
+        return
+    if not rules_rich(get_channel_settings(chat_id)['settings']):
+        note = "Bu grupta henüz kural belirlenmemiş."
+        if has_specific_permission(chat_id, update.effective_user.id, 'can_content'):
+            note += "\n/setrules ile ekleyebilirsin."
+        await msg.reply_text(note)
+        return
+    await send_rules(chat_id, msg, update.effective_user)
+
+async def _preview_cmd(update: Update, context, kind: str):
+    chat_id, channel = await _rich_cmd_target(update, context)
+    if not chat_id:
+        return
+    s = channel['settings']
+    rich = welcome_rich(s) if kind == 'welcome' else goodbye_rich(s)
+    on = s.get('welcome_enabled', True) if kind == 'welcome' else s.get('goodbye_enabled')
+    msg = update.effective_message
+    await msg.reply_text(f"{'👋 Hoş geldin' if kind == 'welcome' else '🚪 Veda'} mesajı: {'Açık' if on else 'Kapalı'} · "
+                         f"{rich_summary(rich)}\nDeğiştirmek için /set{'welcome' if kind == 'welcome' else 'goodbye'}")
+    await send_rich(msg.chat_id, rich, reply_msg=msg, users=[update.effective_user], title=await _chat_title(chat_id))
+
+async def cmd_welcome(update: Update, context):
+    await _preview_cmd(update, context, 'welcome')
+
+async def cmd_goodbye(update: Update, context):
+    await _preview_cmd(update, context, 'goodbye')
+
+async def cmd_resetwelcome(update: Update, context):
+    chat_id, channel = await _rich_cmd_target(update, context)
+    if not chat_id:
+        return
+    channel['settings'].pop('welcome_rich', None)
+    channel['settings']['welcome_msg'] = _default_channel_settings()['welcome_msg']
+    save_channel_settings(chat_id, channel)
+    await update.effective_message.reply_text("✅ Hoş geldin mesajı varsayılana döndü.")
+
+# ── Zamanlanmış mesajlar ──
+SCHED_MIN, SCHED_MAX, SCHED_LIMIT = 10 * 60, 7 * 86400, 10
+
+def parse_interval(text: str) -> int | None:
+    """6h / 6sa / 6 saat / 30dk / 30m / 1g / 1d → saniye"""
+    m = re.fullmatch(r'(\d{1,4})\s*(m|dk|dak|dakika|h|sa|saat|d|g|gün|gun)', (text or '').strip().lower())
+    if not m:
+        return None
+    unit = m.group(2)
+    mult = 60 if unit in ('m', 'dk', 'dak', 'dakika') else 3600 if unit in ('h', 'sa', 'saat') else 86400
+    return int(m.group(1)) * mult
+
+def sched_list(chat_id: str) -> list:
+    with get_db() as conn:
+        return [dict(r) for r in conn.execute("SELECT * FROM scheduled_msgs WHERE chat_id = ? ORDER BY id", (chat_id,))]
+
+def sched_add(chat_id: str, rich: dict, interval: int, uid: int) -> int:
+    with get_db() as conn:
+        sid = conn.execute("""INSERT INTO scheduled_msgs (chat_id, rich, interval, next_at, created_by, created_at)
+                              VALUES (?, ?, ?, ?, ?, ?)""",
+                           (chat_id, json.dumps(rich, ensure_ascii=False), interval, time.time() + interval, uid,
+                            time.time())).lastrowid
+        conn.commit()
+    return sid
+
+def _sched_check(chat_id: str, interval: int | None) -> str | None:
+    if interval is None:
+        return "Süre biçimi: <code>30dk</code>, <code>6sa</code>, <code>1g</code> (ya da 30m, 6h, 1d)"
+    if not SCHED_MIN <= interval <= SCHED_MAX:
+        return "Süre en az 10 dakika, en fazla 7 gün olabilir."
+    if len(sched_list(chat_id)) >= SCHED_LIMIT:
+        return f"Bir grupta en fazla {SCHED_LIMIT} zamanlanmış mesaj olabilir."
+    return None
+
+async def cmd_zamanla(update: Update, context):
+    """/zamanla 6sa metin  ·  bir mesaja/medyaya yanıt: /zamanla 6sa"""
+    chat_id, channel = await _rich_cmd_target(update, context)
+    if not chat_id:
+        return
+    msg = update.effective_message
+    interval = parse_interval(context.args[0]) if context.args else None
+    rich = rich_from_command(msg, skip=2) if context.args else None
+    if not context.args or not rich:
+        await msg.reply_text(
+            "⏰ <b>Zamanlanmış mesaj</b>\nKullanım: <code>/zamanla 6sa Kuralları okumayı unutmayın!</code>\n"
+            "ya da bir mesaja/medyaya yanıt: <code>/zamanla 6sa</code>\nListe ve silme: /zamanlar\n\n" + RICH_HELP,
+            parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+        return
+    err = _sched_check(chat_id, interval)
+    if err:
+        await msg.reply_text(f"❌ {err}", parse_mode=ParseMode.HTML)
+        return
+    sid = sched_add(chat_id, rich, interval, update.effective_user.id)
+    await msg.reply_text(f"✅ Zamanlanmış mesaj #{sid}: her {human_duration(interval)} bir gönderilecek "
+                         f"(ilki {human_duration(interval)} sonra). Liste: /zamanlar")
+    await send_log(chat_id, f"⏰ Zamanlanmış mesaj eklendi (her {human_duration(interval)}) | {mention(update.effective_user)}",
+                   ParseMode.HTML)
+
+def _sched_data(chat_id: str, op: str, sid: int, panel: bool) -> str:
+    return f"s|{chat_id}|{op}|{sid}" if panel else f"zm|{chat_id}|{op}|{sid}"
+
+def render_sched(chat_id: str, panel: bool):
+    """panel=True: ayar panelindeki sayfa (s|…), False: /zamanlar mesajı (zm|…) — butonlar aynı işlemleri yapar."""
+    items = sched_list(chat_id)
+    lines = []
+    rows = []
+    for it in items:
+        rich = json.loads(it['rich'])
+        nxt = datetime.fromtimestamp(it['next_at'], TZ_TR).strftime('%d.%m %H:%M')
+        lines.append(f"{'🟢' if it['enabled'] else '⏸'} <b>#{it['id']}</b> her {human_duration(it['interval'])} · "
+                     f"sonraki {nxt}\n<i>{html.escape(rich_plain(rich, 60)) or rich_summary(rich)}</i>")
+        d_toggle, d_view, d_prev, d_del = (_sched_data(chat_id, op, it['id'], panel) for op in ('zt', 'zp', 'zc', 'zd'))
+        rows.append([ibtn(f"{'⏸' if it['enabled'] else '▶️'} #{it['id']}", d_toggle, RED if it['enabled'] else GREEN),
+                     ibtn("👁", d_view, BLUE),
+                     ibtn("🧹 Öncekini sil" if it['delete_prev'] else "📌 Öncekini tut", d_prev),
+                     ibtn("🗑", d_del, RED)])
+    text = ("⏰ <b>Zamanlanmış mesajlar</b>\n\n" + ("\n\n".join(lines) if lines else "Henüz yok.") +
+            "\n\nEklemek için: <code>/zamanla 6sa mesaj</code> (medya/buton desteklenir)")
+    return text, rows
+
+async def sched_op(chat_id: str, op: str, sid: int, query) -> str:
+    """zt aç/kapat · zp önizle · zc öncekini sil/tut · zd sil. Dönüş: kısa bildirim."""
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM scheduled_msgs WHERE id = ? AND chat_id = ?", (sid, chat_id)).fetchone()
+    if not row:
+        return "Bulunamadı"
+    with get_db() as conn:
+        if op == 'zt':
+            conn.execute("UPDATE scheduled_msgs SET enabled = ?, next_at = ? WHERE id = ?",
+                         (0 if row['enabled'] else 1, time.time() + row['interval'], sid))
+            note = "⏸ Durduruldu" if row['enabled'] else "▶️ Başlatıldı"
+        elif op == 'zc':
+            conn.execute("UPDATE scheduled_msgs SET delete_prev = ? WHERE id = ?", (0 if row['delete_prev'] else 1, sid))
+            note = "Kaydedildi"
+        elif op == 'zd':
+            conn.execute("DELETE FROM scheduled_msgs WHERE id = ?", (sid,))
+            note = "🗑 Silindi"
+        else:
+            note = "👁 Önizleme gönderildi"
+        conn.commit()
+    if op == 'zp':
+        await send_rich(query.message.chat_id, json.loads(row['rich']), users=[query.from_user],
+                        title=await _chat_title(chat_id))
+    return note
+
+async def cmd_zamanlar(update: Update, context):
+    chat_id, channel = await _rich_cmd_target(update, context)
+    if not chat_id:
+        return
+    text, rows = render_sched(chat_id, False)
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML,
+                                              reply_markup=InlineKeyboardMarkup(rows) if rows else None)
+
+async def sched_callback(update: Update, context):
+    """zm|cid|op|id — /zamanlar listesindeki butonlar."""
+    query = update.callback_query
+    parts = query.data.split('|')
+    if len(parts) < 4 or not parts[3].isdigit():
+        await query.answer()
+        return
+    chat_id, op, sid = parts[1], parts[2], int(parts[3])
+    if not has_specific_permission(chat_id, query.from_user.id, 'can_content'):
+        await deny(update, 'can_content')
+        return
+    note = await sched_op(chat_id, op, sid, query)
+    await query.answer(note)
+    text, rows = render_sched(chat_id, False)
+    try:
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows) if rows else None)
+    except BadRequest:
+        pass
+
+async def scheduled_msgs_job(context):
+    now = time.time()
+    with get_db() as conn:
+        due = [dict(r) for r in conn.execute(
+            "SELECT * FROM scheduled_msgs WHERE enabled = 1 AND next_at <= ? ORDER BY next_at LIMIT 50", (now,))]
+    for it in due:
+        chat_id = it['chat_id']
+        nxt = it['next_at'] + it['interval']
+        if nxt <= now:  # bot kapalıyken kaçırılan turlar art arda gönderilmez: bir sonraki tur tam aralık sonra
+            nxt = now + it['interval']
+        if not get_channel_settings(chat_id):
+            with get_db() as conn:
+                conn.execute("DELETE FROM scheduled_msgs WHERE id = ?", (it['id'],))
+                conn.commit()
+            continue
+        if it['delete_prev'] and it['last_msg_ids']:
+            try:
+                await bot.delete_messages(chat_id, json.loads(it['last_msg_ids']))
+            except Exception as e:
+                logger.debug(f"Önceki zamanlanmış mesaj silinemedi {chat_id}: {e}")
+        sent = await send_rich(chat_id, json.loads(it['rich']), title=await _chat_title(chat_id))
+        with get_db() as conn:
+            conn.execute("UPDATE scheduled_msgs SET next_at = ?, last_msg_ids = ? WHERE id = ?",
+                         (nxt, json.dumps([m.message_id for m in sent if getattr(m, 'message_id', None)]), it['id']))
+            conn.commit()
+
+
+# ── Panel: karşılama / veda / zamanlanmış mesaj sayfaları ──
+def render_rich_page(cid: str, base: str, s: dict, title: str):
+    if base == 'sched':
+        text, rows = render_sched(cid, True)
+        text = text.replace("⏰ <b>Zamanlanmış mesajlar</b>", f"⏰ <b>Zamanlanmış mesajlar</b> — {title}", 1)
+        rows = rows + [[ibtn("➕ Yeni zamanlanmış mesaj", f"s|{cid}|i|sched", GREEN)], _back(cid, 'welcome')]
+        return text, rows
+    if base == 'goodbye':
+        g = goodbye_rich(s)
+        text = (f"🚪 <b>Veda mesajı</b> — {title}\n\nDurum: <b>{'Açık' if s.get('goodbye_enabled') else 'Kapalı'}</b> · "
+                f"{rich_summary(g)}\n<blockquote expandable>{html.escape(rich_plain(g, 500)) or '—'}</blockquote>\n"
+                "Sadece kendi isteğiyle çıkanlara gönderilir (atılan/banlanana değil). "
+                "Otomatik silme süresi hoş geldinle aynıdır.")
+        rows = [[toggle_btn("Veda mesajı", s.get('goodbye_enabled'), f"s|{cid}|t|goodbye_enabled|goodbye")],
+                [ibtn("✏️ Değiştir", f"s|{cid}|i|goodbye", BLUE), ibtn("👁 Önizle", f"s|{cid}|pv|goodbye", BLUE)],
+                ([ibtn("🖼 Medyayı kaldır", f"s|{cid}|wm|goodbye", RED)] if g.get('m') else []) +
+                ([ibtn("↩️ Varsayılana dön", f"s|{cid}|wr|goodbye")] if s.get('goodbye_rich') else []),
+                _back(cid, 'welcome')]
+        return text, [r for r in rows if r]
+    w = welcome_rich(s)
+    rules = rules_rich(s)
+    text = (f"👋 <b>Karşılama</b> — {title}\n\nHoş geldin: <b>{'Açık' if s.get('welcome_enabled', True) else 'Kapalı'}</b> · "
+            f"{rich_summary(w)}\n<blockquote expandable>{html.escape(rich_plain(w, 500)) or '—'}</blockquote>\n"
+            f"📜 Kurallar: {'var' if rules else 'yok'} · 🚪 Veda: {'açık' if s.get('goodbye_enabled') else 'kapalı'} · "
+            f"⏰ Zamanlı mesaj: {len(sched_list(cid))}\n\nMedya, buton ve değişkenler için ✏️ Değiştir'e bas "
+            "(ya da grupta /setwelcome yazıp yardımına bak).")
+    rows = [[toggle_btn("Hoş geldin mesajı", s.get('welcome_enabled', True), f"s|{cid}|t|welcome_enabled|welcome")],
+            [ibtn("✏️ Değiştir", f"s|{cid}|i|welcome", BLUE), ibtn("👁 Önizle", f"s|{cid}|pv|welcome", BLUE)],
+            ([ibtn("🖼 Medyayı kaldır", f"s|{cid}|wm|welcome", RED)] if w.get('m') else []) +
+            ([ibtn("↩️ Varsayılana dön", f"s|{cid}|wr|welcome")] if s.get('welcome_rich') else []),
+            [toggle_btn("🧹 Eskisini sil", s.get('welcome_clean'), f"s|{cid}|t|welcome_clean|welcome"),
+             toggle_btn("👥 Toplu tek mesaj", s.get('welcome_batch', True), f"s|{cid}|t|welcome_batch|welcome")],
+            _num_row(cid, 'welcome_autodel', s, 'welcome', "⏱ Otomatik sil"),
+            [toggle_btn("📩 Özelden gönder", s.get('welcome_dm'), f"s|{cid}|t|welcome_dm|welcome")],
+            [ibtn("📜 Kuralları yaz", f"s|{cid}|i|rules", BLUE)] +
+            ([ibtn("👁 Kurallar", f"s|{cid}|pv|rules", BLUE), ibtn("🗑", f"s|{cid}|rx", RED)] if rules else []),
+            [ibtn("🚪 Veda mesajı ›", f"s|{cid}|p|goodbye", BLUE), ibtn("⏰ Zamanlı mesajlar ›", f"s|{cid}|p|sched", BLUE)],
+            _back(cid)]
+    return text, [r for r in rows if r]
+
+async def rich_panel_op(cid: str, channel: dict, op: str, args: list, query):
+    """pv önizle · wr varsayılana dön · wm medyayı kaldır · zt/zp/zc/zd zamanlanmış mesaj. Dönüş: (sayfa, bildirim)"""
+    s = channel['settings']
+    if op == 'ts':
+        if args and args[0] in ('name', 'emoji'):
+            s['tag_style'] = args[0]
+            save_channel_settings(cid, channel)
+        return 'tag', "Kaydedildi"
+    if op in ('zt', 'zp', 'zc', 'zd'):
+        if not args or not args[0].isdigit():
+            return 'sched', ''
+        return 'sched', await sched_op(cid, op, int(args[0]), query)
+    kind = args[0] if args else ''
+    page = 'goodbye' if kind == 'goodbye' else 'welcome'
+    if kind not in ('welcome', 'goodbye', 'rules'):
+        return page, ''
+    if op == 'pv':
+        if kind == 'rules':
+            if not rules_rich(s):
+                return page, "Kural yok"
+            await send_rules(cid, query.message, query.from_user)
+        else:
+            rich = welcome_rich(s) if kind == 'welcome' else goodbye_rich(s)
+            await send_rich(query.message.chat_id, rich, users=[query.from_user], title=await _chat_title(cid))
+        return page, "👁 Önizleme gönderildi"
+    key = f"{kind}_rich"
+    if op == 'wr':
+        s.pop(key, None)
+        if kind == 'welcome':
+            s['welcome_msg'] = _default_channel_settings()['welcome_msg']
+        save_channel_settings(cid, channel)
+        return page, "↩️ Varsayılana döndü"
+    if op == 'wm':
+        rich = welcome_rich(s) if kind == 'welcome' else goodbye_rich(s) if kind == 'goodbye' else rules_rich(s)
+        if rich and rich.get('m'):
+            rich = {**rich, 'm': None}
+            store_rich(s, kind, rich)
+            save_channel_settings(cid, channel)
+        return page, "🖼 Medya kaldırıldı"
+    return page, ''
+
+
+# ═══════════════════════════ /etiket (toplu etiketleme) ═══════════════════════════
+TAG_DELAY = 3.0        # sn: iki etiket mesajı arası (Telegram grupta dakikada ~20 mesaja izin verir)
+TAG_COOLDOWN = 600     # sn: bir etiketleme bitince aynı grupta yenisi için bekleme
+TAG_MAX = 3000
+TAG_EMOJIS = ["😀", "😎", "🥳", "🤩", "😇", "🤠", "🥰", "😺", "🦊", "🐼", "🐯", "🦁", "🐸", "🐵", "🦄", "🐝", "🌸", "🌻",
+              "🍀", "🍉", "🍓", "🍒", "🍩", "⚽", "🏀", "🎈", "🎁", "🎯", "🎵", "⭐", "🌙", "🔥", "💎", "🚀", "🌈", "❤️"]
+_tag_runs: dict = {}   # chat_id -> {'stop': bool, 'by': uid, 'done': int, 'total': int, 'task': Task}
+_tag_last: dict = {}   # chat_id -> son etiketlemenin bittiği zaman
+
+async def tag_targets(chat_id: str, active_only: bool) -> list:
+    """Etiketlenecek üyeler [(id, ad)]. Telethon (ana bot) açıksa tüm üye listesi, değilse botun gördüğü üyeler."""
+    with get_db() as conn:
+        optout = {r['user_id'] for r in conn.execute("SELECT user_id FROM tag_optout WHERE chat_id = ?", (chat_id,))}
+    skip = optout | {TELEGRAM_SERVICE_ID, GROUP_ANON_BOT_ID}
+    users: dict = {}
+    ub = await get_userbot()
+    if ub and not active_only and (chat_bot_id(chat_id) or BOT_ID) == BOT_ID:
+        try:
+            async for p in ub.iter_participants(int(chat_id), limit=TAG_MAX):
+                if not getattr(p, 'bot', False) and not getattr(p, 'deleted', False) and p.id not in skip:
+                    users[p.id] = getattr(p, 'first_name', None) or getattr(p, 'username', None) or str(p.id)
+        except Exception as e:
+            logger.debug(f"Üye listesi alınamadı {chat_id}: {e}")
+    # Botun gördüğü üyeler de eklenir (Telethon büyük gruplarda listenin hepsini vermeyebilir)
+    since = time.time() - 7 * 86400 if active_only else 0
+    with get_db() as conn:
+        rows = conn.execute("""SELECT user_id, first_name, username FROM users WHERE chat_id = ? AND is_bot = 0
+                               AND left_at IS NULL AND COALESCE(last_seen, 0) >= ? ORDER BY last_seen DESC LIMIT ?""",
+                            (chat_id, since, TAG_MAX)).fetchall()
+    for r in rows:
+        if r['user_id'] not in skip and len(users) < TAG_MAX:
+            users.setdefault(r['user_id'], r['first_name'] or r['username'] or str(r['user_id']))
+    return list(users.items())
+
+def _tag_chunk_html(chunk: list, style: str) -> str:
+    if style == 'emoji':
+        return " ".join(f'<a href="tg://user?id={uid}">{random.choice(TAG_EMOJIS)}</a>' for uid, _ in chunk)
+    return ", ".join(mention_html(uid, name) for uid, name in chunk)
+
+async def run_tagging(chat_id: str, text_html: str, targets: list, size: int, style: str, status_msg, thread_id=None):
+    run = _tag_runs[chat_id]
+    fails = 0
+    try:
+        for i in range(0, len(targets), size):
+            if run['stop']:
+                break
+            chunk = targets[i:i + size]
+            body = (text_html + "\n\n" if text_html else "") + _tag_chunk_html(chunk, style)
+            kw = {'parse_mode': ParseMode.HTML, 'disable_web_page_preview': True}
+            if thread_id:
+                kw['message_thread_id'] = thread_id
+            try:
+                await bot.send_message(chat_id, body, **kw)
+                fails = 0
+            except BadRequest:
+                try:  # biçim hatası: metni düz gönder
+                    await bot.send_message(chat_id, html.escape(_strip_html(text_html)) + "\n\n" +
+                                           _tag_chunk_html(chunk, style), **kw)
+                except TelegramError as e:
+                    logger.debug(f"Etiket mesajı gönderilemedi {chat_id}: {e}")
+                    fails += 1
+            except TelegramError as e:
+                logger.debug(f"Etiket mesajı gönderilemedi {chat_id}: {e}")
+                fails += 1
+            if fails >= 3:
+                run['stop'] = True
+                break
+            run['done'] = min(len(targets), i + size)
+            if TAG_DELAY and i + size < len(targets):
+                await asyncio.sleep(TAG_DELAY)
+    finally:
+        _tag_runs.pop(chat_id, None)
+        _tag_last[chat_id] = time.time()
+        end = "⏹ Etiketleme durduruldu" if run['stop'] else "✅ Etiketleme bitti"
+        try:
+            await status_msg.edit_text(f"{end}: {run['done']}/{len(targets)} kişi etiketlendi.")
+        except Exception as e:
+            logger.debug(f"Etiket durum mesajı güncellenemedi: {e}")
+
+def _spawn(coro):
+    """Arka plan görevi. PTB'nin create_task'ı kapanışta görevin bitmesini bekler (uzun etiketleme yeniden başlatmayı
+    geciktirirdi); düz asyncio görevi kapanışta iptal edilir. Referans _tag_runs içinde tutulur."""
+    return asyncio.get_running_loop().create_task(coro)
+
+async def cmd_etiket(update: Update, context):
+    """/etiket mesaj — üyeleri gruplar hâlinde etiketleyerek mesaj atar."""
+    msg = update.effective_message
+    chat = update.effective_chat
+    if chat.type not in ('group', 'supergroup'):
+        await msg.reply_text("/etiket grupta kullanılır.")
+        return
+    chat_id = str(chat.id)
+    channel = get_channel_settings(chat_id)
+    if not channel:
+        return
+    if not await require(update, chat_id, 'can_tag'):
+        return
+    if chat_id in _tag_runs:
+        await msg.reply_text("⏳ Bu grupta etiketleme zaten sürüyor. Durdurmak için: /etiketdur")
+        return
+    wait = TAG_COOLDOWN - (time.time() - _tag_last.get(chat_id, 0))
+    if wait > 0:
+        await msg.reply_text(f"⏳ Grup kirlenmesin diye etiketlemeler arasında bekleme var. {int(wait // 60) + 1} dk sonra tekrar dene.")
+        return
+    text_html = cmd_args_html(msg) or (msg_html(msg.reply_to_message) if msg.reply_to_message else '')
+    s = channel['settings']
+    targets = await tag_targets(chat_id, bool(s.get('tag_active_only')))
+    if not targets:
+        await msg.reply_text("Etiketlenecek kimse bulunamadı. (Bot, grupta yazan ya da katılan üyeleri tanır.)")
+        return
+    size = max(1, min(10, int(s.get('tag_size') or 5)))
+    style = 'emoji' if s.get('tag_style') == 'emoji' else 'name'
+    secs = int((len(targets) + size - 1) // size * max(TAG_DELAY, 3))
+    status = await msg.reply_text(
+        f"🏷 Etiketleme başladı: <b>{len(targets)}</b> kişi, {size}'{'li' if size in (1, 5, 10) else 'lü'} · "
+        f"yaklaşık {max(1, secs // 60)} dk\nDurdurmak için: /etiketdur", parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup([[ibtn("⏹ Durdur", f"et|{chat_id}|stop", RED)]]))
+    run = {'stop': False, 'by': update.effective_user.id, 'done': 0, 'total': len(targets)}
+    _tag_runs[chat_id] = run
+    run['task'] = _spawn(run_tagging(chat_id, text_html, targets, size, style, status,
+                                              getattr(msg, 'message_thread_id', None)))
+    await send_log(chat_id, f"🏷 /etiket başlatıldı ({len(targets)} kişi) | {mention(update.effective_user)}", ParseMode.HTML)
+
+async def cmd_etiketdur(update: Update, context):
+    chat_id = str(update.effective_chat.id)
+    if not get_channel_settings(chat_id) or not await require(update, chat_id, 'can_tag'):
+        return
+    run = _tag_runs.get(chat_id)
+    if not run:
+        await update.effective_message.reply_text("Şu an süren bir etiketleme yok.")
+        return
+    run['stop'] = True
+    await update.effective_message.reply_text("⏹ Etiketleme durduruluyor…")
+
+async def tag_stop_callback(update: Update, context):
+    """et|cid|stop"""
+    query = update.callback_query
+    chat_id = query.data.split('|')[1]
+    if not has_specific_permission(chat_id, query.from_user.id, 'can_tag'):
+        await deny(update, 'can_tag')
+        return
+    run = _tag_runs.get(chat_id)
+    if run:
+        run['stop'] = True
+    await query.answer("⏹ Durduruluyor" if run else "Etiketleme zaten bitti.")
+
+async def cmd_etiketme(update: Update, context):
+    """/etiketme — üye kendini bu gruptaki /etiket listesinden çıkarır (tekrar yazınca geri alır)."""
+    chat = update.effective_chat
+    if chat.type not in ('group', 'supergroup'):
+        await update.effective_message.reply_text("Bunu etiketlenmek istemediğin grupta yaz.")
+        return
+    uid, chat_id = update.effective_user.id, str(chat.id)
+    with get_db() as conn:
+        n = conn.execute("DELETE FROM tag_optout WHERE chat_id = ? AND user_id = ?", (chat_id, uid)).rowcount
+        if not n:
+            conn.execute("INSERT INTO tag_optout (chat_id, user_id) VALUES (?, ?)", (chat_id, uid))
+        conn.commit()
+    await update.effective_message.reply_text(
+        "🔔 Tekrar /etiket listesindesin." if n else "🔕 Artık bu grupta /etiket ile etiketlenmeyeceksin. Geri almak için tekrar /etiketme yaz.")
+
+# ═══════════════════════════ KANAL ZORUNLULUĞU ═══════════════════════════
+FSUB_OK_TTL = 600       # sn: üyeliği doğrulanan kişi bu süre boyunca tekrar sorgulanmaz
+FSUB_WARN_EVERY = 60    # sn: aynı kişiye en fazla bu sıklıkla uyarı
+FSUB_WARN_TTL = 60      # sn: uyarı mesajı bu süre sonra silinir
+_fsub_ok: dict = {}
+_fsub_warned: dict = {}
+_fsub_broken: dict = {}  # grup → kanal kontrolü yapılamadı (bot kanalda yönetici değil) uyarısı zamanı
+
+async def fsub_is_member(group_id: str, channel_id, user_id: int, fresh: bool = False) -> bool:
+    key = (str(channel_id), user_id)
+    if not fresh and time.time() - _fsub_ok.get(key, 0) < FSUB_OK_TTL:
+        return True
+    try:
+        m = await bot.get_chat_member(channel_id, user_id)
+    except BadRequest as e:
+        if 'user not found' in str(e).lower() or 'participant' in str(e).lower():
+            return False
+        return await _fsub_failed(group_id, e)
+    except TelegramError as e:
+        return await _fsub_failed(group_id, e)
+    ok = m.status in ('member', 'administrator', 'creator') or (m.status == 'restricted' and getattr(m, 'is_member', False))
+    if ok:
+        _fsub_ok[key] = time.time()
+    return ok
+
+async def _fsub_failed(group_id: str, e) -> bool:
+    """Kanal kontrol edilemiyorsa üyeler engellenmez (yanlışlıkla herkesi susturmamak için); yöneticilere bildirilir."""
+    logger.debug(f"Kanal zorunluluğu kontrol edilemedi {group_id}: {e}")
+    if time.time() - _fsub_broken.get(group_id, 0) > 3600:
+        _fsub_broken[group_id] = time.time()
+        await send_log(group_id, "⚠️ Kanal zorunluluğu kontrol edilemiyor: bot kanalda yönetici mi? (/kanalzorunlu ile tekrar ayarla)")
+    return True
+
+async def fsub_guard(update: Update, context):
+    """Kanala katılmayanın grup mesajı silinir; 'Kanala katıl / Katıldım' butonlu uyarı gelir."""
+    msg = update.effective_message
+    if not msg or not update.message or msg.chat.type not in ('group', 'supergroup'):
+        return
+    user = msg.from_user
+    if not user or user.is_bot or msg.sender_chat or user.id in (TELEGRAM_SERVICE_ID, GROUP_ANON_BOT_ID):
+        return
+    if getattr(msg, 'new_chat_members', None) or getattr(msg, 'left_chat_member', None):
+        return
+    chat_id = str(msg.chat_id)
+    channel = get_channel_settings(chat_id)
+    if not channel:
+        return
+    s = channel['settings']
+    if not s.get('fsub_enabled') or not s.get('fsub_channel'):
+        return
+    if await is_staff_user(chat_id, user.id, channel):
+        return
+    if await fsub_is_member(chat_id, s['fsub_channel'], user.id):
+        return
+    try:
+        await msg.delete()
+    except TelegramError as e:
+        logger.debug(f"Kanal zorunluluğu: mesaj silinemedi {chat_id}: {e}")
+    key = (chat_id, user.id)
+    if time.time() - _fsub_warned.get(key, 0) >= FSUB_WARN_EVERY:
+        _fsub_warned[key] = time.time()
+        title = html.escape(s.get('fsub_title') or 'kanal')
+        rows = []
+        if s.get('fsub_link'):
+            rows.append([ibtn(f"📢 {(s.get('fsub_title') or 'Kanala katıl')[:40]}", url=s['fsub_link'], style=BLUE)])
+        rows.append([ibtn("✅ Katıldım", f"fs|{chat_id}|{user.id}", GREEN)])
+        try:
+            warn = await bot.send_message(
+                chat_id, f"📢 {mention(user)}, bu grupta yazabilmek için önce <b>{title}</b> kanalına katılmalısın.",
+                parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(rows),
+                message_thread_id=getattr(msg, 'message_thread_id', None))
+            schedule_delete(chat_id, [warn], FSUB_WARN_TTL)
+        except TelegramError as e:
+            logger.debug(f"Kanal zorunluluğu uyarısı gönderilemedi {chat_id}: {e}")
+    raise ApplicationHandlerStop
+
+async def fsub_callback(update: Update, context):
+    """fs|cid|uid — ✅ Katıldım"""
+    query = update.callback_query
+    _, chat_id, uid = query.data.split('|')
+    if query.from_user.id != int(uid):
+        await query.answer("Bu buton sana ait değil.", show_alert=True)
+        return
+    channel = get_channel_settings(chat_id)
+    s = channel['settings'] if channel else {}
+    if not s.get('fsub_enabled') or not s.get('fsub_channel') or \
+            await fsub_is_member(chat_id, s['fsub_channel'], query.from_user.id, fresh=True):
+        await query.answer("✅ Teşekkürler, artık yazabilirsin!")
+        try:
+            await query.message.delete()
+        except TelegramError:
+            pass
+        return
+    await query.answer("Henüz kanala katılmamışsın. Önce 📢 butonuyla katıl, sonra tekrar bas.", show_alert=True)
+
+async def fsub_set_channel(group_id: str, ref: str):
+    """Kanalı doğrular (bot kanalda yönetici olmalı). Dönüş: (ayarlar sözlüğü, None) veya (None, hata)."""
+    ref = (ref or '').strip()
+    m = re.match(r'^(?:https?://)?t\.me/([A-Za-z]\w{3,31})/?$', ref)
+    if m:
+        ref = '@' + m.group(1)
+    if not (re.fullmatch(r'@[A-Za-z]\w{3,31}', ref) or re.fullmatch(r'-100\d{5,}', ref)):
+        return None, "Kanalı <code>@kullaniciadi</code>, <code>t.me/kanal</code> ya da <code>-100…</code> ID olarak yaz."
+    try:
+        ch = await bot.get_chat(ref)
+        me = await bot.get_chat_member(ch.id, bot_id_for(group_id))
+    except Exception as e:
+        return None, f"Kanal bulunamadı ya da bot kanalda değil. {html.escape(friendly_error(e))}"
+    if getattr(ch, 'type', '') not in ('channel', 'supergroup'):
+        return None, "Bu bir kanal değil."
+    if me.status not in ('administrator', 'creator'):
+        return None, "Botu önce kanala <b>yönetici</b> olarak ekle (üyeleri görebilmesi için gerekli)."
+    link = f"https://t.me/{ch.username}" if getattr(ch, 'username', None) else getattr(ch, 'invite_link', None)
+    if not link:
+        try:
+            link = await bot.export_chat_invite_link(ch.id)
+        except TelegramError:
+            link = None
+    return {'fsub_channel': ch.id, 'fsub_title': ch.title, 'fsub_link': link, 'fsub_enabled': True}, None
+
+async def cmd_kanalzorunlu(update: Update, context):
+    """/kanalzorunlu @kanal · /kanalzorunlu kapat · /kanalzorunlu (durum)"""
+    chat_id = _get_effective_chat_id(update, context)
+    msg = update.effective_message
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile grup seç!")
+        return
+    if not await require(update, chat_id, 'can_manage_settings'):
+        return
+    channel = get_channel_settings(chat_id)
+    s = channel['settings']
+    arg = context.args[0] if context.args else ''
+    if not arg:
+        st = (f"Açık — <b>{html.escape(s.get('fsub_title') or '?')}</b>" if s.get('fsub_enabled') and s.get('fsub_channel')
+              else "Kapalı")
+        await msg.reply_text(f"📢 <b>Kanal zorunluluğu</b>: {st}\n\nAyarla: <code>/kanalzorunlu @kanal</code>\n"
+                             "Kapat: <code>/kanalzorunlu kapat</code>\nBot, kanalda yönetici olmalı. "
+                             "Yöneticiler ve bot sahibi muaftır.", parse_mode=ParseMode.HTML)
+        return
+    if arg.lower() in ('kapat', 'off', 'kaldır', 'kaldir'):
+        s['fsub_enabled'] = False
+        save_channel_settings(chat_id, channel)
+        await msg.reply_text("📢 Kanal zorunluluğu kapatıldı.")
+        return
+    vals, err = await fsub_set_channel(chat_id, arg)
+    if err:
+        await msg.reply_text(f"❌ {err}", parse_mode=ParseMode.HTML)
+        return
+    s.update(vals)
+    save_channel_settings(chat_id, channel)
+    await msg.reply_text(f"✅ Kanal zorunluluğu açık: <b>{html.escape(vals['fsub_title'] or '')}</b>\n"
+                         "Kanala katılmayanların mesajı silinir ve katılma butonu gösterilir.", parse_mode=ParseMode.HTML)
+    await send_log(chat_id, f"📢 Kanal zorunluluğu: {html.escape(vals['fsub_title'] or '')} | {mention(update.effective_user)}",
+                   ParseMode.HTML)
+
+# ═══════════════════════════ AFK ═══════════════════════════
+AFK_NOTIFY_EVERY = 60   # sn: aynı grupta aynı AFK kişi için en fazla bu sıklıkla hatırlatma
+
+_afk_notified: dict = {}
+
+def _dur_text(sec: float) -> str:
+    sec = int(max(0, sec))
+    if sec < 60:
+        return "kısa süre"
+    if sec < 3600:
+        return f"{sec // 60} dakika"
+    if sec < 86400:
+        return f"{sec // 3600} saat"
+    return f"{sec // 86400} gün"
+
+def _ago(sec: float) -> str:
+    """'5 dakikadır', '2 saattir', '3 gündür'"""
+    t = _dur_text(sec)
+    if t == "kısa süre":
+        return "az önce"
+    n, unit = t.split()
+    return f"{n} " + {'dakika': "dakikadır", 'saat': "saattir", 'gün': "gündür"}[unit]
+
+def afk_get(user_id: int):
+    with get_db() as conn:
+        return conn.execute("SELECT * FROM afk WHERE user_id = ?", (user_id,)).fetchone()
+
+async def cmd_afk(update: Update, context):
+    user = update.effective_user
+    msg = update.effective_message
+    if not user or not msg:
+        return
+    parts = (msg.text or '').split(maxsplit=1)
+    reason = parts[1].strip()[:200] if len(parts) > 1 else ''
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO afk (user_id, reason, since, name) VALUES (?, ?, ?, ?)",
+                     (user.id, reason, time.time(), user.first_name or user.username or str(user.id)))
+        conn.commit()
+    await msg.reply_text(f"💤 {mention(user)} artık AFK" + (f": {html.escape(reason)}" if reason else "."),
+                         parse_mode=ParseMode.HTML)
+
+async def afk_handler(update: Update, context):
+    """AFK kişi yazınca AFK kalkar; AFK birini yanıtlayan/etiketleyen kişiye bilgi verilir."""
+    msg = update.effective_message
+    if not msg or not update.message or msg.chat.type == 'private' or not msg.from_user or msg.from_user.is_bot:
+        return
+    user = msg.from_user
+    text = msg.text or msg.caption or ''
+    if not re.match(r'^/afk(@\w+)?(\s|$)', text, re.I):
+        row = afk_get(user.id)
+        if row:
+            with get_db() as conn:
+                conn.execute("DELETE FROM afk WHERE user_id = ?", (user.id,))
+                conn.commit()
+            try:
+                await msg.reply_text(f"👋 {mention(user)} geri döndü ({_dur_text(time.time() - row['since'])} AFK'ydı).",
+                                     parse_mode=ParseMode.HTML)
+            except TelegramError as e:
+                logger.debug(f"AFK dönüş mesajı gönderilemedi: {e}")
+    targets = set()
+    reply = msg.reply_to_message
+    if reply and reply.from_user and not reply.from_user.is_bot:
+        targets.add(reply.from_user.id)
+    for ent in (getattr(msg, 'entities', None) or ()):
+        if getattr(ent, 'type', None) == 'text_mention' and getattr(ent, 'user', None):
+            targets.add(ent.user.id)
+    names = set(m.lower() for m in re.findall(r'@(\w{4,32})', text))
+    if names:
+        with get_db() as conn:
+            for n in names:
+                r = conn.execute("SELECT user_id FROM users WHERE LOWER(username) = ? LIMIT 1", (n,)).fetchone()
+                if r:
+                    targets.add(r['user_id'])
+    targets.discard(user.id)
+    chat_id = str(msg.chat_id)
+    for uid in targets:
+        row = afk_get(uid)
+        if not row:
+            continue
+        key = (chat_id, uid)
+        if time.time() - _afk_notified.get(key, 0) < AFK_NOTIFY_EVERY:
+            continue
+        _afk_notified[key] = time.time()
+        why = f": {html.escape(row['reason'])}" if row['reason'] else "."
+        try:
+            await msg.reply_text(f"💤 {html.escape(row['name'] or 'Bu kişi')} şu an AFK ({_ago(time.time() - row['since'])}){why}",
+                                 parse_mode=ParseMode.HTML)
+        except TelegramError as e:
+            logger.debug(f"AFK bilgisi gönderilemedi: {e}")
+
+# ── Panel: kanal zorunluluğu ve etiket ayarları ──
+def render_fsub_tag_page(cid: str, base: str, s: dict, title: str):
+    if base == 'fsub':
+        on = s.get('fsub_enabled') and s.get('fsub_channel')
+        text = (f"📢 <b>Kanal zorunluluğu</b> — {title}\n\nDurum: <b>{'Açık' if on else 'Kapalı'}</b>\n"
+                f"Kanal: {html.escape(s.get('fsub_title') or 'ayarlanmamış')}\n\n"
+                "Kanala katılmayan üyenin mesajı silinir ve '📢 Kanala katıl / ✅ Katıldım' butonlu uyarı gelir. "
+                "Yöneticiler muaftır. Bot, kanalda yönetici olmalı.")
+        rows = [[ibtn("✏️ Kanalı ayarla", f"s|{cid}|i|fsub", BLUE)]]
+        if s.get('fsub_channel'):
+            rows.insert(0, [toggle_btn("Kanal zorunluluğu", s.get('fsub_enabled'), f"s|{cid}|t|fsub_enabled|fsub")])
+        rows.append(_back(cid))
+        return text, rows
+    style = s.get('tag_style') or 'name'
+    text = (f"🏷 <b>Etiket ayarları</b> — {title}\n\n<code>/etiket mesaj</code> üyeleri gruplar hâlinde etiketler. "
+            "<code>/etiketdur</code> durdurur, üyeler <code>/etiketme</code> ile listeden çıkabilir.\n\n"
+            f"Bir mesajda: <b>{int(s.get('tag_size') or 5)} kişi</b> · Biçim: <b>{'emoji' if style == 'emoji' else 'isim'}</b> · "
+            f"Kimler: <b>{'son 7 günün aktifleri' if s.get('tag_active_only') else 'herkes'}</b>")
+    rows = [_num_row(cid, 'tag_size', s, 'tag', "Kişi"),
+            [ibtn(("✅ " if style == 'name' else "") + "İsimle", f"s|{cid}|ts|name", GREEN if style == 'name' else None),
+             ibtn(("✅ " if style == 'emoji' else "") + "Emojiyle", f"s|{cid}|ts|emoji", GREEN if style == 'emoji' else None)],
+            [toggle_btn("Sadece son 7 günün aktifleri", s.get('tag_active_only'), f"s|{cid}|t|tag_active_only|tag")],
+            _back(cid)]
+    return text, rows
+
 # ── Notlar (/save, /not, #isim) ──
 _NOTE_NAME = re.compile(r'^[\w\-]{1,32}$')
 
@@ -9141,20 +10424,9 @@ async def _send_note(chat_id: str, name: str, reply_to):
         row = conn.execute("SELECT * FROM notes WHERE chat_id = ? AND name = ?", (chat_id, name.lower())).fetchone()
     if not row:
         return False
-    try:
-        if row['file_id']:
-            sender = {
-                'photo': reply_to.reply_photo, 'video': reply_to.reply_video, 'animation': reply_to.reply_animation,
-                'document': reply_to.reply_document, 'voice': reply_to.reply_voice, 'audio': reply_to.reply_audio,
-            }.get(row['file_type'])
-            if row['file_type'] == 'sticker':
-                await reply_to.reply_sticker(row['file_id'])
-            elif sender:
-                await sender(row['file_id'], caption=row['content'], parse_mode=ParseMode.HTML)
-        else:
-            await reply_to.reply_text(row['content'], parse_mode=ParseMode.HTML, disable_web_page_preview=True)
-    except BadRequest:
-        await reply_to.reply_text(html.unescape(re.sub(r'<[^>]+>', '', row['content'] or '')))
+    rich = build_rich(row['content'] or '', {'type': row['file_type'], 'id': row['file_id']} if row['file_id'] else None)
+    await send_rich(reply_to.chat_id, rich, reply_msg=reply_to, users=[getattr(reply_to, 'from_user', None)],
+                    title=await _chat_title(chat_id))
     return True
 
 async def cmd_get_note(update: Update, context):
@@ -9267,6 +10539,7 @@ def apply_setup(cid: str, st: dict):
     s['welcome_enabled'] = st['welcome'] != 'off'
     if st['welcome'] == 'def':
         s['welcome_msg'] = _default_channel_settings()['welcome_msg']
+        s.pop('welcome_rich', None)
     channel['settings'] = s
     save_channel_settings(cid, channel)
 
@@ -9409,6 +10682,11 @@ def _parse_trigger(raw: str):
         return None
     return raw, norm, mode
 
+def _tail_html(msg, text: str, tail_plain: str) -> str:
+    """Komut metninin sonundaki tail_plain kısmının biçimli HTML'i."""
+    idx = len(text.rstrip()) - len(tail_plain)
+    return html_after(msg, idx) if idx >= 0 and text.rstrip().endswith(tail_plain) else html.escape(tail_plain, quote=False)
+
 def _split_filter_args(text: str):
     """'/filter "iyi akşamlar" Size de' → ('iyi akşamlar', 'Size de'); '/filter selam Aleyküm selam' → ('selam', ...)"""
     body = text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else ''
@@ -9441,12 +10719,13 @@ async def cmd_filter(update: Update, context):
             if obj:
                 file_id, file_type = (obj[-1].file_id if ft == 'photo' else obj.file_id), ft
                 break
-        answer = extra or (reply.caption or '')
+        answer = _tail_html(msg, text, extra) if extra else msg_html(reply)
     elif reply and (reply.text or reply.caption):
         trigger_raw = reply.text or reply.caption
-        answer = text.split(maxsplit=1)[1].strip() if len(text.split(maxsplit=1)) > 1 else ''
+        answer = cmd_args_html(msg, 1)
     else:
         trigger_raw, answer = _split_filter_args(text)
+        answer = _tail_html(msg, text, answer) if answer else ''
     parsed = _parse_trigger(trigger_raw or '')
     if not parsed or (not answer and not file_id):
         await msg.reply_text(
@@ -9456,7 +10735,8 @@ async def cmd_filter(update: Update, context):
             "• Çok kelimeli: <code>/filter \"iyi akşamlar\" Size de!</code>\n"
             "• Mesajın içinde geçerse: <code>/filter *selam* Merhaba!</code>\n"
             "• Sticker/foto/GIF ile cevap: medyaya yanıtla → <code>/filter selam</code>\n"
-            "Değişkenler: <code>{kullanıcı}</code> <code>{grup}</code>\n"
+            "• Butonlar: cevabın altına satır satır <code>Kanal - https://t.me/kanal</code>\n"
+            "Değişkenler: <code>{kullanıcı}</code> <code>{ad}</code> <code>{grup}</code> · Biçim (kalın, link…) korunur\n"
             "Liste: /filters · Sil: /stop selam · Hepsini sil: /stopall", parse_mode=ParseMode.HTML)
         return
     shown, norm, mode = parsed
@@ -9469,8 +10749,8 @@ async def cmd_filter(update: Update, context):
     async with _db_lock:
         with get_db() as conn:
             conn.execute("""INSERT OR REPLACE INTO chat_filters
-                            (chat_id, trigger_norm, trigger_text, mode, reply_text, file_id, file_type, created_by, created_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                            (chat_id, trigger_norm, trigger_text, mode, reply_text, file_id, file_type, created_by, created_at,
+                             is_html) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
                          (chat_id, norm, shown, mode, (answer or '')[:3500], file_id, file_type,
                           update.effective_user.id, time.time()))
             conn.commit()
@@ -9551,15 +10831,6 @@ async def filter_clear_callback(update: Update, context):
     await query.edit_message_text(f"🗑 {n} filtre silindi.")
     await send_log(chat_id, f"🧹 Tüm filtreler silindi ({n}) | {mention(query.from_user)}", ParseMode.HTML)
 
-def _fill_vars(text: str, user, chat_title: str) -> str:
-    """Yanıt metni kullanıcı girdisidir: HTML olarak kaçışlanır, sadece değişkenler biçimlenir."""
-    out = html.escape(text or '')
-    for key in ('{kullanıcı}', '{kullanici}', '{user}'):
-        out = out.replace(html.escape(key), mention(user) if user else '')
-    for key in ('{grup}', '{group}'):
-        out = out.replace(html.escape(key), html.escape(chat_title or ''))
-    return out
-
 async def filter_reply_handler(update: Update, context):
     """Gruba gelen mesaj bir filtreyle eşleşirse bot cevap verir."""
     msg = update.effective_message
@@ -9579,19 +10850,9 @@ async def filter_reply_handler(update: Update, context):
     if now - _filter_last.get(key, 0) < FILTER_COOLDOWN:
         return
     _filter_last[key] = now
-    body = _fill_vars(f['reply_text'], msg.from_user, msg.chat.title)
-    try:
-        if f['file_type'] == 'sticker':
-            await msg.reply_sticker(f['file_id'])
-        elif f['file_type'] == 'video_note':
-            await msg.reply_video_note(f['file_id'])
-        elif f['file_id']:
-            sender = getattr(msg, f"reply_{f['file_type']}")
-            await sender(f['file_id'], caption=body or None, parse_mode=ParseMode.HTML)
-        else:
-            await msg.reply_text(body, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
-    except TelegramError as e:
-        logger.debug(f"Filtre yanıtı gönderilemedi {chat_id}: {e}")
+    body = (f['reply_text'] or '') if f.get('is_html') else html.escape(f['reply_text'] or '', quote=False)
+    rich = build_rich(body, {'type': f['file_type'], 'id': f['file_id']} if f['file_id'] else None)
+    await send_rich(chat_id, rich, reply_msg=msg, users=[msg.from_user], title=msg.chat.title)
 
 # ═══════════════════════════ KLON BOT ═══════════════════════════
 # Akış: kullanıcı ana botta 🤖 Klon → BotFather token'ını gönderir → bot sahibine isteyen kişi, token ve bot ismi
@@ -10446,7 +11707,9 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(TypeHandler(Update, auto_register_handler), group=-99)
     app.add_error_handler(error_handler)
     # Panelin ForceReply ile istediği metin (sadece bekleyen giriş varsa yakalar)
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, settings_input_handler), group=-50)
+    app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL
+                                    | filters.Sticker.ALL | filters.AUDIO | filters.VOICE | filters.VIDEO_NOTE)
+                                   & ~filters.COMMAND, settings_input_handler), group=-50)
 
     app.add_handler(ChatMemberHandler(chat_member_cache_handler, ChatMemberHandler.CHAT_MEMBER), group=-1)
     app.add_handler(ChatMemberHandler(network_ban_handler, ChatMemberHandler.CHAT_MEMBER), group=-2)
@@ -10460,6 +11723,7 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, kanal_admin_spam_check), group=2)
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_bot_added), group=0)
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member_handler), group=1)
+    app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, left_member_handler), group=1)
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
 
     app.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.ChatType.GROUPS, edit_guard_handler),
@@ -10475,7 +11739,12 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, anti_spam_flood_handler), group=-8)
     app.add_handler(MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND, anti_link_handler), group=-7)
     app.add_handler(MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND, check_message), group=-6)
+    # Kanal zorunluluğu: korumalardan sonra, not/filtre/sayaçtan önce (engellenen mesaj sonraki adımlara gitmez)
+    app.add_handler(MessageHandler(filters.UpdateType.MESSAGE & filters.ChatType.GROUPS & ~filters.StatusUpdate.ALL,
+                                   fsub_guard), group=-4)
     app.add_handler(MessageHandler(filters.Regex(r'^#[\w\-]+') & filters.ChatType.GROUPS, hashtag_note_handler), group=5)
+    app.add_handler(MessageHandler(filters.UpdateType.MESSAGE & filters.ChatType.GROUPS & ~filters.StatusUpdate.ALL,
+                                   afk_handler), group=7)
     app.add_handler(MessageHandler(filters.UpdateType.MESSAGE & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND
                                    & filters.ChatType.GROUPS, filter_reply_handler), group=6)
 
@@ -10525,6 +11794,21 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('setautoreject', set_auto_reject))
     app.add_handler(CommandHandler('setautorejectbot', set_auto_reject_bot))
     app.add_handler(CommandHandler('setwelcome', set_welcome))
+    app.add_handler(CommandHandler(['setgoodbye', 'setveda'], cmd_setgoodbye))
+    app.add_handler(CommandHandler('welcome', cmd_welcome))
+    app.add_handler(CommandHandler(['goodbye', 'veda'], cmd_goodbye))
+    app.add_handler(CommandHandler('resetwelcome', cmd_resetwelcome))
+    app.add_handler(CommandHandler('zamanla', cmd_zamanla))
+    app.add_handler(CommandHandler('zamanlar', cmd_zamanlar))
+    app.add_handler(CallbackQueryHandler(sched_callback, pattern=r'^zm\|'))
+    app.add_handler(CallbackQueryHandler(rich_action_callback, pattern=r'^ra\|'))
+    app.add_handler(CommandHandler('etiket', cmd_etiket))
+    app.add_handler(CommandHandler('etiketdur', cmd_etiketdur))
+    app.add_handler(CommandHandler('etiketme', cmd_etiketme))
+    app.add_handler(CallbackQueryHandler(tag_stop_callback, pattern=r'^et\|'))
+    app.add_handler(CommandHandler(['kanalzorunlu', 'fsub', 'forcesub'], cmd_kanalzorunlu))
+    app.add_handler(CallbackQueryHandler(fsub_callback, pattern=r'^fs\|'))
+    app.add_handler(CommandHandler('afk', cmd_afk))
 
     app.add_handler(CommandHandler('stats', stats))
     app.add_handler(CommandHandler('invitestats', invite_stats))
@@ -10674,6 +11958,8 @@ def main():
     job_queue.run_repeating(db_cleanup_job, interval=3600, first=600)
     job_queue.run_repeating(checkpoint_job, interval=600, first=60)
     job_queue.run_repeating(clone_health_job, interval=600, first=300)
+    job_queue.run_repeating(auto_delete_job, interval=20, first=20)
+    job_queue.run_repeating(scheduled_msgs_job, interval=60, first=45)
     job_queue.run_repeating(spam_memory_cleanup, interval=3600, first=3600)
     job_queue.run_repeating(weekly_log_cleanup, interval=86400, first=3600)
     job_queue.run_daily(backup_job, time=dtime(4, 0, tzinfo=TZ_TR))

@@ -2,7 +2,7 @@
 
 Her faz bitince: testler → zip → canlı deneme → sonraki faz.
 
-## Faz 1 — Zengin mesaj sistemi
+## Faz 1 — Zengin mesaj sistemi ✅ (tamamlandı)
 Hoş geldin, veda, kurallar, notlar, /filter, duyuru ve zamanlanmış mesajlar tek ortak altyapıyı kullanır.
 Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu kullanır; bu yüzden ilk sırada.
 
@@ -26,7 +26,7 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
    - Hoş geldini özelden gönderme.
 8. **Zamanlanmış mesajlar** — örn. "her 6 saatte bir kuralları butonlarıyla at".
 
-## Faz 2 — Etkileşim
+## Faz 2 — Etkileşim ✅ (tamamlandı)
 1. **`/etiket <mesaj>`** — gruptaki üyeleri etiketleyerek mesaj atar.
    - Grup başına 1, 5 veya 10 kişi aynı mesajda (varsayılan 5).
    - İsimle ya da emojiyle (gizli etiket) etiketleme.
@@ -50,7 +50,7 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
    - Yeni üyeler oy veremez; yetkililere karşı kullanılamaz.
 
 ## Faz 4 — Çekiliş ve istatistik
-1. **Çekiliş sistemi** — `/cekilis` ile "🎁 Katıl" butonlu çekiliş; süre bitince kazanan rastgele seçilip duyurulur.
+1. **Çekiliş sistemi** (temel `/cekilis` zaten var; şartlar ve sahte hesap engeli eklenecek) — `/cekilis` ile "🎁 Katıl" butonlu çekiliş; süre bitince kazanan rastgele seçilip duyurulur.
    - Katılım şartı konabilir: kanal üyeliği, en az X mesaj, X gündür grupta olmak.
    - Yeni açılmış ve sahte hesaplar katılamaz.
 2. **Grafikli istatistik** — `/stats`: son 7 ve 30 günün aktivitesi, en aktif saatler, katılan/ayrılan; resim olarak grafik (matplotlib).
