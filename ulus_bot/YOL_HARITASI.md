@@ -26,6 +26,24 @@ Hoş geldin, veda, kurallar, notlar, /filter ve duyuru tek ortak altyapıyı kul
 
 Karar bekliyor: hepsi tek seferde mi, yoksa önce 1–7, sonra 8 mi?
 
+## Onaylanan yeni özellikler (henüz yazılmadı)
+1. **Kanal zorunluluğu** — grupta yazmak için belirlenen kanala katılmak gerekir.
+   - Katılmayanın mesajı silinir; "📢 Kanala katıl → ✅ Katıldım" butonlu uyarı gelir.
+2. **Çekiliş sistemi** — `/cekilis` ile "🎁 Katıl" butonlu çekiliş; süre bitince kazanan rastgele seçilip duyurulur.
+   - Katılım şartı konabilir: kanal üyeliği, en az X mesaj, X gündür grupta olmak.
+   - Yeni açılmış ve sahte hesaplar katılamaz.
+3. **Ortak spam kara listesi** — botun bir grubunda spam yüzünden banlanan hesap, diğer gruplara katılınca "şüpheli" işaretlenir.
+   - İsteğe bağlı CAS (dünya çapında bilinen spam listesi) kontrolü.
+4. **Kullanıcı sicili (`/sicil`)** — kişinin botun tüm gruplarındaki uyarı, susturma ve ban geçmişi; sadece yetkililere açık.
+
+## Önerildi, şimdilik seçilmedi
+- Davet yarışması (haftalık/aylık davet sıralaması)
+- Hesap güven puanı (hesap yaşı, profil fotoğrafı, biyografideki link, premium)
+- Seviye ve rozet sistemi (XP, unvanlar)
+- Destek hattı (üyeden yetkililere anonim mesaj)
+- Telegram Stars ile premium (ücretli klon/özellikler)
+- Yapay zekâ moderasyonu (anlamdan hakaret, dolandırıcılık ve spam tespiti)
+
 ## Ertelendi
 - **Federasyon** — farklı sahiplerin grupları ortak ban listesine katılır. Grup ağı şu an sadece aynı sahibin gruplarında çalışıyor.
 - **Klon token şifreleme** — bot sahibi şimdilik gerek görmedi.
