@@ -1,17 +1,19 @@
-# ULUS — Yol haritası
+# ULUS — Yol haritası (kesinleşti)
 
-## Sırada: Zengin mesaj sistemi (onaylandı, henüz yazılmadı)
-Hoş geldin, veda, kurallar, notlar, /filter ve duyuru tek ortak altyapıyı kullanacak.
+Her faz bitince: testler → zip → canlı deneme → sonraki faz.
+
+## Faz 1 — Zengin mesaj sistemi
+Hoş geldin, veda, kurallar, notlar, /filter, duyuru ve zamanlanmış mesajlar tek ortak altyapıyı kullanır.
+Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu kullanır; bu yüzden ilk sırada.
 
 1. **Medya** — resim, video, GIF, sticker, dosya, ses. Medyaya yanıt verip `/setwelcome` yazmak yeterli.
-2. **Butonlar**
-   - Satır satır yazım; `&&` ile aynı satıra yan yana:
-     ```
-     Kanalımız - https://t.me/kanal && Destek - https://t.me/destek
-     Kuralları Oku - rules
-     ```
-   - Özel butonlar: 📜 kurallar (özelden gösterir), 📝 not, 💬 popup uyarı, renkli butonlar.
-   - Karar bekliyor: Rose tarzı `[Kanal](buttonurl://t.me/kanal)` yazımı da desteklensin mi?
+2. **Butonlar** — iki yazım da desteklenir:
+   ```
+   Kanalımız - https://t.me/kanal && Destek - https://t.me/destek
+   Kuralları Oku - rules
+   ```
+   ve Rose tarzı `[Kanal](buttonurl://t.me/kanal)` (`:same` ile aynı satır).
+   - Özel butonlar: 📜 kurallar (özelden), 📝 not, 💬 popup uyarı, renkli butonlar.
 3. **Biçimlendirme** — kalın, italik, link, spoiler, alıntı, premium emoji; adminin mesajı nasıl biçimlendirdiyse öyle kaydedilir.
 4. **Değişkenler** — `{kullanıcı}` `{ad}` `{soyad}` `{username}` `{id}` `{grup}` `{uye_sayisi}` `{tarih}` `{saat}`
 5. **Rastgele hoş geldin** — birden fazla mesaj, her yeni üyeye rastgele biri.
@@ -24,17 +26,38 @@ Hoş geldin, veda, kurallar, notlar, /filter ve duyuru tek ortak altyapıyı kul
    - Hoş geldini özelden gönderme.
 8. **Zamanlanmış mesajlar** — örn. "her 6 saatte bir kuralları butonlarıyla at".
 
-Karar bekliyor: hepsi tek seferde mi, yoksa önce 1–7, sonra 8 mi?
-
-## Onaylanan yeni özellikler (henüz yazılmadı)
-1. **Kanal zorunluluğu** — grupta yazmak için belirlenen kanala katılmak gerekir.
+## Faz 2 — Etkileşim
+1. **`/etiket <mesaj>`** — gruptaki üyeleri etiketleyerek mesaj atar.
+   - Grup başına 1, 5 veya 10 kişi aynı mesajda (varsayılan 5).
+   - İsimle ya da emojiyle (gizli etiket) etiketleme.
+   - Herkes ya da sadece aktifler (son 7 gün).
+   - `/etiketdur` ile durur; aynı anda bir etiketleme; bitince 10 dk bekleme.
+   - Üye `/etiketme` ile kendini listeden çıkarabilir.
+   - Botlar ve silinmiş hesaplar atlanır; Admin ve üstü kullanabilir.
+   - Telegram sınırı: grupta dakikada ~20 mesaj. 300 kişi, 5'erli = 60 mesaj ≈ 3–4 dk.
+   - Bot API grubun tüm üye listesini vermez. Bot, gördüğü (yazan/katılan) üyeleri etiketler.
+     Userbot (API_ID/API_HASH) açıksa ve o hesap gruptaysa tüm üye listesi kullanılır.
+2. **Kanal zorunluluğu** — grupta yazmak için belirlenen kanala katılmak gerekir.
    - Katılmayanın mesajı silinir; "📢 Kanala katıl → ✅ Katıldım" butonlu uyarı gelir.
-2. **Çekiliş sistemi** — `/cekilis` ile "🎁 Katıl" butonlu çekiliş; süre bitince kazanan rastgele seçilip duyurulur.
+3. **AFK** — `/afk sebep`; etiketlenince "şu an AFK: sebep (2 saattir)"; tekrar yazınca kalkar.
+
+## Faz 3 — Güvenlik
+1. **Ortak spam kara listesi** — botun bir grubunda spam yüzünden banlanan hesap, diğer gruplara katılınca "şüpheli" işaretlenir.
+   - İsteğe bağlı CAS (dünya çapında bilinen spam listesi) kontrolü.
+2. **Kullanıcı sicili (`/sicil`)** — kişinin botun tüm gruplarındaki uyarı, susturma ve ban geçmişi; sadece yetkililere açık.
+3. **İsim değişikliği takibi** — ad veya kullanıcı adı değişince log kanalına kayıt; eski isimler `/sicil`'de görünür.
+4. **Oylamalı susturma (`/oylama`)** — admin yokken üyeler oyla geçici susturur (örn. 5 oy → 1 saat).
+   - Yeni üyeler oy veremez; yetkililere karşı kullanılamaz.
+
+## Faz 4 — Çekiliş ve istatistik
+1. **Çekiliş sistemi** — `/cekilis` ile "🎁 Katıl" butonlu çekiliş; süre bitince kazanan rastgele seçilip duyurulur.
    - Katılım şartı konabilir: kanal üyeliği, en az X mesaj, X gündür grupta olmak.
    - Yeni açılmış ve sahte hesaplar katılamaz.
-3. **Ortak spam kara listesi** — botun bir grubunda spam yüzünden banlanan hesap, diğer gruplara katılınca "şüpheli" işaretlenir.
-   - İsteğe bağlı CAS (dünya çapında bilinen spam listesi) kontrolü.
-4. **Kullanıcı sicili (`/sicil`)** — kişinin botun tüm gruplarındaki uyarı, susturma ve ban geçmişi; sadece yetkililere açık.
+2. **Grafikli istatistik** — `/stats`: son 7 ve 30 günün aktivitesi, en aktif saatler, katılan/ayrılan; resim olarak grafik (matplotlib).
+
+## Faz 5 — Telegram Mini App paneli
+- Ayarlar Telegram içinde açılan web sayfasından yönetilir: sekmeler, açma/kapama anahtarları, önizleme.
+- PythonAnywhere web uygulaması üzerinde çalışır; giriş Telegram doğrulamasıyla.
 
 ## Önerildi, şimdilik seçilmedi
 - Davet yarışması (haftalık/aylık davet sıralaması)
@@ -43,6 +66,11 @@ Karar bekliyor: hepsi tek seferde mi, yoksa önce 1–7, sonra 8 mi?
 - Destek hattı (üyeden yetkililere anonim mesaj)
 - Telegram Stars ile premium (ücretli klon/özellikler)
 - Yapay zekâ moderasyonu (anlamdan hakaret, dolandırıcılık ve spam tespiti)
+- Admin taklitçisi koruması
+- Yetkili performans raporu + pasif admin uyarısı
+- Ayar şablonları + yedekle / geri yükle
+- Konuya (topic) özel kurallar
+- Bilgi yarışması
 
 ## Ertelendi
 - **Federasyon** — farklı sahiplerin grupları ortak ban listesine katılır. Grup ağı şu an sadece aynı sahibin gruplarında çalışıyor.
