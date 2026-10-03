@@ -927,6 +927,32 @@ def init_db():
                 at REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_botrem ON bot_removals(bot_id, at);
+            CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+            CREATE TABLE IF NOT EXISTS invite_links (
+                chat_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                link TEXT NOT NULL,
+                created_at REAL,
+                PRIMARY KEY (chat_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_invlink ON invite_links(chat_id, link);
+            CREATE TABLE IF NOT EXISTS invite_joins (
+                chat_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                inviter_id INTEGER NOT NULL,
+                at REAL NOT NULL,
+                left_at REAL,
+                PRIMARY KEY (chat_id, user_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_invjoin ON invite_joins(chat_id, inviter_id);
+            CREATE TABLE IF NOT EXISTS support_msgs (
+                bot_id INTEGER NOT NULL,
+                admin_msg_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                user_msg_id INTEGER NOT NULL,
+                at REAL NOT NULL,
+                PRIMARY KEY (bot_id, admin_msg_id)
+            );
             CREATE TABLE IF NOT EXISTS duyuru_templates (
                 bot_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
@@ -1553,6 +1579,7 @@ def _default_channel_settings():
         'fsub_enabled': False, 'fsub_channel': None, 'fsub_title': None, 'fsub_link': None,
         # /etiket: bir mesajda kaç kişi, isim/emoji, sadece son 7 günün aktifleri
         'tag_size': 5, 'tag_style': 'name', 'tag_active_only': False,
+        'invite_enabled': True,
         # Topluluk koruması: ortak kara liste (botun başka grubunda banlı) + CAS, isim takibi, oylamalı susturma
         'shared_blacklist': True, 'blacklist_action': 'mute', 'cas_enabled': False, 'name_track': True,
         'vote_mute': True, 'vote_needed': 5, 'vote_mute_minutes': 60,
@@ -5877,6 +5904,8 @@ def _dy_start(did: int) -> None:
 
 async def duyuru_job(context):
     """Zamanı gelen duyuruları başlatır; bot yeniden başlarken yarıda kalanları kaldığı yerden sürdürür."""
+    if maintenance_on():  # bakımda zamanlanmış duyurular bekler
+        return
     now = time.time()
     with get_db() as conn:
         rows = conn.execute("SELECT id, bot_id FROM announcements WHERE (status = 'scheduled' AND run_at <= ?) "
@@ -6433,6 +6462,345 @@ async def cmd_buyume(update: Update, context):
     if not is_bot_owner(update.effective_user.id):
         return
     await update.effective_message.reply_text(growth_report(), parse_mode=ParseMode.HTML)
+
+# ═══════════════════════════ KÜÇÜK ANAHTAR-DEĞER DEPOSU ═══════════════════════════
+def kv_get(key: str, default=None):
+    with get_db() as conn:
+        r = conn.execute("SELECT v FROM kv WHERE k = ?", (key,)).fetchone()
+    return r['v'] if r else default
+
+def kv_set(key: str, value) -> None:
+    with get_db() as conn:
+        if value is None:
+            conn.execute("DELETE FROM kv WHERE k = ?", (key,))
+        else:
+            conn.execute("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", (key, str(value)))
+
+# ═══════════════════════════ BAKIM MODU ═══════════════════════════
+# /bakim: komutlar ve butonlar herkese kapanır (bot sahibi hariç); otomatik korumalar (spam, link, flood, captcha…)
+# çalışmaya devam eder. Süre verilirse kendiliğinden kapanır.
+MAINT_TEXT = "🛠 Bot kısa bir bakımda; birazdan dönecek. Korumalar çalışmaya devam ediyor."
+_maint: dict = {'until': None}   # None: henüz okunmadı · 0: kapalı · -1: süresiz · >0: bitiş zamanı
+_maint_notice: dict = {}         # chat_id -> son uyarı zamanı
+
+def maintenance_until() -> float:
+    if _maint['until'] is None:
+        try:
+            _maint['until'] = float(kv_get('maintenance_until', 0) or 0)
+        except (ValueError, sqlite3.Error):
+            _maint['until'] = 0
+    return _maint['until']
+
+def maintenance_on() -> bool:
+    u = maintenance_until()
+    if u > 0 and u <= time.time():
+        set_maintenance(0)
+        return False
+    return u != 0
+
+def set_maintenance(until: float) -> None:
+    kv_set('maintenance_until', until or None)
+    _maint['until'] = until or 0
+
+async def maintenance_guard(update: Update, context):
+    if not maintenance_on():
+        return
+    user = update.effective_user
+    if user and user.id == FOUNDER_ID:
+        return
+    q = update.callback_query
+    if q is not None:
+        try:
+            await q.answer(MAINT_TEXT, show_alert=True)
+        except TelegramError:
+            pass
+        raise ApplicationHandlerStop
+    msg = update.message
+    if msg is not None and (msg.text or '').startswith('/'):
+        key = msg.chat_id
+        if time.time() - _maint_notice.get(key, 0) >= 600:
+            _maint_notice[key] = time.time()
+            try:
+                await msg.reply_text(MAINT_TEXT)
+            except TelegramError:
+                pass
+        raise ApplicationHandlerStop
+
+def _maint_announce(text: str) -> None:
+    """Bakım notunu duyuru altyapısıyla gruplara gönderir (arka planda, hız sınırlı)."""
+    with get_db() as conn:
+        did = conn.execute(
+            "INSERT INTO announcements (bot_id, owner_id, chat_id, created_at, targets, payload, silent, status) "
+            "VALUES (?, ?, ?, ?, 'g', ?, 1, 'running')",
+            (cur_bot_id(), FOUNDER_ID, str(FOUNDER_ID), time.time(),
+             json.dumps({'mode': 'rich', 'rich': rich_from_plain(text)}))).lastrowid
+    _dy_start(did)
+
+async def cmd_bakim(update: Update, context):
+    """/bakim [dakika|ac|kapat] [-duyur] — sadece ana bot sahibi."""
+    msg = update.effective_message
+    if update.effective_user.id != FOUNDER_ID:
+        return
+    args = [a.lower() for a in context.args or []]
+    announce = '-duyur' in args
+    args = [a for a in args if a != '-duyur']
+    if not args:
+        u = maintenance_until() if maintenance_on() else 0
+        state = ("🛠 Bakım modu <b>açık</b>" + (f" — {datetime.fromtimestamp(u, TZ_TR).strftime('%H:%M')}'de kapanır"
+                                                if u > 0 else " (süresiz)")) if u else "✅ Bakım modu kapalı"
+        await msg.reply_text(f"{state}\n\n<code>/bakim 30</code> — 30 dakika · <code>/bakim ac</code> — süresiz · "
+                             f"<code>/bakim kapat</code>\nSonuna <code>-duyur</code> eklersen gruplara kısa not gider.\n\n"
+                             f"Bakımda komutlar ve butonlar herkese kapanır (sen hariç); spam, link, flood, captcha gibi "
+                             f"korumalar çalışmaya devam eder.", parse_mode=ParseMode.HTML)
+        return
+    a = args[0]
+    if a in ('kapat', 'off', 'bitir', '0'):
+        was = maintenance_on()
+        set_maintenance(0)
+        await msg.reply_text("✅ Bakım modu kapandı." if was else "Bakım modu zaten kapalı.")
+        if was and announce:
+            _maint_announce("✅ Bakım bitti, bot tamamen çalışıyor.")
+        return
+    if a.isdigit() and 1 <= int(a) <= 7 * 24 * 60:
+        set_maintenance(time.time() + int(a) * 60)
+        when = datetime.fromtimestamp(maintenance_until(), TZ_TR).strftime('%H:%M')
+        text = f"🛠 Bakım modu açıldı, {when}'de kendiliğinden kapanır."
+    elif a in ('ac', 'aç', 'on'):
+        set_maintenance(-1)
+        text = "🛠 Bakım modu açıldı (süresiz). Kapatmak için /bakim kapat"
+    else:
+        await msg.reply_text("Kullanım: /bakim 30 · /bakim ac · /bakim kapat")
+        return
+    await msg.reply_text(text + "\nKomutlar ve butonlar herkese kapalı (sen hariç); korumalar çalışıyor.")
+    if announce:
+        _maint_announce(MAINT_TEXT)
+
+# ═══════════════════════════ DAVET YARIŞMASI ═══════════════════════════
+# /davet: üyeye özel davet linki; bu linkle katılan sayılır, ayrılan düşülür. /davetler: sıralama.
+async def cmd_davet(update: Update, context):
+    msg = update.effective_message
+    chat, user = update.effective_chat, update.effective_user
+    if chat.type not in ('group', 'supergroup'):
+        await msg.reply_text("/davet grupta kullanılır: sana özel davet linki verir, getirdiğin kişiler sayılır.")
+        return
+    cid = str(chat.id)
+    channel = get_channel_settings(cid)
+    if not channel:
+        return
+    if not channel['settings'].get('invite_enabled', True):
+        await msg.reply_text("Bu grupta davet yarışması kapalı.")
+        return
+    with get_db() as conn:
+        row = conn.execute("SELECT link FROM invite_links WHERE chat_id = ? AND user_id = ?", (cid, user.id)).fetchone()
+    link = row['link'] if row else None
+    if not link:
+        try:
+            inv = await bot.create_chat_invite_link(cid, name=f"Davet · {user.first_name or user.id}"[:32])
+        except TelegramError as e:
+            logger.debug(f"Davet linki oluşturulamadı {cid}: {e}")
+            await msg.reply_text("Davet linki oluşturamadım: bana \"kullanıcı davet etme\" yetkisi verilmeli.")
+            return
+        link = getattr(inv, 'invite_link', None)
+        if not link:
+            await msg.reply_text("Davet linki oluşturamadım, biraz sonra tekrar dene.")
+            return
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO invite_links (chat_id, user_id, link, created_at) VALUES (?, ?, ?, ?)",
+                         (cid, user.id, link, time.time()))
+    with get_db() as conn:
+        r = conn.execute("SELECT COUNT(*) total, SUM(left_at IS NULL) active FROM invite_joins "
+                         "WHERE chat_id = ? AND inviter_id = ?", (cid, user.id)).fetchone()
+    await msg.reply_text(f"🔗 {mention(user)}, davet linkin:\n{html.escape(link)}\n\n"
+                         f"👥 Getirdiğin: <b>{r['active'] or 0}</b> kişi"
+                         + (f" ({r['total'] - (r['active'] or 0)} kişi ayrıldı)" if r['total'] and r['total'] != r['active'] else "")
+                         + "\n🏆 Sıralama: /davetler", parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
+async def invite_track_handler(update: Update, context):
+    """Bot'un oluşturduğu davet linkiyle katılanı linkin sahibine yazar; ayrılanı işaretler."""
+    cm = update.chat_member
+    if not cm:
+        return
+    cid, uid = str(cm.chat.id), cm.new_chat_member.user.id
+    old, new = cm.old_chat_member.status, cm.new_chat_member.status
+    out = ('left', 'kicked')
+    if old in out and new not in out:
+        link = getattr(getattr(cm, 'invite_link', None), 'invite_link', None)
+        if not link:
+            return
+        with get_db() as conn:
+            row = conn.execute("SELECT user_id FROM invite_links WHERE chat_id = ? AND link = ?", (cid, link)).fetchone()
+            if row and row['user_id'] != uid and not cm.new_chat_member.user.is_bot:
+                conn.execute("INSERT INTO invite_joins (chat_id, user_id, inviter_id, at) VALUES (?, ?, ?, ?) "
+                             "ON CONFLICT(chat_id, user_id) DO UPDATE SET left_at = NULL",
+                             (cid, uid, row['user_id'], time.time()))
+    elif new in out and old not in out:
+        with get_db() as conn:
+            conn.execute("UPDATE invite_joins SET left_at = ? WHERE chat_id = ? AND user_id = ? AND left_at IS NULL",
+                         (time.time(), cid, uid))
+
+async def cmd_davetler(update: Update, context):
+    """/davetler [hafta] — en çok kişi getirenler (gruptan ayrılanlar sayılmaz)."""
+    msg = update.effective_message
+    chat = update.effective_chat
+    if chat.type not in ('group', 'supergroup'):
+        await msg.reply_text("/davetler grupta kullanılır.")
+        return
+    cid = str(chat.id)
+    week = bool(context.args) and context.args[0].lower() in ('hafta', 'haftalik', 'haftalık', '7')
+    since = time.time() - 7 * 86400 if week else 0
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT j.inviter_id, SUM(j.left_at IS NULL) n, COUNT(*) total, "
+            "(SELECT first_name FROM users u WHERE u.user_id = j.inviter_id AND u.chat_id = j.chat_id) fn "
+            "FROM invite_joins j WHERE j.chat_id = ? AND j.at >= ? GROUP BY j.inviter_id "
+            "HAVING n > 0 ORDER BY n DESC, total DESC LIMIT 10", (cid, since)).fetchall()
+    if not rows:
+        await msg.reply_text("🏆 Henüz davetle gelen yok. /davet ile kendi linkini al!")
+        return
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [f"🏆 <b>Davet sıralaması</b>{' (son 7 gün)' if week else ''}\n"]
+    for i, r in enumerate(rows):
+        lines.append(f"{medals[i] if i < 3 else f'{i + 1}.'} {mention_html(r['inviter_id'], r['fn'] or str(r['inviter_id']))}"
+                     f" — <b>{r['n']}</b> kişi")
+    lines.append("\nKendi linkin için /davet" + ("" if week else " · haftalık: /davetler hafta"))
+    await msg.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+# ═══════════════════════════ TOPLU AYAR ═══════════════════════════
+def copy_settings_to(source: str, targets, lists: bool = False) -> int:
+    """Kaynak grubun koruma ayarlarını hedeflere kopyalar (hoş geldin, kurallar, kanal zorunluluğu gibi gruba özel
+    olanlar hariç). lists=True: kelime ve link listeleri de (birleştirerek) eklenir."""
+    src = get_channel_settings(source)['settings']
+    defaults = _default_channel_settings()
+    copied = 0
+    for cid in targets:
+        if str(cid) == str(source):
+            continue
+        ch = get_channel_settings(cid)
+        if not ch or ch['chat_type'] == 'channel':
+            continue
+        for key in defaults:
+            if key not in NETWORK_COPY_EXCLUDE:
+                ch['settings'][key] = copy.deepcopy(src.get(key, defaults[key]))
+        if lists:
+            for key in ('banned_words', 'link_whitelist'):
+                ch['settings'][key] = list(dict.fromkeys(ch['settings'].get(key, []) + src.get(key, [])))
+        save_channel_settings(cid, ch)
+        copied += 1
+    return copied
+
+# ═══════════════════════════ ÖZELDEN DESTEK HATTI ═══════════════════════════
+# Kullanıcı bota özelden yazar → mesaj bot sahibine kopyalanır. Sahip o mesaja yanıt verir → yanıt kullanıcıya gider.
+SUPPORT_RATE = (5, 600)          # 10 dakikada en fazla 5 mesaj iletilir
+_support_hits: dict = {}         # (bot_id, user_id) -> [zamanlar]
+_support_ack: dict = {}          # (bot_id, user_id) -> son "iletildi" bilgisi
+
+def support_enabled(bot_id: int) -> bool:
+    return not kv_get(f"support_off:{bot_id}")
+
+async def support_inbox_handler(update: Update, context):
+    msg = update.message
+    user = update.effective_user
+    if msg is None or not user or user.is_bot or (context.user_data or {}).get('await_input'):
+        return
+    bid = context.bot.id
+    owner = bot_owner_id()
+    if user.id in (owner, FOUNDER_ID) or not support_enabled(bid) or kv_get(f"support_block:{bid}:{user.id}"):
+        return
+    key = (bid, user.id)
+    now = time.time()
+    hits = [t for t in _support_hits.get(key, []) if now - t < SUPPORT_RATE[1]]
+    if len(hits) >= SUPPORT_RATE[0]:
+        _support_hits[key] = hits
+        return
+    _support_hits[key] = hits + [now]
+    name = (getattr(user, "full_name", None) or user.first_name or str(user.id))[:28]
+    kb = InlineKeyboardMarkup([[ibtn(f"👤 {name} · {user.id}", f"sp|i|{user.id}")],
+                               [ibtn("🚫 Engelle", f"sp|b|{user.id}", RED)]])
+    try:
+        res = await context.bot.copy_message(owner, msg.chat_id, msg.message_id, reply_markup=kb)
+    except TelegramError as e:
+        logger.debug(f"Destek mesajı iletilemedi: {e}")
+        return
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO support_msgs (bot_id, admin_msg_id, user_id, user_msg_id, at) "
+                     "VALUES (?, ?, ?, ?, ?)", (bid, res.message_id, user.id, msg.message_id, now))
+    if now - _support_ack.get(key, 0) >= 3600:
+        _support_ack[key] = now
+        try:
+            await msg.reply_text("📨 Mesajın bot yöneticisine iletildi. Yanıt gelince burada göreceksin.")
+        except TelegramError:
+            pass
+
+async def support_reply_handler(update: Update, context):
+    """Sahip, iletilen destek mesajına yanıt verince yanıt kullanıcıya kopyalanır."""
+    msg = update.message
+    if msg is None or msg.reply_to_message is None:
+        return
+    bid = context.bot.id
+    with get_db() as conn:
+        row = conn.execute("SELECT user_id, user_msg_id FROM support_msgs WHERE bot_id = ? AND admin_msg_id = ?",
+                           (bid, msg.reply_to_message.message_id)).fetchone()
+    if not row or update.effective_user.id not in (bot_owner_id(), FOUNDER_ID):
+        return
+    try:
+        await context.bot.copy_message(row['user_id'], msg.chat_id, msg.message_id,
+                                       reply_to_message_id=row['user_msg_id'], allow_sending_without_reply=True)
+        await msg.reply_text("✅ Yanıt iletildi.")
+    except Forbidden:
+        await msg.reply_text("❌ İletilemedi: kullanıcı botu engellemiş.")
+    except TelegramError as e:
+        await msg.reply_text(f"❌ İletilemedi: {e}")
+    raise ApplicationHandlerStop
+
+async def support_callback(update: Update, context):
+    """sp|i|uid — kişi bilgisi · sp|b|uid — destek hattından engelle · sp|u|uid — engeli kaldır"""
+    query = update.callback_query
+    if not is_bot_owner(query.from_user.id):
+        await query.answer("Yetkisiz!", show_alert=True)
+        return
+    _, act, uid = query.data.split('|')[:3]
+    uid = int(uid)
+    bid = context.bot.id
+    if act == 'i':
+        with get_db() as conn:
+            r = conn.execute("SELECT first_name, username FROM bot_users WHERE bot_id = ? AND user_id = ?", (bid, uid)).fetchone() \
+                or conn.execute("SELECT first_name, username FROM users WHERE user_id = ? ORDER BY last_seen DESC LIMIT 1",
+                                (uid,)).fetchone()
+            n = conn.execute("SELECT COUNT(*) FROM support_msgs WHERE bot_id = ? AND user_id = ?", (bid, uid)).fetchone()[0]
+        name = (r['first_name'] if r else '') or '-'
+        uname = f"@{r['username']}" if r and r['username'] else "kullanıcı adı yok"
+        await query.answer(f"{name} · {uname}\nID: {uid}\nToplam mesaj: {n}"[:200], show_alert=True)
+        return
+    block = act == 'b'
+    kv_set(f"support_block:{bid}:{uid}", 1 if block else None)
+    await query.answer("🚫 Engellendi: mesajları artık iletilmeyecek." if block else "✅ Engel kaldırıldı.", show_alert=True)
+    try:
+        await query.edit_message_reply_markup(reply_markup=InlineKeyboardMarkup([[ibtn(f"👤 {uid}", f"sp|i|{uid}")], [
+            ibtn("✅ Engeli kaldır", f"sp|u|{uid}", GREEN) if block else ibtn("🚫 Engelle", f"sp|b|{uid}", RED)]]))
+    except TelegramError:
+        pass
+
+async def cmd_destek(update: Update, context):
+    """/destek [ac|kapat] — bot sahibi: özelden gelen mesajların iletilmesi."""
+    msg = update.effective_message
+    if not is_bot_owner(update.effective_user.id):
+        await msg.reply_text("💬 Bota özelden yazdığın mesajlar bot yöneticisine iletilir; yanıt da buraya gelir.")
+        return
+    bid = context.bot.id
+    a = (context.args[0].lower() if context.args else '')
+    if a in ('ac', 'aç', 'on'):
+        kv_set(f"support_off:{bid}", None)
+    elif a in ('kapat', 'off'):
+        kv_set(f"support_off:{bid}", 1)
+    with get_db() as conn:
+        n = conn.execute("SELECT COUNT(*), COUNT(DISTINCT user_id) FROM support_msgs WHERE bot_id = ? AND at >= ?",
+                         (bid, time.time() - 7 * 86400)).fetchone()
+    on = support_enabled(bid)
+    await msg.reply_text(
+        f"💬 Destek hattı: <b>{'açık' if on else 'kapalı'}</b>\nSon 7 gün: {n[0]} mesaj, {n[1]} kişi\n\n"
+        "Kullanıcıların bota özelden yazdığı mesajlar sana iletilir; o mesaja <b>yanıt</b> verirsen cevabın kullanıcıya "
+        "gider (kimliğin görünmez). Altındaki 🚫 ile kişiyi engelleyebilirsin.\n"
+        f"{'/destek kapat — kapat' if on else '/destek ac — aç'}", parse_mode=ParseMode.HTML)
 
 def upsert_user(chat_id: str, user):
     with get_db() as conn:
@@ -7328,6 +7696,8 @@ def network_remove(chat_id: str):
 
 def network_copy(source: str, owner_id: int, lists: bool) -> int:
     """Kaynak grubun ayarlarını ağdaki diğer gruplara kopyalar. lists=True: kelime ve link listeleri (birleştirerek)."""
+    if not lists:
+        return copy_settings_to(source, network_chats(owner_id))
     src = get_channel_settings(source)['settings']
     copied = 0
     for cid in network_chats(owner_id):
@@ -7336,13 +7706,8 @@ def network_copy(source: str, owner_id: int, lists: bool) -> int:
         ch = get_channel_settings(cid)
         if not ch:
             continue
-        if lists:
-            for key in ('banned_words', 'link_whitelist'):
-                ch['settings'][key] = list(dict.fromkeys(ch['settings'].get(key, []) + src.get(key, [])))
-        else:
-            for key in _default_channel_settings():
-                if key not in NETWORK_COPY_EXCLUDE:
-                    ch['settings'][key] = copy.deepcopy(src.get(key, _default_channel_settings()[key]))
+        for key in ('banned_words', 'link_whitelist'):
+            ch['settings'][key] = list(dict.fromkeys(ch['settings'].get(key, []) + src.get(key, [])))
         save_channel_settings(cid, ch)
         copied += 1
     return copied
@@ -8524,6 +8889,7 @@ async def help_command(update: Update, context):
                 "/duyurular — Duyuru gecmisi, tiklamalar, anket sonuclari\n"
                 "/duyurusablon — Duyuru sablonlari\n"
                 "/buyume — Haftalik buyume raporu (her pazartesi otomatik gelir)\n"
+                "/destek — Destek hatti (ozelden gelen mesajlar sana iletilir)\n"
                 "/gban <id|@kullanici> [sebep] — Botunun tum gruplarinda banla\n"
                 "/ungban <id|@kullanici> — Bani kaldir\n"
                 "/gbanlist — Ban listesi\n"
@@ -8536,6 +8902,7 @@ async def help_command(update: Update, context):
                 "/klon — Kendi klon botun\n"
                 "/panel — Yönetim paneli (gruplar/kanallar, botu çıkar, 🧹 temizlik)\n"
                 "/perf — Performans: yavaş işlemler, bellek, kuyruk\n"
+                "/bakim — Bakım modu (komutlar kapanır, korumalar çalışır)\n"
                 "/engelle <id> [sebep] — Engelle\n"
                 "/engelkaldir <id> — Engel kaldir\n"
                 "/gban <id|@kullanici> [sebep] — Tum gruplarda banla\n"
@@ -8548,6 +8915,7 @@ async def help_command(update: Update, context):
                 "/duyurular — Duyuru gecmisi, tiklamalar, anket sonuclari\n"
                 "/duyurusablon — Duyuru sablonlari\n"
                 "/buyume — Haftalik buyume raporu (her pazartesi otomatik gelir)\n"
+                "/destek — Destek hatti (ozelden gelen mesajlar sana iletilir)\n"
                 "/kanal — Kanal sec\n"
                 "/kanalsettings — Kanal ayarlari\n"
             ))
@@ -8563,6 +8931,7 @@ async def help_command(update: Update, context):
                 "/kanal — Kanal baglantisi\n"
                 "/itiraz <aciklama> — Ban itirazi gonder\n"
                 "/kurtar — Admin kurtarma (guvenilir kisiler icin)\n"
+                "💬 Bota yazdığın mesaj bot yöneticisine iletilir, yanıtı buraya gelir.\n"
             ) + brand_footer())
         return
 
@@ -8591,7 +8960,8 @@ async def help_command(update: Update, context):
         "/rules — Grup kurallarini gor\n"
         "/afk [sebep] — AFK ol (etiketleyene bilgi verilir, yazınca kalkar)\n"
         "/oylama — Yanıtladığın kişi için susturma oylaması başlat\n"
-        "/etiketme — /etiket listesinden çık (tekrar yazınca geri gir)\n\n"
+        "/etiketme — /etiket listesinden çık (tekrar yazınca geri gir)\n"
+        "/davet — Sana özel davet linki (getirdiğin kişiler sayılır) · /davetler — sıralama\n\n"
         "📝 Notlar\n"
         "/notlar — Kayitli notlar\n"
         "#not — Notu getir (ornek: #kurallar)\n"
@@ -8745,7 +9115,7 @@ GROUP_USER_COMMANDS = [
     ("profil", "Profilin ve uyarıların"), ("top", "Aktiflik sıralaması"), ("info", "Kullanıcı istatistikleri"),
     ("grupbilgi", "Grup bilgisi"), ("id", "ID göster"), ("zar", "Zar at"), ("yazitura", "Yazı tura at"),
     ("report", "Yanıtladığın mesajı yetkililere bildir"), ("afk", "AFK ol"), ("etiketme", "Etiket listesinden çık"),
-    ("oylama", "Susturma oylaması (mesaja yanıt)"),
+    ("oylama", "Susturma oylaması (mesaja yanıt)"), ("davet", "Sana özel davet linki"), ("davetler", "Davet sıralaması"),
 ]
 GROUP_ADMIN_COMMANDS = [
     ("settings", "Butonlu ayar paneli"), ("reload", "Admin listesini yenile"), ("warn", "Uyarı ver"), ("unwarn", "1 uyarı geri al"), ("warns", "Uyarıları gör"),
@@ -8766,16 +9136,18 @@ PRIVATE_COMMANDS = [
     ("settings", "Seçili grubun ayarları"), ("itiraz", "Ban itirazı gönder"), ("help", "Yardım"), ("id", "ID göster"),
     ("kurtar", "Admin kurtarma (güvenilir kişiler)"), ("kurulum", "Seçili grup için hızlı kurulum"),
     ("webpanel", "Web panel (tüm ayarlar tek sayfada)"), ("duyurukapat", "Bot duyurularını kapat"),
+    ("destek", "Yöneticiye yaz (destek hattı)"),
 ]
 CLONE_OWNER_COMMANDS = [
     ("panel", "Botunun grupları ve istatistikleri"), ("duyuru", "Gruplara, kanallara, kişilere duyuru"),
     ("duyurular", "Duyuru geçmişi"), ("duyurusablon", "Duyuru şablonları"), ("buyume", "Haftalık büyüme raporu"),
-    ("gban", "Botunun gruplarında banla"), ("ungban", "Banı kaldır"), ("gbanlist", "Ban listesi"),
+    ("destek", "Destek hattı aç/kapat"), ("gban", "Botunun gruplarında banla"), ("ungban", "Banı kaldır"), ("gbanlist", "Ban listesi"),
 ]
 FOUNDER_COMMANDS = [("klonlar", "Klon botları yönet"), ("perf", "Performans ölçümü"), 
     ("panel", "Yönetim paneli"), ("gban", "Global ban"), ("ungban", "Global banı kaldır"),
     ("gbanlist", "Global ban listesi"), ("engelle", "Kullanıcı/sohbet engelle"), ("engelkaldir", "Engeli kaldır"),
     ("duyuru", "Gruplara, kanallara, kişilere duyuru"), ("duyurular", "Duyuru geçmişi"), ("duyurusablon", "Duyuru şablonları"), ("buyume", "Haftalık büyüme raporu"), ("yedek", "Veritabanı yedeği"),
+    ("destek", "Destek hattı aç/kapat"), ("bakim", "Bakım modu"),
     ("gmedyaengel", "Medyayı tüm gruplarda engelle"),
 ]
 
@@ -12037,7 +12409,8 @@ def web_schema() -> list:
             num('tag_size', "/etiket: bir mesajda"),
             _f('tag_style', 'select', "/etiket biçimi", options=[['name', "İsimle"], ['emoji', "Emojiyle"]]),
             _f('tag_active_only', 'bool', "Sadece son 7 günün aktifleri"),
-            _f('fsub_enabled', 'bool', "📢 Kanal zorunluluğu", hint="Kanalı /kanalzorunlu @kanal ile ayarla.")]},
+            _f('fsub_enabled', 'bool', "📢 Kanal zorunluluğu", hint="Kanalı /kanalzorunlu @kanal ile ayarla."),
+            _f('invite_enabled', 'bool', "🔗 Davet yarışması", hint="Üyeler /davet ile kendi linkini alır, /davetler sıralama.")]},
         {'id': 'comm', 'title': "🧑‍⚖️ Topluluk koruması", 'fields': [
             _f('shared_blacklist', 'bool', "🚩 Ortak kara liste", hint="Botun başka grubunda banlı kişi katılınca."),
             _f('blacklist_action', 'select', "Kara liste işlemi", options=[[k, v] for k, v in BLACKLIST_ACTIONS.items()]),
@@ -12842,7 +13215,10 @@ async def _panel_info(cid: str, kind: str, page: int):
         act = [ibtn("🚪 Botu çıkar", f"panel|lq|{cid}|{kind}|{page}", RED)]
     else:
         act = [ibtn("🗑 Kaydı sil", f"panel|lv|{cid}|d|{kind}|{page}", RED)]
-    return text, InlineKeyboardMarkup([act, back])
+    rows = [act]
+    if ch.get('chat_type') != 'channel':
+        rows.insert(0, [ibtn("📋 Ayarlarını diğer gruplara uygula", f"panel|ap|{cid}|{kind}|{page}", BLUE)])
+    return text, InlineKeyboardMarkup(rows + [back])
 
 def purge_chat(chat_id: str) -> int:
     """Sohbetin bütün kayıtlarını (ayarlar, rütbeler, istatistikler…) siler. Dönüş: silinen satır."""
@@ -12960,6 +13336,33 @@ async def panel_callback(update: Update, context):
     elif action == 'info':
         await query.answer()
         await show(*await _panel_info(parts[2], parts[3], int(parts[4])))
+    elif action == 'ap':
+        cid, kind, page = parts[2], parts[3], int(parts[4])
+        await query.answer()
+        with get_db() as conn:
+            r = conn.execute("SELECT title FROM channels WHERE chat_id = ?", (cid,)).fetchone()
+            n = conn.execute("SELECT COUNT(*) FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup') "
+                             "AND chat_id != ?", (cid,)).fetchone()[0]
+        title = html.escape((r['title'] if r else None) or cid)
+        await show(f"📋 <b>{title}</b> grubunun ayarları diğer <b>{n}</b> gruba uygulansın mı?\n\n"
+                   "Kopyalanır: koruma ayarları, cezalar, captcha, gece modu, uyarı sınırı vb.\n"
+                   "Kopyalanmaz: hoş geldin/veda/kurallar mesajı, kanal zorunluluğu, kilitler, gruba özel listeler.\n"
+                   "<b>+ listeler</b>: yasaklı kelime ve izinli link listeleri de eklenir (mevcutlar silinmez).",
+                   InlineKeyboardMarkup([[ibtn("✅ Uygula", f"panel|apy|{cid}|s", GREEN),
+                                          ibtn("✅ Uygula + listeler", f"panel|apy|{cid}|l", GREEN)],
+                                         [ibtn("↩️ Vazgeç", f"panel|info|{cid}|{kind}|{page}")]]))
+    elif action == 'apy':
+        cid, mode = parts[2], parts[3]
+        if not get_channel_settings(cid):
+            await query.answer("Kaynak grubun kaydı yok.", show_alert=True)
+            return
+        with get_db() as conn:
+            targets = [r['chat_id'] for r in conn.execute(
+                "SELECT chat_id FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')")]
+        n = copy_settings_to(cid, targets, lists=(mode == 'l'))
+        await query.answer(f"✅ {n} gruba uygulandı", show_alert=True)
+        await send_log(cid, f"📋 Bu grubun ayarları {n} gruba uygulandı | {mention(query.from_user)}", ParseMode.HTML)
+        await show(*await _panel_info(cid, 'g', 0))
     elif action == 'lq':
         cid, kind, page = parts[2], parts[3], int(parts[4])
         await query.answer()
@@ -14418,6 +14821,7 @@ def register_handlers(app, main_bot: bool = True):
     # Her güncellemeden önce: engelli sohbet/kullanıcı ve global ban kontrolü
     app.add_handler(TypeHandler(Update, blocklist_guard), group=-100)
     app.add_handler(TypeHandler(Update, auto_register_handler), group=-99)
+    app.add_handler(TypeHandler(Update, maintenance_guard), group=-95)
     app.add_error_handler(error_handler)
     # Panelin ForceReply ile istediği metin (sadece bekleyen giriş varsa yakalar)
     app.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL
@@ -14546,6 +14950,18 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('duyurudur', cmd_duyurudur))
     app.add_handler(CommandHandler('duyurusablon', cmd_duyurusablon))
     app.add_handler(CommandHandler('buyume', cmd_buyume))
+    app.add_handler(CommandHandler('bakim', cmd_bakim))
+    app.add_handler(CommandHandler('davet', cmd_davet))
+    app.add_handler(CommandHandler('davetler', cmd_davetler))
+    app.add_handler(ChatMemberHandler(invite_track_handler, ChatMemberHandler.CHAT_MEMBER), group=-4)
+    app.add_handler(CommandHandler('destek', cmd_destek, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CallbackQueryHandler(support_callback, pattern=r'^sp\|'))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.REPLY & ~filters.COMMAND, support_reply_handler),
+                    group=-45)
+    app.add_handler(MessageHandler(
+        filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE & ~filters.COMMAND & ~filters.Text(sorted(DM_MENU_TEXTS))
+        & (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL | filters.VOICE
+           | filters.AUDIO | filters.Sticker.ALL | filters.VIDEO_NOTE), support_inbox_handler), group=40)
     app.add_handler(PollHandler(duyuru_poll_handler))
     app.add_handler(CommandHandler(['duyurukapat', 'duyuruac'], cmd_duyurukapat, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(duyuru_callback, pattern=r'^dy\|'))

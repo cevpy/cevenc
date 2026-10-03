@@ -66,25 +66,25 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
 - `-test`, `-sabitle`, `-sessiz`, `-saat 20:00`; `/duyurular` geçmiş; kişiler 🔕 / `/duyurukapat` ile kapatır.
 - Özelden kullananlar kaydedilir; botu engelleyen ve başlatmamış olan bir kez denenip atlanır. Klon sahibi kendi kitlesine gönderir.
 
-## Sırada (onaylandı, yapılacak)
+## Büyüme ve yönetim paketi ✅ (tamamlandı)
 **A — Duyuru eklentileri**
-1. Duyuru tıklama istatistiği — butona kaç kişi tıkladı (web panel adresi üzerinden yönlendirme ile sayılır).
-2. Hedefli duyuru — `-aktif` (son 7 gün), önizlemede 🎯 grup/kanal seçimi.
-12. Duyuru şablonları — `/duyuru -kaydet isim`, `/duyuru #isim`, `/duyurusablon`.
-13. Anket duyurusu — `/duyuru -anket "Soru\nSeçenek…"`, oylar tek ankette toplanır, sonuç raporu.
+- 👆 Buton tıklama sayacı (web panel adresinden yönlendirme; kişi bazında) → /duyurular
+- 🔥 `-aktif [gün]`, 🎯 önizlemeden grup/kanal seçimi
+- 💾 Şablonlar: `/duyuru -kaydet isim`, `/duyuru #isim`, `/duyurusablon`
+- 🗳 Anket: `/duyuru -anket "Soru\nA\nB"` — tek anket iletilir, oylar tek yerde
 
 **B — Rapor ve takip**
-3. Hoş geldin olarak mesaj kopyalama (premium emoji tam korunur; değişkenler bu modda çalışmaz).
-4. Haftalık büyüme raporu — pazartesi sahibine özelden.
-6. Bot eklenince: ekleyene teşekkür, sahibine "yeni gruba eklendim" bildirimi (ekleyen, üye sayısı).
-7. Kurulum takibi — 1 gün içinde yönetici yapılmazsa ekleyene hatırlatma.
-9. Otomatik gece yedeği — veritabanı zip olarak sahibine özelden.
+- 💎 Premium emojili mesaja yanıtla `/setwelcome` (`/setgoodbye`, `/setrules`) → birebir kopya
+- 📈 Haftalık büyüme raporu (pazartesi 10:00, her bot kendi sahibine) + `/buyume`
+- ➕/➖ Eklenme/çıkarılma bildirimi, ekleyene teşekkür
+- ⚠️ 24 saatte yönetici yapılmazsa "beni yönetici yap" hatırlatması
+- 🗄 Gece yedeği zip olarak
 
 **C — Yönetim ve iletişim**
-5. Davet linki takibi — kim kaç kişi getirdi, sıralama.
-8. Toplu ayar — bir grubun ayarlarını diğer gruplara uygula.
-10. Bakım modu — `/bakim`, sadece kritik korumalar çalışır.
-11. Özelden destek hattı — kullanıcı yazar, sahibine iletilir, yanıt geri gider.
+- 🔗 Davet yarışması: `/davet`, `/davetler [hafta]`
+- 📋 Toplu ayar: /panel → grup → ayarlarını diğer gruplara uygula
+- 🛠 Bakım modu: `/bakim 30|ac|kapat [-duyur]`
+- 💬 Destek hattı: özelden gelen mesaj sahibine, yanıt kullanıcıya; `/destek ac|kapat`
 
 ## Önerildi, şimdilik seçilmedi
 - Davet yarışması (haftalık/aylık davet sıralaması)
