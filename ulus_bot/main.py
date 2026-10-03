@@ -42,6 +42,7 @@ import os
 import re
 import signal
 import sys
+import threading
 
 from dotenv import load_dotenv
 
@@ -99,6 +100,7 @@ USERBOT_SESSION = _env_path("TELETHON_SESSION", "ulus_userbot")
 TZ_TR = timezone(timedelta(hours=3))
 MESSAGE_STATS_RETENTION_DAYS = max(1, _env_int("MESSAGE_STATS_RETENTION_DAYS", 30))
 MOD_LOG_RETENTION_DAYS = 180  # /sicil ve /info için ceza geçmişi
+CONCURRENT_UPDATES = max(1, _env_int("CONCURRENT_UPDATES", 32))  # aynı anda işlenen güncelleme sayısı
 
 # Premium emoji: ENV'den custom ID verilirse HTML parse ile kullanılır, yoksa standart emojiye düşer.
 EMOJI_FALLBACKS = {
@@ -276,6 +278,7 @@ async def bot_context_handler(update: Update, context):
     """Her güncellemenin en başında: hangi botla çalışıldığını işaretler; başka botumuzun yönettiği sohbetin
     güncellemelerini (aynı grupta iki botumuz varsa çift işlem olmasın diye) yok sayar."""
     _ctx_bot.set(context.bot)
+    PERF['updates'] += 1
     chat = update.effective_chat
     if not chat or chat.type == 'private' or update.my_chat_member:
         return
@@ -300,13 +303,7 @@ async def bot_context_handler(update: Update, context):
 _db_lock = asyncio.Lock()
 
 
-class _ClosingConnection(sqlite3.Connection):
-    """`with get_db() as conn:` bloğu bitince commit/rollback yapar VE bağlantıyı kapatır."""
-    def __exit__(self, exc_type, exc, tb):
-        try:
-            return super().__exit__(exc_type, exc, tb)
-        finally:
-            self.close()
+_db_local = threading.local()  # iş parçacığı başına tek, kalıcı bağlantı
 
 
 def _sql_mybot(bot_id) -> int:
@@ -317,11 +314,23 @@ def _sql_mybot(bot_id) -> int:
     return int(bot_id == cur)
 
 def get_db():
-    conn = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False, factory=_ClosingConnection)
-    conn.row_factory = sqlite3.Row
-    conn.create_function('mybot', 1, _sql_mybot, deterministic=False)  # bu botun sohbeti mi? (klon filtreleri)
-    conn.execute("PRAGMA busy_timeout = 30000")
-    conn.execute("PRAGMA synchronous = NORMAL")
+    """Kalıcı bağlantı (her sorguda yeniden açılmaz). `with get_db() as conn:` bloğu bitince commit/rollback yapar,
+    bağlantı açık kalır. Bloklar içinde await yok; eşzamanlı işlemede işlemler birbirine karışmaz."""
+    conn = getattr(_db_local, 'conn', None)
+    if conn is None or _db_local.path != DB_FILE:
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
+        conn = sqlite3.connect(DB_FILE, timeout=30, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.create_function('mybot', 1, _sql_mybot, deterministic=False)  # bu botun sohbeti mi? (klon filtreleri)
+        conn.execute("PRAGMA busy_timeout = 30000")
+        conn.execute("PRAGMA synchronous = NORMAL")
+        conn.execute("PRAGMA temp_store = MEMORY")
+        conn.execute("PRAGMA cache_size = -16000")  # ~16 MB sayfa önbelleği
+        _db_local.conn, _db_local.path = conn, DB_FILE
     return conn
 
 def init_db():
@@ -1570,6 +1579,7 @@ async def handle_bot_added(update: Update, context):
             await update.message.reply_text("Bot eklendi ve kaydedildi! /help ile komutlari gorebilirsin.")
 
 async def resolve_user(chat_id, user_ref=None, replied_user=None):
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     if replied_user:
         try:
             member = await bot.get_chat_member(chat_id, replied_user.id)
@@ -5388,6 +5398,7 @@ async def _settings_change_ext(cid: str, channel: dict, op: str, args: list, que
     return 'main', ''
 
 async def _apply_recovery_input(cid: str, channel: dict, msg, user):
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     if not has_permission(cid, user.id, LVL_KURUCU):
         return "Güvenilir kişiyi sadece kurucu ekleyebilir.", 'rec'
     ref = msg.text.strip().lstrip('@')
@@ -5619,20 +5630,9 @@ async def track_message(update: Update, context):
     if not channel:
         return
 
-    upsert_user(chat_id, user)
+    queue_user(chat_id, user)  # bellekte biriktirilir, 2 sn'de bir toplu yazılır (flush_writes)
     await track_name(chat_id, user, channel['settings'])
-
-    msg_type = _get_msg_type(msg)
-    username = user.username or ''
-    first_name = user.first_name or ''
-
-    async with _db_lock:
-        with get_db() as conn:
-            conn.execute(
-                "INSERT INTO message_stats (chat_id, user_id, username, first_name, msg_type, sent_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (chat_id, user.id, username, first_name, msg_type, time.time())
-            )
-            conn.commit()
+    queue_message_stat(chat_id, user, _get_msg_type(msg))
 
 TZ_OFFSET = 3 * 3600
 
@@ -5674,6 +5674,7 @@ def _get_leaderboard(chat_id: str, period: str, limit: int = 15,
     since_ts / until_ts verilirse onları kullan (otomatik duyuru için),
     yoksa period'dan hesapla.
     """
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     if since_ts is None or until_ts is None:
         since_ts, until_ts = _get_period_range(period)
 
@@ -5708,6 +5709,7 @@ def _get_leaderboard(chat_id: str, period: str, limit: int = 15,
 
 def _get_user_count(chat_id: str, user_id: int, period: str,
                     since_ts: float = None, until_ts: float = None) -> int:
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     if since_ts is None or until_ts is None:
         since_ts, until_ts = _get_period_range(period)
     with get_db() as conn:
@@ -5739,6 +5741,7 @@ def _build_leaderboard_text(chat_id: str, period: str, title: str,
                              caller_id: int = None,
                              caller_name: str = None) -> str:
     """Sıralama metnini oluştur — hem komut hem otomatik duyuru için"""
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     if since_ts is None or until_ts is None:
         since_ts, until_ts = _get_period_range(period)
 
@@ -5915,6 +5918,7 @@ async def cmd_top(update: Update, context):
 
 async def top_callback(update: Update, context):
     
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -6062,6 +6066,7 @@ async def top_callback(update: Update, context):
 
 async def cmd_info(update: Update, context):
     
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     chat_id = _get_effective_chat_id(update, context)
     if not chat_id or not get_channel_settings(chat_id):
         await update.message.reply_text("Bu grup kayıtlı değil! Özelden kullanıyorsan önce /kanal ile grup seç.")
@@ -7382,188 +7387,6 @@ async def cmd_basadmin(update: Update, context):
 async def cmd_yardimci_kurucu(update: Update, context):
     await _cmd_set_role(update, context, 'yardimci_kurucu')
 
-async def cmd_panel(update: Update, context):
-    if not is_bot_owner(update.effective_user.id):
-        return
-    if update.effective_chat.type != 'private':
-        await update.message.reply_text("Bu komut sadece DM'de calisir!")
-        return
-
-    with get_db() as conn:
-        total_groups = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')").fetchone()['c']
-        total_channels = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type='channel'").fetchone()['c']
-        total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            ibtn("📢 Kanallar", "panel|channels", BLUE),
-            ibtn("👥 Gruplar", "panel|groups", BLUE),
-        ],
-        [
-            ibtn("🚫 Engelliler", "panel|blocked", BLUE),
-            ibtn("📊 İstatistikler", "panel|stats", BLUE),
-        ],
-    ])
-    await update.message.reply_text(
-        f"🤖 {brand()} Security Bot Paneli\n\n"
-        f"📊 İstatistikler:\n"
-        f"├ Toplam Grup: {total_groups}\n"
-        f"├ Toplam Kanal: {total_channels}\n"
-        f"└ Toplam Kullanici: {total_users}",
-        reply_markup=keyboard
-    )
-
-async def panel_callback(update: Update, context):
-    query = update.callback_query
-    if not is_bot_owner(query.from_user.id):
-        await query.answer("Yetkisiz!", show_alert=True)
-        return
-    await query.answer()
-
-    data = query.data
-    parts = data.split("|")
-    action = parts[1] if len(parts) > 1 else ''
-
-    if action == 'channels':
-        with get_db() as conn:
-            rows = conn.execute("SELECT chat_id, settings FROM channels WHERE mybot(bot_id) AND chat_type='channel'").fetchall()
-        if not rows:
-            await query.message.edit_text("Kayitli kanal yok.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]]))
-            return
-        buttons = []
-        for row in rows:
-            cid = row['chat_id']
-            try:
-                chat = await context.bot.get_chat(cid)
-                name = chat.title or cid
-                username = chat.username
-                link = f"https://t.me/{username}" if username else None
-            except Exception:
-                name = cid
-                link = None
-            row_btns = []
-            if link:
-                row_btns.append(InlineKeyboardButton(f"📢 {name}", url=link))
-            else:
-                row_btns.append(InlineKeyboardButton(f"📢 {name}", callback_data=f"panel|chatinfo|{cid}"))
-            row_btns.append(InlineKeyboardButton("🛠 Bilgi", callback_data=f"panel|chatinfo|{cid}"))
-            buttons.append(row_btns)
-        buttons.append([InlineKeyboardButton("🔙 Geri", callback_data="panel|back")])
-        await query.message.edit_text("📢 Kanallar:", reply_markup=InlineKeyboardMarkup(buttons))
-
-    elif action == 'groups':
-        with get_db() as conn:
-            rows = conn.execute("SELECT chat_id FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')").fetchall()
-        if not rows:
-            await query.message.edit_text("Kayitli grup yok.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]]))
-            return
-        buttons = []
-        for row in rows:
-            cid = row['chat_id']
-            try:
-                chat = await context.bot.get_chat(cid)
-                name = chat.title or cid
-                username = chat.username
-                link = f"https://t.me/{username}" if username else None
-            except Exception:
-                name = cid
-                link = None
-            row_btns = []
-            if link:
-                row_btns.append(InlineKeyboardButton(f"👥 {name}", url=link))
-            else:
-                row_btns.append(InlineKeyboardButton(f"👥 {name}", callback_data=f"panel|chatinfo|{cid}"))
-            row_btns.append(InlineKeyboardButton("🛠 Bilgi", callback_data=f"panel|chatinfo|{cid}"))
-            buttons.append(row_btns)
-        buttons.append([InlineKeyboardButton("🔙 Geri", callback_data="panel|back")])
-        await query.message.edit_text("👥 Gruplar:", reply_markup=InlineKeyboardMarkup(buttons))
-
-    elif action == 'chatinfo':
-        cid = parts[2]
-        try:
-            chat = await context.bot.get_chat(cid)
-            admins = await context.bot.get_chat_administrators(cid)
-            cfg = get_channel_cfg(cid)
-            member_count = chat.get_member_count() if hasattr(chat, 'get_member_count') else '?'
-            try:
-                member_count = await context.bot.get_chat_member_count(cid)
-            except Exception:
-                member_count = '?'
-
-            prot_lines = []
-            prot_lines.append(f"Admin Spam: {'✅' if cfg.get('admin_spam_enabled') else '❌'}")
-            prot_lines.append(f"Link: {'✅' if cfg.get('link_protection') else '❌'}")
-            prot_lines.append(f"Klonlama: {'✅' if cfg.get('clone_protection') else '❌'}")
-
-            text = (
-                f"{'📢' if chat.type == 'channel' else '👥'} {chat.title}\n\n"
-                f"🆔 ID: {cid}\n"
-                f"👥 Uye: {member_count}\n"
-                f"👤 Admin sayisi: {len(admins)}\n"
-                f"🛡 Koruma: {' | '.join(prot_lines)}"
-            )
-        except Exception as e:
-            text = f"Bilgi alinamiyor: {e}"
-
-        keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]])
-        await query.message.edit_text(text, reply_markup=keyboard)
-
-    elif action == 'blocked' and query.from_user.id != FOUNDER_ID:
-        await query.message.edit_text("Engelli listesi sadece ana bot sahibine açıktır.",
-                                      reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]]))
-
-    elif action == 'blocked':
-        with get_db() as conn:
-            rows = conn.execute("SELECT entity_id, entity_type, reason FROM blocked_entities LIMIT 20").fetchall()
-        if not rows:
-            await query.message.edit_text("Engellenmiş kimse yok.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]]))
-            return
-        lines = ["🚫 Engellenenler:\n"]
-        for r in rows:
-            lines.append(f"• {r['entity_type']}: {r['entity_id']} — {r['reason'] or '-'}")
-        await query.message.edit_text("\n".join(lines), reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]]))
-
-    elif action == 'stats':
-        with get_db() as conn:
-            total_groups = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')").fetchone()['c']
-            total_channels = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type='channel'").fetchone()['c']
-            total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
-            total_msgs = conn.execute("SELECT COUNT(*) as c FROM message_stats WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
-            total_bans = conn.execute("SELECT COUNT(*) as c FROM ban_list WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
-        text = (
-            f"📊 Bot İstatistikleri\n\n"
-            f"├ Toplam Grup: {total_groups}\n"
-            f"├ Toplam Kanal: {total_channels}\n"
-            f"├ Toplam Kullanici: {total_users}\n"
-            f"├ Toplam Mesaj Kaydi: {total_msgs}\n"
-            f"└ Toplam Ban: {total_bans}"
-        )
-        await query.message.edit_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Geri", callback_data="panel|back")]]))
-
-    elif action == 'back':
-        with get_db() as conn:
-            total_groups = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')").fetchone()['c']
-            total_channels = conn.execute("SELECT COUNT(*) as c FROM channels WHERE mybot(bot_id) AND chat_type='channel'").fetchone()['c']
-            total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats WHERE chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()['c']
-        keyboard = InlineKeyboardMarkup([
-            [
-                ibtn("📢 Kanallar", "panel|channels", BLUE),
-                ibtn("👥 Gruplar", "panel|groups", BLUE),
-            ],
-            [
-                ibtn("🚫 Engelliler", "panel|blocked", BLUE),
-                ibtn("📊 İstatistikler", "panel|stats", BLUE),
-            ],
-        ])
-        await query.message.edit_text(
-            f"🤖 {brand()} Security Bot Paneli\n\n"
-            f"📊 İstatistikler:\n"
-            f"├ Toplam Grup: {total_groups}\n"
-            f"├ Toplam Kanal: {total_channels}\n"
-            f"└ Toplam Kullanici: {total_users}",
-            reply_markup=keyboard
-        )
-
 async def cmd_engelle(update: Update, context):
     if update.effective_user.id != FOUNDER_ID:
         return
@@ -7664,6 +7487,7 @@ async def cmd_whitelist(update: Update, context):
         await update.message.reply_text(f"{who} spam muaf listesine eklendi.", parse_mode=ParseMode.HTML)
 
 async def cmd_grupbilgi(update: Update, context):
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     chat_id = _get_effective_chat_id(update, context)
     if not chat_id or not get_channel_settings(chat_id):
         await update.message.reply_text("Once /kanal ile sec!")
@@ -7744,7 +7568,8 @@ async def help_command(update: Update, context):
                 "🤖 Bot Sahibi Komutlari\n\n"
                 "/klonlar — Klon botlari yonet (durdur/baslat/sil)\n"
                 "/klon — Kendi klon botun\n"
-                "/panel — Yonetim paneli\n"
+                "/panel — Yönetim paneli (gruplar/kanallar, botu çıkar, 🧹 temizlik)\n"
+                "/perf — Performans: yavaş işlemler, bellek, kuyruk\n"
                 "/engelle <id> [sebep] — Engelle\n"
                 "/engelkaldir <id> — Engel kaldir\n"
                 "/gban <id|@kullanici> [sebep] — Tum gruplarda banla\n"
@@ -7977,7 +7802,7 @@ CLONE_OWNER_COMMANDS = [
     ("panel", "Botunun grupları ve istatistikleri"), ("duyuru", "Tüm gruplarına duyuru"),
     ("gban", "Botunun gruplarında banla"), ("ungban", "Banı kaldır"), ("gbanlist", "Ban listesi"),
 ]
-FOUNDER_COMMANDS = [("klonlar", "Klon botları yönet"), 
+FOUNDER_COMMANDS = [("klonlar", "Klon botları yönet"), ("perf", "Performans ölçümü"), 
     ("panel", "Yönetim paneli"), ("gban", "Global ban"), ("ungban", "Global banı kaldır"),
     ("gbanlist", "Global ban listesi"), ("engelle", "Kullanıcı/sohbet engelle"), ("engelkaldir", "Engeli kaldır"),
     ("duyuru", "Tüm gruplara duyuru"), ("yedek", "Veritabanı yedeği"),
@@ -8785,6 +8610,7 @@ async def staff(update: Update, context):
 
 # ── Global ban (tüm gruplarda) ──
 async def _resolve_target_id(update: Update, context) -> tuple[int | None, str]:
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     msg = update.effective_message
     if msg.reply_to_message and msg.reply_to_message.from_user:
         u = msg.reply_to_message.from_user
@@ -9565,6 +9391,7 @@ async def left_member_handler(update: Update, context):
     if user.is_bot:
         return
     chat_id = str(msg.chat_id)
+    flush_writes()  # bekleyen kayıt, ayrılma işaretini geri almasın
     with get_db() as conn:
         conn.execute("UPDATE users SET left_at = ? WHERE chat_id = ? AND user_id = ?", (time.time(), chat_id, user.id))
         conn.commit()
@@ -9926,6 +9753,7 @@ _tag_last: dict = {}   # chat_id -> son etiketlemenin bittiği zaman
 
 async def tag_targets(chat_id: str, active_only: bool) -> list:
     """Etiketlenecek üyeler [(id, ad)]. Telethon (ana bot) açıksa tüm üye listesi, değilse botun gördüğü üyeler."""
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     with get_db() as conn:
         optout = {r['user_id'] for r in conn.execute("SELECT user_id FROM tag_optout WHERE chat_id = ?", (chat_id,))}
     skip = optout | {TELEGRAM_SERVICE_ID, GROUP_ANON_BOT_ID}
@@ -10299,6 +10127,7 @@ async def afk_handler(update: Update, context):
             targets.add(ent.user.id)
     names = set(m.lower() for m in re.findall(r'@(\w{4,32})', text))
     if names:
+        flush_writes()
         with get_db() as conn:
             for n in names:
                 r = conn.execute("SELECT user_id FROM users WHERE LOWER(username) = ? LIMIT 1", (n,)).fetchone()
@@ -10482,6 +10311,7 @@ def _action_kind(action: str) -> str | None:
     return None
 
 async def build_sicil(user_id: int) -> str:
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     with get_db() as conn:
         u = conn.execute("SELECT first_name, last_name, username FROM users WHERE user_id = ? ORDER BY last_seen DESC LIMIT 1",
                          (user_id,)).fetchone()
@@ -10554,6 +10384,7 @@ _votes: dict = {}           # (chat_id, hedef) -> {'yes': set, 'at': zaman, 'nam
 _vote_started: dict = {}
 
 def _can_vote(chat_id: str, uid: int) -> bool:
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     with get_db() as conn:
         r = conn.execute("SELECT joined_at FROM users WHERE chat_id = ? AND user_id = ?", (chat_id, uid)).fetchone()
     return bool(r) and time.time() - (r['joined_at'] or 0) >= VOTE_MIN_AGE
@@ -10787,6 +10618,7 @@ async def cekilis(update: Update, context):
 
 async def giveaway_eligible(chat_id: str, user, req: dict) -> str | None:
     """Katılım şartları. Dönüş: uygun değilse sebep."""
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     if user.is_bot:
         return "Botlar katılamaz."
     try:
@@ -10937,6 +10769,7 @@ def _tr_day(ts: float) -> str:
     return datetime.fromtimestamp(ts, TZ_TR).strftime('%d.%m')
 
 def stats_data(chat_id: str) -> dict:
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     now = time.time()
     since30, since7 = now - 30 * 86400, now - 7 * 86400
     days = [_tr_day(now - i * 86400) for i in range(29, -1, -1)]
@@ -11705,6 +11538,489 @@ start();
 </html>
 '''
 
+
+# ═══════════════════════════ PERFORMANS: ölçüm (/perf) + toplu yazma ═══════════════════════════
+# Her handler'ın süresi ölçülür; mesaj sayacı ve üye kaydı bellekte biriktirilip 2 sn'de bir tek seferde yazılır.
+PERF: dict = {'handlers': {}, 'since': time.time(), 'updates': 0, 'flushes': 0, 'flushed_rows': 0, 'lag': []}
+WRITE_FLUSH_EVERY = 2      # sn
+WRITE_FLUSH_MAX = 300      # bu kadar satır birikince beklemeden yazılır
+_stats_buf: list = []      # message_stats satırları
+_users_buf: dict = {}      # (user_id, chat_id) -> users satırı
+
+def perf_wrap(fn):
+    """Handler süresini ölçer (çağrı sayısı, toplam, en uzun). Testlerin/yönlendirmenin gördüğü asıl fonksiyon korunur."""
+    inner = getattr(fn, '__wrapped__', fn)
+    name = getattr(inner, '__name__', 'handler')
+
+    @functools.wraps(fn)
+    async def wrapper(update, context):
+        t = time.perf_counter()
+        try:
+            return await fn(update, context)
+        finally:
+            dt = time.perf_counter() - t
+            st = PERF['handlers'].get(name)
+            if st is None:
+                st = PERF['handlers'][name] = [0, 0.0, 0.0]
+            st[0] += 1
+            st[1] += dt
+            if dt > st[2]:
+                st[2] = dt
+    wrapper.__wrapped__ = inner
+    return wrapper
+
+def queue_user(chat_id: str, user):
+    """upsert_user'ın toplu yazılan hâli (her grup mesajında çağrılır)."""
+    now = time.time()
+    _users_buf[(user.id, chat_id)] = (user.id, chat_id, user.username or '', user.first_name or '',
+                                      getattr(user, 'last_name', '') or '', int(user.is_bot), now, now)
+    if len(_users_buf) >= WRITE_FLUSH_MAX:
+        flush_writes()
+
+def queue_message_stat(chat_id: str, user, msg_type: str):
+    _stats_buf.append((chat_id, user.id, user.username or '', user.first_name or '', msg_type, time.time()))
+    if len(_stats_buf) >= WRITE_FLUSH_MAX:
+        flush_writes()
+
+def flush_writes():
+    """Biriken mesaj sayacı ve üye kayıtlarını tek işlemde yazar. Bu tablolardan okuyan kod önce bunu çağırır."""
+    if not _stats_buf and not _users_buf:
+        return
+    stats, users = _stats_buf[:], list(_users_buf.values())
+    _stats_buf.clear()
+    _users_buf.clear()
+    try:
+        with get_db() as conn:
+            if users:
+                conn.executemany("""
+                    INSERT INTO users (user_id, chat_id, username, first_name, last_name, is_bot, joined_at, last_seen)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(user_id, chat_id) DO UPDATE SET
+                        username = excluded.username, first_name = excluded.first_name,
+                        last_name = excluded.last_name, last_seen = excluded.last_seen, left_at = NULL""", users)
+            if stats:
+                conn.executemany("INSERT INTO message_stats (chat_id, user_id, username, first_name, msg_type, sent_at) "
+                                 "VALUES (?, ?, ?, ?, ?, ?)", stats)
+    except sqlite3.Error as e:
+        logger.error(f"Toplu yazma başarısız ({len(stats)} mesaj, {len(users)} üye): {e}")
+        _stats_buf[:0] = stats  # kaybolmasın: bir sonraki turda tekrar denenir
+        for u in users:
+            _users_buf.setdefault((u[0], u[1]), u)
+        return
+    PERF['flushes'] += 1
+    PERF['flushed_rows'] += len(stats) + len(users)
+
+async def flush_writes_job(context):
+    flush_writes()
+
+async def loop_lag_job(context):
+    """Olay döngüsü gecikmesi: bir işlem döngüyü bloke ederse burada görünür."""
+    loop = asyncio.get_running_loop()
+    t = loop.time()
+    await asyncio.sleep(0.05)
+    lag = max(0.0, loop.time() - t - 0.05)
+    PERF['lag'] = (PERF['lag'] + [lag])[-60:]
+
+def _proc_mem() -> tuple:
+    """(şu anki, en yüksek) bellek MB"""
+    cur = peak = None
+    try:
+        with open('/proc/self/status') as f:
+            for line in f:
+                if line.startswith('VmRSS:'):
+                    cur = int(line.split()[1]) / 1024
+                elif line.startswith('VmHWM:'):
+                    peak = int(line.split()[1]) / 1024
+    except OSError:
+        pass
+    return cur, peak
+
+def _fmt_ms(sec: float) -> str:
+    return f"{sec * 1000:.0f} ms" if sec < 1 else f"{sec:.1f} sn"
+
+def perf_report(app=None) -> str:
+    up = int(time.time() - PERF['since'])
+    cur, peak = _proc_mem()
+    db_mb = sum(os.path.getsize(p) for p in (DB_FILE, DB_FILE + '-wal') if os.path.exists(p)) / 1048576
+    with get_db() as conn:
+        n_groups = conn.execute("SELECT COUNT(*) FROM channels WHERE chat_type IN ('group','supergroup')").fetchone()[0]
+        n_channels = conn.execute("SELECT COUNT(*) FROM channels WHERE chat_type = 'channel'").fetchone()[0]
+    queues = []
+    for label, a in [("ana", app)] + [(f"@{(CLONES.get(b) or {}).get('username') or b}", a2) for b, a2 in CLONE_APPS.items()]:
+        if a is None:
+            continue
+        q = getattr(getattr(a, 'update_queue', None), 'qsize', lambda: 0)()
+        busy = getattr(getattr(a, 'update_processor', None), 'current_concurrent_updates', None)
+        queues.append(f"{label}: {q} bekleyen" + (f", {busy} işleniyor" if busy is not None else ""))
+    lag = PERF['lag']
+    lines = [f"⚡ <b>Performans</b> — çalışma süresi {human_duration(up - up % 60) if up >= 60 else str(up) + ' saniye'}",
+             f"💬 İşlenen güncelleme: <b>{PERF['updates']}</b> · kuyruk: {html.escape(' · '.join(queues) or '-')}",
+             f"🧠 Bellek: <b>{cur:.0f} MB</b> (en yüksek {peak:.0f} MB) · CPU: {time.process_time():.0f} sn"
+             if cur is not None else f"🧠 CPU: {time.process_time():.0f} sn",
+             f"🗄 Veritabanı: {db_mb:.1f} MB · toplu yazma: {PERF['flushes']} kez, {PERF['flushed_rows']} satır · "
+             f"bekleyen: {len(_stats_buf) + len(_users_buf)}",
+             f"⏱ Döngü gecikmesi: ort {_fmt_ms(sum(lag) / len(lag)) if lag else '-'} · en yüksek {_fmt_ms(max(lag)) if lag else '-'}"
+             " (100 ms üstü = bir işlem botu bekletiyor)",
+             f"👥 Grup: {n_groups} · Kanal: {n_channels} · Klon: {len(CLONE_APPS)}"]
+    hs = [(n, c, tot, mx) for n, (c, tot, mx) in PERF['handlers'].items() if c]
+    if hs:
+        lines.append("\n🐢 <b>En yavaş (ortalama)</b>")
+        for i, (n, c, tot, mx) in enumerate(sorted(hs, key=lambda x: x[2] / x[1], reverse=True)[:8], 1):
+            lines.append(f"{i}. <code>{html.escape(n)}</code> — {_fmt_ms(tot / c)} ort · en çok {_fmt_ms(mx)} · {c} kez")
+        lines.append("\n⏳ <b>En çok toplam süre</b>")
+        for i, (n, c, tot, mx) in enumerate(sorted(hs, key=lambda x: x[2], reverse=True)[:6], 1):
+            lines.append(f"{i}. <code>{html.escape(n)}</code> — toplam {_fmt_ms(tot)} · {c} kez")
+    return "\n".join(lines)
+
+def _perf_markup():
+    return InlineKeyboardMarkup([[ibtn("🔄 Yenile", "perf|r", BLUE), ibtn("🧹 Sıfırla", "perf|z", RED)],
+                                 [ibtn("🔙 Panel", "panel|back")]])
+
+async def cmd_perf(update: Update, context):
+    """/perf — bot sahibi: hangi işlem ne kadar sürüyor, bellek, kuyruk, veritabanı."""
+    if update.effective_user.id != FOUNDER_ID:
+        return
+    await update.effective_message.reply_text(perf_report(context.application), parse_mode=ParseMode.HTML,
+                                              reply_markup=_perf_markup())
+
+async def perf_callback(update: Update, context):
+    query = update.callback_query
+    if query.from_user.id != FOUNDER_ID:
+        await query.answer("Yetkisiz!", show_alert=True)
+        return
+    if query.data == "perf|z":
+        PERF['handlers'].clear()
+        PERF.update(since=time.time(), updates=0, flushes=0, flushed_rows=0, lag=[])
+        await query.answer("🧹 Ölçümler sıfırlandı")
+    else:
+        await query.answer("🔄 Yenilendi")
+    try:
+        await query.edit_message_text(perf_report(context.application), parse_mode=ParseMode.HTML, reply_markup=_perf_markup())
+    except BadRequest:
+        pass
+
+# ═══════════════════════════ BOT SAHİBİ PANELİ (/panel) ═══════════════════════════
+# Gruplar/kanallar 10'arlı sayfa; adına dokun → bilgi; 🚪 → botu çıkar (ayarları tut ya da kaydı da sil).
+# 🧹 Temizlik: botun çıkarıldığı, yönetici olmadığı, boş ya da 30 gündür sessiz sohbetleri bulur, toplu çıkar/siler.
+PANEL_PAGE = 10
+PANEL_IDLE_DAYS = 30
+PANEL_EMPTY_MEMBERS = 3   # bu kadar ya da daha az üyeli grup "boş" sayılır (bot + 1-2 kişi)
+CLEAN_LABELS = {'dead': "🪦 Botun çıkarıldığı / erişilemeyen", 'noadmin': "⚠️ Botun yönetici olmadığı",
+                'empty': f"🕳 Boş (≤{PANEL_EMPTY_MEMBERS} üye)", 'idle': f"💤 {PANEL_IDLE_DAYS} gündür sessiz"}
+
+def _panel_back_kb():
+    return InlineKeyboardMarkup([[ibtn("🔙 Geri", "panel|back")]])
+
+def _panel_main():
+    with get_db() as conn:
+        g = conn.execute("SELECT COUNT(*) FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')").fetchone()[0]
+        c = conn.execute("SELECT COUNT(*) FROM channels WHERE mybot(bot_id) AND chat_type='channel'").fetchone()[0]
+        u = conn.execute("SELECT COUNT(DISTINCT user_id) FROM message_stats WHERE chat_id IN "
+                         "(SELECT chat_id FROM channels WHERE mybot(bot_id))").fetchone()[0]
+    text = (f"🤖 <b>{html.escape(brand())} Security Bot Paneli</b>\n\n📊 İstatistikler:\n├ Toplam Grup: {g}\n"
+            f"├ Toplam Kanal: {c}\n└ Toplam Kullanıcı: {u}")
+    rows = [[ibtn("📢 Kanallar", "panel|ls|c|0", BLUE), ibtn("👥 Gruplar", "panel|ls|g|0", BLUE)],
+            [ibtn("🧹 Temizlik", "panel|clean", BLUE), ibtn("📊 İstatistikler", "panel|stats", BLUE)],
+            [ibtn("🚫 Engelliler", "panel|blocked", BLUE)]]
+    if current_clone() is None:
+        rows[-1].append(ibtn("⚡ Performans", "panel|perf", BLUE))
+    return text, InlineKeyboardMarkup(rows)
+
+def _panel_chats(kind: str) -> list:
+    types = "('channel')" if kind == 'c' else "('group','supergroup')"
+    with get_db() as conn:
+        return [dict(r) for r in conn.execute(
+            f"SELECT chat_id, title, chat_type FROM channels WHERE mybot(bot_id) AND chat_type IN {types} "
+            "ORDER BY LOWER(COALESCE(title, chat_id))")]
+
+def _panel_list(kind: str, page: int):
+    items = _panel_chats(kind)
+    pages = max(1, (len(items) + PANEL_PAGE - 1) // PANEL_PAGE)
+    page = max(0, min(page, pages - 1))
+    icon, name = ("📢", "Kanallar") if kind == 'c' else ("👥", "Gruplar")
+    text = (f"{icon} <b>{name}</b> ({len(items)}) — sayfa {page + 1}/{pages}\n\n"
+            "Adına dokun: bilgi · 🚪: botu çıkar")
+    rows = []
+    for it in items[page * PANEL_PAGE:(page + 1) * PANEL_PAGE]:
+        cid = it['chat_id']
+        rows.append([ibtn(f"{icon} {(it['title'] or cid)[:30]}", f"panel|info|{cid}|{kind}|{page}"),
+                     ibtn("🚪", f"panel|lq|{cid}|{kind}|{page}", RED)])
+    if pages > 1:
+        rows.append([ibtn("◀️ Önceki", f"panel|ls|{kind}|{(page - 1) % pages}"),
+                     ibtn(f"{page + 1}/{pages}", f"panel|ls|{kind}|{page}"),
+                     ibtn("Sonraki ▶️", f"panel|ls|{kind}|{(page + 1) % pages}")])
+    if not items:
+        text = f"{icon} Kayıtlı {name.lower()[:-3]} yok."
+    rows.append([ibtn("🔙 Geri", "panel|back")])
+    return text, InlineKeyboardMarkup(rows)
+
+async def _panel_info(cid: str, kind: str, page: int):
+    flush_writes()
+    with get_db() as conn:
+        ch = conn.execute("SELECT * FROM channels WHERE chat_id = ?", (cid,)).fetchone()
+        last = conn.execute("SELECT MAX(sent_at) FROM message_stats WHERE chat_id = ?", (cid,)).fetchone()[0]
+        n7 = conn.execute("SELECT COUNT(*) FROM message_stats WHERE chat_id = ? AND sent_at >= ?",
+                          (cid, time.time() - 7 * 86400)).fetchone()[0]
+    back = [ibtn("🔙 Listeye dön", f"panel|ls|{kind}|{page}")]
+    if not ch:
+        return "Bu sohbetin kaydı yok (silinmiş).", InlineKeyboardMarkup([back])
+    ch = dict(ch)
+    title, link, members, status = ch.get('title') or cid, None, '?', None
+    try:
+        chat = await bot.get_chat(cid)
+        title = chat.title or title
+        link = f"https://t.me/{chat.username}" if getattr(chat, 'username', None) else None
+        try:
+            members = await bot.get_chat_member_count(cid)
+        except TelegramError:
+            pass
+        status = (await bot.get_chat_member(cid, bot_id_for(cid))).status
+        if title != ch.get('title'):
+            with get_db() as conn:
+                conn.execute("UPDATE channels SET title = ? WHERE chat_id = ?", (title, cid))
+    except TelegramError as e:
+        logger.debug(f"Panel bilgi {cid}: {e}")
+    st = {'administrator': "✅ yönetici", 'creator': "✅ sahip", 'member': "⚠️ üye (yönetici değil)",
+          'left': "❌ grupta değil", 'kicked': "❌ atılmış"}.get(status, "❌ erişilemiyor (bot çıkarılmış olabilir)")
+    s = json.loads(ch.get('settings') or '{}')
+    active = [lbl for k, (lbl, skey, _, _) in PROTECTIONS.items() if s.get(skey)]
+    created = (ch.get('created_at') or '')[:10]
+    text = (f"{'📢' if ch.get('chat_type') == 'channel' else '👥'} <b>{html.escape(title)}</b>\n\n"
+            f"🆔 <code>{cid}</code>" + (f" · {html.escape(link)}" if link else "") + "\n"
+            f"👥 Üye: {members} · 🤖 Bot: {st}\n"
+            f"📅 Kayıt: {html.escape(created) or '-'}" +
+            (f" · Ekleyen: {mention_html(ch['added_by'], str(ch['added_by']))}" if ch.get('added_by') else "") + "\n"
+            f"💬 Son mesaj: {(_ago(time.time() - last) if last else 'hiç')} · 7 günde {n7} mesaj\n"
+            f"🛡 Açık korumalar: {', '.join(active) or 'yok'}")
+    if status in ('administrator', 'creator', 'member'):
+        act = [ibtn("🚪 Botu çıkar", f"panel|lq|{cid}|{kind}|{page}", RED)]
+    else:
+        act = [ibtn("🗑 Kaydı sil", f"panel|lv|{cid}|d|{kind}|{page}", RED)]
+    return text, InlineKeyboardMarkup([act, back])
+
+def purge_chat(chat_id: str) -> int:
+    """Sohbetin bütün kayıtlarını (ayarlar, rütbeler, istatistikler…) siler. Dönüş: silinen satır."""
+    cid = str(chat_id)
+    flush_writes()
+    n = 0
+    with get_db() as conn:
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")]
+        for t in tables:
+            if 'chat_id' in {r[1] for r in conn.execute(f'PRAGMA table_info("{t}")')}:
+                n += conn.execute(f'DELETE FROM "{t}" WHERE chat_id = ? OR chat_id = ?',
+                                  (cid, int(cid) if cid.lstrip('-').isdigit() else cid)).rowcount
+    _invalidate_settings(cid)
+    for cache in (_chat_bot_map, _title_cache, _tg_admin_cache, _filter_cache):
+        cache.pop(cid, None)
+    return n
+
+async def leave_chat(chat_id: str, purge: bool) -> str | None:
+    """Botu sohbetten çıkarır; purge=True ise kaydını da siler. Dönüş: hata metni ya da None."""
+    try:
+        await bot.leave_chat(chat_id)
+    except TelegramError as e:
+        err = str(e).lower()
+        if not any(w in err for w in ('not found', 'not a member', 'kicked', 'forbidden', 'chat_id_invalid', 'left')):
+            return friendly_error(e)
+    if purge:
+        purge_chat(chat_id)
+    return None
+
+async def panel_scan(chats: list) -> dict:
+    """Temizlik taraması: her sohbette botun durumu, üye sayısı ve son mesaj."""
+    res = {k: [] for k in CLEAN_LABELS}
+    flush_writes()
+    cutoff = time.time() - PANEL_IDLE_DAYS * 86400
+    with get_db() as conn:
+        last = {r[0]: r[1] for r in conn.execute("SELECT chat_id, MAX(sent_at) FROM message_stats GROUP BY chat_id")}
+    sem = asyncio.Semaphore(5)
+
+    async def check(c):
+        cid = c['chat_id']
+        async with sem:
+            try:
+                me = await bot.get_chat_member(cid, bot_id_for(cid))
+            except TelegramError:
+                res['dead'].append(cid)
+                return
+            if me.status in ('left', 'kicked'):
+                res['dead'].append(cid)
+                return
+            if me.status not in ('administrator', 'creator'):
+                res['noadmin'].append(cid)
+            if c['chat_type'] == 'channel':
+                return
+            try:
+                if await bot.get_chat_member_count(cid) <= PANEL_EMPTY_MEMBERS:
+                    res['empty'].append(cid)
+                    return
+            except TelegramError:
+                pass
+            created = c.get('created_at') or ''
+            old = True
+            try:
+                old = datetime.strptime(created[:19], '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc).timestamp() < cutoff
+            except ValueError:
+                pass
+            if old and (last.get(cid) or 0) < cutoff:
+                res['idle'].append(cid)
+    await asyncio.gather(*(check(c) for c in chats))
+    return res
+
+def _clean_summary(res: dict, n: int):
+    lines = [f"🧹 <b>Temizlik taraması</b> — {n} sohbet tarandı\n"]
+    rows = []
+    for k, lbl in CLEAN_LABELS.items():
+        cnt = len(res.get(k, []))
+        lines.append(f"{lbl}: <b>{cnt}</b>")
+        if cnt:
+            act = "🗑 Kayıtları sil" if k == 'dead' else "🚪 Çık + sil"
+            rows.append([ibtn(f"{act} ({cnt})", f"panel|cq|{k}", RED), ibtn("📋 Göster", f"panel|cv|{k}")])
+    if not rows:
+        lines.append("\n✅ Temizlenecek bir şey yok.")
+    lines.append("\nNot: ‘Çık + sil’ botu o sohbetlerden çıkarır ve ayarlarını siler.")
+    rows.append([ibtn("🔄 Yeniden tara", "panel|clean"), ibtn("🔙 Geri", "panel|back")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+async def cmd_panel(update: Update, context):
+    if not is_bot_owner(update.effective_user.id):
+        return
+    if update.effective_chat.type != 'private':
+        await update.effective_message.reply_text("Bu komut sadece özelden çalışır!")
+        return
+    text, kb = _panel_main()
+    await update.effective_message.reply_text(text, reply_markup=kb, parse_mode=ParseMode.HTML)
+
+async def panel_callback(update: Update, context):
+    query = update.callback_query
+    if not is_bot_owner(query.from_user.id):
+        await query.answer("Yetkisiz!", show_alert=True)
+        return
+    parts = query.data.split("|")
+    action = parts[1] if len(parts) > 1 else ''
+    # eski butonlar (önceki sürüm)
+    if action in ('channels', 'groups'):
+        parts, action = ['panel', 'ls', 'c' if action == 'channels' else 'g', '0'], 'ls'
+    elif action == 'chatinfo':
+        parts, action = ['panel', 'info', parts[2], 'g', '0'], 'info'
+
+    async def show(text, kb):
+        await query.edit_message_text(text, reply_markup=kb, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+
+    if action == 'ls':
+        await query.answer()
+        await show(*_panel_list(parts[2], int(parts[3])))
+    elif action == 'info':
+        await query.answer()
+        await show(*await _panel_info(parts[2], parts[3], int(parts[4])))
+    elif action == 'lq':
+        cid, kind, page = parts[2], parts[3], int(parts[4])
+        await query.answer()
+        with get_db() as conn:
+            r = conn.execute("SELECT title FROM channels WHERE chat_id = ?", (cid,)).fetchone()
+        title = html.escape((r['title'] if r else None) or cid)
+        await show(f"🚪 Bot <b>{title}</b> sohbetinden çıkarılsın mı?\n\n"
+                   "• <b>Ayarları sakla</b>: bot tekrar eklenirse ayarlar geri gelir.\n"
+                   "• <b>Kaydı da sil</b>: ayarlar, rütbeler ve istatistikler silinir.",
+                   InlineKeyboardMarkup([[ibtn("🚪 Çık, ayarları sakla", f"panel|lv|{cid}|k|{kind}|{page}", RED)],
+                                         [ibtn("🗑 Çık ve kaydı sil", f"panel|lv|{cid}|d|{kind}|{page}", RED)],
+                                         [ibtn("↩️ Vazgeç", f"panel|info|{cid}|{kind}|{page}")]]))
+    elif action == 'lv':
+        cid, mode, kind, page = parts[2], parts[3], parts[4], int(parts[5])
+        err = await leave_chat(cid, purge=(mode == 'd'))
+        if err:
+            await query.answer(f"Çıkılamadı: {err}"[:190], show_alert=True)
+            return
+        await query.answer("✅ Çıkıldı" + (" ve kayıt silindi" if mode == 'd' else ""))
+        logger.info(f"Panelden sohbetten çıkıldı: {cid} (kayıt {'silindi' if mode == 'd' else 'saklandı'})")
+        await show(*_panel_list(kind, page))
+    elif action == 'clean':
+        await query.answer("Taranıyor…")
+        with get_db() as conn:
+            chats = [dict(r) for r in conn.execute("SELECT chat_id, chat_type, created_at FROM channels WHERE mybot(bot_id)")]
+        await show(f"🧹 {len(chats)} sohbet taranıyor, biraz sürebilir…", None)
+        res = await panel_scan(chats)
+        context.user_data['panel_clean'] = {'at': time.time(), 'res': res}
+        await show(*_clean_summary(res, len(chats)))
+    elif action in ('cq', 'cv', 'cx'):
+        scan = context.user_data.get('panel_clean')
+        k = parts[2] if len(parts) > 2 else ''
+        if not scan or time.time() - scan['at'] > 900 or k not in CLEAN_LABELS:
+            await query.answer("Tarama eskidi, yeniden tara.", show_alert=True)
+            return
+        ids = scan['res'][k]
+        if action == 'cv':
+            await query.answer()
+            with get_db() as conn:
+                titles = {r['chat_id']: r['title'] for r in conn.execute(
+                    f"SELECT chat_id, title FROM channels WHERE chat_id IN ({','.join('?' * len(ids))})", ids)} if ids else {}
+            body = "\n".join(f"• {html.escape(titles.get(c) or c)} (<code>{c}</code>)" for c in ids[:60])
+            more = f"\n… ve {len(ids) - 60} tane daha" if len(ids) > 60 else ""
+            await show(f"{CLEAN_LABELS[k]}:\n<blockquote expandable>{body or '-'}</blockquote>{more}",
+                       InlineKeyboardMarkup([[ibtn(f"{'🗑 Sil' if k == 'dead' else '🚪 Çık + sil'} ({len(ids)})", f"panel|cq|{k}", RED)],
+                                             [ibtn("🔙 Taramaya dön", "panel|cs")]]))
+        elif action == 'cq':
+            await query.answer()
+            verb = "kayıtları silinsin" if k == 'dead' else "sohbetlerden çıkılsın ve kayıtları silinsin"
+            await show(f"⚠️ {CLEAN_LABELS[k]}: <b>{len(ids)}</b> sohbetin {verb} mi? Bu geri alınamaz.",
+                       InlineKeyboardMarkup([[ibtn("✅ Evet", f"panel|cx|{k}", RED), ibtn("↩️ Vazgeç", "panel|cs")]]))
+        else:
+            await query.answer("İşleniyor…")
+            done, failed = 0, 0
+            for cid in ids:
+                if k == 'dead':
+                    purge_chat(cid)
+                    done += 1
+                elif await leave_chat(cid, purge=True):
+                    failed += 1
+                else:
+                    done += 1
+            for other in scan['res'].values():
+                other[:] = [c for c in other if c not in set(ids)]
+            logger.info(f"Panel temizliği ({k}): {done} sohbet, {failed} başarısız")
+            text, kb = _clean_summary(scan['res'], sum(len(v) for v in scan['res'].values()))
+            await show(f"✅ {done} sohbet temizlendi" + (f", {failed} başarısız" if failed else "") + "\n\n" + text, kb)
+    elif action == 'cs':
+        scan = context.user_data.get('panel_clean')
+        await query.answer()
+        if not scan:
+            await show(*_panel_main())
+        else:
+            await show(*_clean_summary(scan['res'], sum(len(v) for v in scan['res'].values())))
+    elif action == 'perf':
+        if query.from_user.id != FOUNDER_ID:
+            await query.answer("Sadece ana bot sahibi.", show_alert=True)
+            return
+        await query.answer()
+        await show(perf_report(context.application), _perf_markup())
+    elif action == 'blocked':
+        await query.answer()
+        if query.from_user.id != FOUNDER_ID:
+            await show("Engelli listesi sadece ana bot sahibine açıktır.", _panel_back_kb())
+            return
+        with get_db() as conn:
+            rows = conn.execute("SELECT entity_id, entity_type, reason FROM blocked_entities LIMIT 30").fetchall()
+        body = "\n".join(f"• {html.escape(str(r['entity_type']))}: <code>{html.escape(str(r['entity_id']))}</code> — "
+                         f"{html.escape(r['reason'] or '-')}" for r in rows)
+        await show("🚫 <b>Engellenenler</b>\n\n" + (body or "Engellenmiş kimse yok."), _panel_back_kb())
+    elif action == 'stats':
+        await query.answer()
+        flush_writes()
+        sub = "SELECT chat_id FROM channels WHERE mybot(bot_id)"
+        with get_db() as conn:
+            def q(sql):
+                return conn.execute(sql).fetchone()[0]
+            groups = q("SELECT COUNT(*) FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')")
+            chans = q("SELECT COUNT(*) FROM channels WHERE mybot(bot_id) AND chat_type = 'channel'")
+            users = q(f"SELECT COUNT(DISTINCT user_id) FROM message_stats WHERE chat_id IN ({sub})")
+            msgs = q(f"SELECT COUNT(*) FROM message_stats WHERE chat_id IN ({sub})")
+            bans = q(f"SELECT COUNT(*) FROM ban_list WHERE chat_id IN ({sub})")
+        await show(f"📊 <b>Bot İstatistikleri</b>\n\n├ Toplam Grup: {groups}\n├ Toplam Kanal: {chans}\n"
+                   f"├ Toplam Kullanıcı: {users}\n├ Toplam Mesaj Kaydı: {msgs}\n└ Toplam Ban: {bans}", _panel_back_kb())
+    else:  # back
+        await query.answer()
+        await show(*_panel_main())
+
 # ── Notlar (/save, /not, #isim) ──
 _NOTE_NAME = re.compile(r'^[\w\-]{1,32}$')
 
@@ -12245,7 +12561,7 @@ async def start_clone(row: dict) -> str | None:
     if bid in CLONE_APPS:
         return None
     app = (Application.builder().token(row['token']).rate_limiter(UlusRateLimiter(max_retries=3))
-           .job_queue(UlusJobQueue()).build())
+           .job_queue(UlusJobQueue()).concurrent_updates(CONCURRENT_UPDATES).build())
     register_handlers(app, main_bot=False)
     try:
         await app.initialize()
@@ -12749,6 +13065,7 @@ def _cleanup_in_memory_caches(now: float) -> None:
 
 # ── Periyodik temizlik ──
 async def db_cleanup_job(context: ContextTypes.DEFAULT_TYPE):
+    flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
     now = time.time()
     msg_stats_cutoff = now - (MESSAGE_STATS_RETENTION_DAYS * 86400)
     async with _db_lock:
@@ -12991,6 +13308,7 @@ async def checkpoint_job(context):
         logger.debug(f"WAL checkpoint: {e}")
 
 async def post_shutdown(application):
+    flush_writes()
     await stop_all_clones()
     await checkpoint_job(None)
     global userbot
@@ -13136,6 +13454,8 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CallbackQueryHandler(fsub_callback, pattern=r'^fs\|'))
     app.add_handler(CommandHandler('afk', cmd_afk))
     app.add_handler(CommandHandler('webpanel', cmd_webpanel))
+    app.add_handler(CommandHandler('perf', cmd_perf, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CallbackQueryHandler(perf_callback, pattern=r'^perf\|'))
     app.add_handler(CommandHandler('sicil', cmd_sicil))
     app.add_handler(CommandHandler(['oylama', 'votemute'], cmd_oylama))
     app.add_handler(CallbackQueryHandler(vote_callback, pattern=r'^vm\|'))
@@ -13256,6 +13576,10 @@ def register_handlers(app, main_bot: bool = True):
         for h in handlers:
             if isinstance(h, CommandHandler):
                 h.filters = h.filters & ~filters.UpdateType.EDITED
+    # /perf: her handler'ın süresi ölçülür
+    for handlers in app.handlers.values():
+        for h in handlers:
+            h.callback = perf_wrap(h.callback)
 
 def main():
     global MAIN_BOT
@@ -13268,6 +13592,7 @@ def main():
         .token(TOKEN)
         .rate_limiter(UlusRateLimiter(max_retries=3))
         .job_queue(UlusJobQueue())
+        .concurrent_updates(CONCURRENT_UPDATES)  # bir grubun yavaş işlemi diğer grupları bekletmesin
         .post_init(post_init)
         .post_shutdown(post_shutdown)
         .build()
@@ -13292,6 +13617,8 @@ def main():
     job_queue.run_repeating(scheduled_msgs_job, interval=60, first=45)
     job_queue.run_repeating(giveaway_job, interval=60, first=50)
     job_queue.run_repeating(web_sync_job, interval=5, first=5)
+    job_queue.run_repeating(flush_writes_job, interval=WRITE_FLUSH_EVERY, first=WRITE_FLUSH_EVERY)
+    job_queue.run_repeating(loop_lag_job, interval=10, first=10)
     job_queue.run_repeating(spam_memory_cleanup, interval=3600, first=3600)
     job_queue.run_repeating(weekly_log_cleanup, interval=86400, first=3600)
     job_queue.run_daily(backup_job, time=dtime(4, 0, tzinfo=TZ_TR))
