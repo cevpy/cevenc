@@ -912,6 +912,21 @@ def init_db():
                 at REAL NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_dyclicks ON duyuru_clicks(did);
+            CREATE TABLE IF NOT EXISTS setup_reminders (
+                chat_id TEXT NOT NULL,
+                bot_id INTEGER NOT NULL,
+                added_by INTEGER NOT NULL,
+                at REAL NOT NULL,
+                PRIMARY KEY (chat_id, bot_id)
+            );
+            CREATE TABLE IF NOT EXISTS bot_removals (
+                chat_id TEXT NOT NULL,
+                bot_id INTEGER NOT NULL,
+                title TEXT,
+                removed_by INTEGER,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_botrem ON bot_removals(bot_id, at);
             CREATE TABLE IF NOT EXISTS duyuru_templates (
                 bot_id INTEGER NOT NULL,
                 name TEXT NOT NULL,
@@ -1001,6 +1016,8 @@ def _migrate_installer():
         fcols = {r[1] for r in conn.execute("PRAGMA table_info(chat_filters)")}
         if 'is_html' not in fcols:  # eski filtreler düz metin; yeniler biçimli (HTML) kaydedilir
             conn.execute("ALTER TABLE chat_filters ADD COLUMN is_html INTEGER DEFAULT 0")
+        # eski sürüm: botu özelden engelleyip yeniden başlatan kişi "sohbet" olarak kaydediliyordu
+        conn.execute("DELETE FROM channels WHERE chat_type = 'private'")
         acols = {r[1] for r in conn.execute("PRAGMA table_info(announcements)")}
         for col in ('filters', 'poll_id', 'poll_result'):
             if col not in acols:
@@ -1586,10 +1603,13 @@ async def handle_my_chat_member(update: Update, context):
         return
 
     new_status = member_update.new_chat_member.status
+    old_status = member_update.old_chat_member.status if member_update.old_chat_member else 'left'
     chat = member_update.chat
     chat_id = str(chat.id)
 
     invalidate_admin_cache(chat_id)
+    if chat.type == 'private':
+        return
     await handle_clone_protection(update, context)
 
     if new_status in ['member', 'administrator'] and is_blocked(chat_id):
@@ -1602,6 +1622,11 @@ async def handle_my_chat_member(update: Update, context):
 
     if new_status in ('left', 'kicked') and chat_bot_id(chat_id) == context.bot.id and get_channel_settings(chat_id):
         set_chat_bot(chat_id, -1)  # yöneten bot çıkarıldı: gruptaki diğer botumuz sahiplenebilir
+    if new_status in ('left', 'kicked') and old_status not in ('left', 'kicked'):
+        await on_bot_removed(chat, member_update.from_user, context)
+    if new_status == 'administrator':
+        with get_db() as conn:
+            conn.execute("DELETE FROM setup_reminders WHERE chat_id = ? AND bot_id = ?", (chat_id, context.bot.id))
     if new_status in ['member', 'administrator']:
         if get_channel_settings(chat_id) and chat_bot_id(chat_id) != context.bot.id:
             set_chat_bot(chat_id, context.bot.id if context.bot.id != BOT_ID else 0)  # son eklenen botumuz yönetir
@@ -1612,7 +1637,7 @@ async def handle_my_chat_member(update: Update, context):
             try:
                 await bot.send_message(
                     owner_id,
-                    f"Bot eklendi: {chat.title or chat_id}\n"
+                    f"🙏 Teşekkürler! Bot eklendi: {chat.title or chat_id}\n"
                     f"Tip: {chat_type}\n"
                     f"ID: {chat_id}\n\n"
                     f"Komutlar icin /help yaz."
@@ -1622,6 +1647,8 @@ async def handle_my_chat_member(update: Update, context):
             await send_log(chat_id, f"Bot eklendi: {chat.title or chat_id} ({chat_type}) | owner: {owner_id}")
             if chat_type in ('group', 'supergroup') and owner_id:
                 await send_setup_wizard(owner_id, chat_id, context)
+        if old_status in ('left', 'kicked'):
+            await on_bot_added(chat, member_update.from_user, new_status, context)
 
 async def handle_bot_added(update: Update, context):
     
@@ -5627,7 +5654,8 @@ def duyuru_targets(kinds, bot_id: int, flt: dict | None = None) -> list:
     out = []
     with get_db() as conn:
         if 'g' in kinds or 'c' in kinds:
-            for r in conn.execute("SELECT chat_id, chat_type FROM channels WHERE mybot(bot_id) ORDER BY chat_id"):
+            for r in conn.execute("SELECT chat_id, chat_type FROM channels WHERE mybot(bot_id) "
+                                  "AND chat_type IN ('group', 'supergroup', 'channel') ORDER BY chat_id"):
                 k = 'c' if r['chat_type'] == 'channel' else 'g'
                 if k not in kinds or (only and str(r['chat_id']) not in only):
                     continue
@@ -5949,6 +5977,7 @@ def _dy_sel_view(did: int, page: int) -> tuple:
     kinds = set(r['targets']) & {'g', 'c'}
     with get_db() as conn:
         chats = [x for x in conn.execute("SELECT chat_id, chat_type, title FROM channels WHERE mybot(bot_id) "
+                                         "AND chat_type IN ('group', 'supergroup', 'channel') "
                                          "ORDER BY title COLLATE NOCASE, chat_id")
                  if ('c' if x['chat_type'] == 'channel' else 'g') in kinds]
     pages = max(1, -(-len(chats) // DY_SEL_PAGE))
@@ -6250,6 +6279,160 @@ async def cmd_duyurukapat(update: Update, context):
         conn.execute("UPDATE bot_users SET optout = ? WHERE bot_id = ? AND user_id = ?", (off, bid, uid))
     await update.effective_message.reply_text(
         "🔕 Duyurular kapatıldı. Tekrar açmak için /duyuruac" if off else "🔔 Duyurular açıldı.")
+
+# ═══════════════════════════ BÜYÜME: haftalık rapor, eklenme/çıkarılma bildirimi, kurulum hatırlatma ═══════════════════════════
+SETUP_REMIND_AFTER = 24 * 3600   # bot yönetici yapılmadan bu kadar süre geçerse ekleyene hatırlatılır
+ADMIN_RIGHTS_LINK = "change_info+delete_messages+restrict_members+invite_users+pin_messages+manage_chat"
+
+def admin_add_link(username: str) -> str:
+    """Botu (yönetici yetkileriyle) gruba ekleme bağlantısı — Telegram grup seçtirip yetkileri önerir."""
+    return f"https://t.me/{username}?startgroup=kurulum&admin={ADMIN_RIGHTS_LINK}"
+
+async def on_bot_added(chat, adder, new_status: str, context) -> None:
+    """Bot bir gruba/kanala eklendi: yönetici değilse hatırlatma kur, bot sahibine bildir."""
+    cid = str(chat.id)
+    b = context.bot
+    if chat.type in ('group', 'supergroup') and new_status != 'administrator' and adder and not adder.is_bot:
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO setup_reminders (chat_id, bot_id, added_by, at) VALUES (?, ?, ?, ?)",
+                         (cid, b.id, adder.id, time.time()))
+    owner = bot_owner_id()
+    if not owner or (adder and adder.id == owner):
+        return
+    try:
+        count = await b.get_chat_member_count(chat.id)
+    except TelegramError:
+        count = None
+    kind = "kanala" if chat.type == 'channel' else "gruba"
+    lines = [f"➕ <b>Yeni {kind} eklendim</b>",
+             f"{'📢' if chat.type == 'channel' else '👥'} {html.escape(chat.title or cid)}"
+             + (f" (@{html.escape(chat.username)})" if getattr(chat, 'username', None) else "")
+             + (f" · {count} üye" if count is not None else ""),
+             f"👤 Ekleyen: {mention(adder) if adder else '-'}" + (f" · <code>{adder.id}</code>" if adder else ""),
+             "🔐 Yönetici" if new_status == 'administrator' else "⚠️ Henüz yönetici değil (24 saat sonra hatırlatılır)"]
+    try:
+        await b.send_message(owner, "\n".join(lines), parse_mode=ParseMode.HTML)
+    except TelegramError as e:
+        logger.debug(f"Eklenme bildirimi gönderilemedi: {e}")
+
+async def on_bot_removed(chat, remover, context) -> None:
+    cid = str(chat.id)
+    b = context.bot
+    with get_db() as conn:
+        conn.execute("DELETE FROM setup_reminders WHERE chat_id = ? AND bot_id = ?", (cid, b.id))
+        if not remover or remover.id != b.id:  # botun kendi çıkışı (/panel, temizlik) rapora "çıkarıldı" yazılmaz
+            conn.execute("INSERT INTO bot_removals (chat_id, bot_id, title, removed_by, at) VALUES (?, ?, ?, ?, ?)",
+                         (cid, b.id, chat.title or '', remover.id if remover else 0, time.time()))
+    owner = bot_owner_id()
+    if not owner or not remover or remover.id in (owner, b.id):  # kendisi çıkardıysa (ör. /panel) bildirim yok
+        return
+    try:
+        await b.send_message(owner, f"➖ <b>Çıkarıldım:</b> {html.escape(chat.title or cid)}\n"
+                                    f"👤 Çıkaran: {mention(remover)} · <code>{remover.id}</code>", parse_mode=ParseMode.HTML)
+    except TelegramError as e:
+        logger.debug(f"Çıkarılma bildirimi gönderilemedi: {e}")
+
+async def setup_reminder_job(context):
+    """Eklenip 24 saat içinde yönetici yapılmayan bot: ekleyene (olmazsa gruba) bir kez hatırlatır."""
+    with get_db() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM setup_reminders WHERE at <= ?",
+                                              (time.time() - SETUP_REMIND_AFTER,))]
+    for r in rows:
+        b = RUNNING_BOTS.get(r['bot_id'])
+        if b is None:
+            continue
+        with get_db() as conn:
+            conn.execute("DELETE FROM setup_reminders WHERE chat_id = ? AND bot_id = ?", (r['chat_id'], r['bot_id']))
+        try:
+            me = await b.get_chat_member(int(r['chat_id']), b.id)
+        except TelegramError:
+            continue
+        if me.status in ('administrator', 'creator', 'left', 'kicked'):
+            continue
+        with get_db() as conn:
+            row = conn.execute("SELECT title FROM channels WHERE chat_id = ?", (r['chat_id'],)).fetchone()
+        title = html.escape((row['title'] if row else '') or r['chat_id'])
+        text = (f"⚠️ <b>{title}</b> grubunda hâlâ yönetici değilim, bu yüzden koruma çalışmıyor.\n\n"
+                f"Grup ayarları → Yöneticiler → Yönetici ekle → @{html.escape(b.username or '')} "
+                f"(mesaj silme ve kullanıcı kısıtlama yetkisi yeterli) ya da aşağıdaki butonu kullan.")
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Beni yönetici yap", url=admin_add_link(b.username or ''))]])
+        try:
+            await b.send_message(r['added_by'], text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        except TelegramError:
+            try:
+                await b.send_message(int(r['chat_id']), text, parse_mode=ParseMode.HTML, reply_markup=kb)
+            except TelegramError as e:
+                logger.debug(f"Kurulum hatırlatması gönderilemedi {r['chat_id']}: {e}")
+
+def _trend(now_v: int, prev_v: int) -> str:
+    if not prev_v:
+        return ""
+    pct = round((now_v - prev_v) * 100 / prev_v)
+    return f" ({'📈 +' if pct >= 0 else '📉 '}{pct}%)"
+
+def growth_report() -> str:
+    """Botun son 7 günü: yeni/çıkarılan sohbetler, yeni kişiler, mesaj ve üye hareketleri, en aktif gruplar."""
+    flush_writes()
+    bid = cur_bot_id()
+    now = time.time()
+    w, w2 = now - 7 * 86400, now - 14 * 86400
+    mine = "SELECT chat_id FROM channels WHERE mybot(bot_id)"
+    with get_db() as conn:
+        def one(sql, args=()):
+            return conn.execute(sql, args).fetchone()[0] or 0
+        g = one("SELECT COUNT(*) FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup')")
+        c = one("SELECT COUNT(*) FROM channels WHERE mybot(bot_id) AND chat_type = 'channel'")
+        new = conn.execute("SELECT title, chat_id, chat_type FROM channels WHERE mybot(bot_id) "
+                           "AND created_at >= datetime('now', '-7 days') ORDER BY created_at DESC").fetchall()
+        removed = one("SELECT COUNT(DISTINCT chat_id) FROM bot_removals WHERE bot_id = ? AND at >= ?", (bid, w))
+        priv = one("SELECT COUNT(*) FROM bot_users WHERE bot_id = ? AND status = 0", (bid,))
+        priv_new = one("SELECT COUNT(*) FROM bot_users WHERE bot_id = ? AND status = 0 AND first_seen >= ?", (bid, w))
+        msgs = one(f"SELECT COUNT(*) FROM message_stats WHERE sent_at >= ? AND chat_id IN ({mine})", (w,))
+        msgs_prev = one(f"SELECT COUNT(*) FROM message_stats WHERE sent_at >= ? AND sent_at < ? AND chat_id IN ({mine})",
+                        (w2, w))
+        active = one(f"SELECT COUNT(DISTINCT user_id) FROM message_stats WHERE sent_at >= ? AND chat_id IN ({mine})", (w,))
+        joins = one(f"SELECT COUNT(*) FROM member_events WHERE kind = 'join' AND at >= ? AND chat_id IN ({mine})", (w,))
+        leaves = one(f"SELECT COUNT(*) FROM member_events WHERE kind = 'leave' AND at >= ? AND chat_id IN ({mine})", (w,))
+        top = conn.execute(f"SELECT m.chat_id, COUNT(*) n, ch.title FROM message_stats m LEFT JOIN channels ch "
+                           f"ON ch.chat_id = m.chat_id WHERE m.sent_at >= ? AND m.chat_id IN ({mine}) "
+                           f"GROUP BY m.chat_id ORDER BY n DESC LIMIT 5", (w,)).fetchall()
+    d1 = datetime.fromtimestamp(w, TZ_TR).strftime('%d.%m')
+    d2 = datetime.fromtimestamp(now, TZ_TR).strftime('%d.%m')
+    lines = [f"📈 <b>{html.escape(brand())} haftalık rapor</b> ({d1} – {d2})\n",
+             f"👥 Grup: <b>{g}</b> · 📢 Kanal: <b>{c}</b>",
+             f"➕ Yeni eklendiğim: <b>{len(new)}</b> · ➖ Çıkarıldığım: <b>{removed}</b>",
+             f"👤 Özelden kullanan: <b>{priv}</b> (bu hafta +{priv_new})",
+             f"💬 Mesaj: <b>{msgs}</b>{_trend(msgs, msgs_prev)} · aktif kişi: <b>{active}</b>",
+             f"🚪 Gruplara katılan: <b>{joins}</b> · ayrılan: <b>{leaves}</b>"]
+    if new:
+        lines.append("\n🆕 <b>Yeni sohbetler</b>")
+        lines += [f"• {'📢' if r['chat_type'] == 'channel' else '👥'} {html.escape(r['title'] or str(r['chat_id']))}"
+                  for r in new[:10]]
+        if len(new) > 10:
+            lines.append(f"… ve {len(new) - 10} tane daha")
+    if top:
+        lines.append("\n🏆 <b>En aktif gruplar</b>")
+        lines += [f"{i}. {html.escape(r['title'] or str(r['chat_id']))} — {r['n']} mesaj" for i, r in enumerate(top, 1)]
+    return "\n".join(lines)
+
+async def weekly_report_job(context):
+    """Her pazartesi: ana bot ve her klon kendi sahibine haftalık raporu gönderir."""
+    if datetime.now(TZ_TR).weekday() != 0:
+        return
+    for bid, b in list(RUNNING_BOTS.items()):
+        tok = _ctx_bot.set(b)
+        try:
+            await b.send_message(bot_owner_id(), growth_report(), parse_mode=ParseMode.HTML)
+        except Exception as e:
+            logger.debug(f"Haftalık rapor gönderilemedi ({bid}): {e}")
+        finally:
+            _ctx_bot.reset(tok)
+
+async def cmd_buyume(update: Update, context):
+    """/buyume — bot sahibi: son 7 günün büyüme raporu."""
+    if not is_bot_owner(update.effective_user.id):
+        return
+    await update.effective_message.reply_text(growth_report(), parse_mode=ParseMode.HTML)
 
 def upsert_user(chat_id: str, user):
     with get_db() as conn:
@@ -8340,6 +8523,7 @@ async def help_command(update: Update, context):
                 "/duyuru — Gruplara, kanallara ve kisilere duyuru (/duyuru yaz, kullanimi gor)\n"
                 "/duyurular — Duyuru gecmisi, tiklamalar, anket sonuclari\n"
                 "/duyurusablon — Duyuru sablonlari\n"
+                "/buyume — Haftalik buyume raporu (her pazartesi otomatik gelir)\n"
                 "/gban <id|@kullanici> [sebep] — Botunun tum gruplarinda banla\n"
                 "/ungban <id|@kullanici> — Bani kaldir\n"
                 "/gbanlist — Ban listesi\n"
@@ -8363,6 +8547,7 @@ async def help_command(update: Update, context):
                 "/duyuru — Gruplara, kanallara ve kisilere duyuru (/duyuru yaz, kullanimi gor)\n"
                 "/duyurular — Duyuru gecmisi, tiklamalar, anket sonuclari\n"
                 "/duyurusablon — Duyuru sablonlari\n"
+                "/buyume — Haftalik buyume raporu (her pazartesi otomatik gelir)\n"
                 "/kanal — Kanal sec\n"
                 "/kanalsettings — Kanal ayarlari\n"
             ))
@@ -8584,13 +8769,13 @@ PRIVATE_COMMANDS = [
 ]
 CLONE_OWNER_COMMANDS = [
     ("panel", "Botunun grupları ve istatistikleri"), ("duyuru", "Gruplara, kanallara, kişilere duyuru"),
-    ("duyurular", "Duyuru geçmişi"), ("duyurusablon", "Duyuru şablonları"),
+    ("duyurular", "Duyuru geçmişi"), ("duyurusablon", "Duyuru şablonları"), ("buyume", "Haftalık büyüme raporu"),
     ("gban", "Botunun gruplarında banla"), ("ungban", "Banı kaldır"), ("gbanlist", "Ban listesi"),
 ]
 FOUNDER_COMMANDS = [("klonlar", "Klon botları yönet"), ("perf", "Performans ölçümü"), 
     ("panel", "Yönetim paneli"), ("gban", "Global ban"), ("ungban", "Global banı kaldır"),
     ("gbanlist", "Global ban listesi"), ("engelle", "Kullanıcı/sohbet engelle"), ("engelkaldir", "Engeli kaldır"),
-    ("duyuru", "Gruplara, kanallara, kişilere duyuru"), ("duyurular", "Duyuru geçmişi"), ("duyurusablon", "Duyuru şablonları"), ("yedek", "Veritabanı yedeği"),
+    ("duyuru", "Gruplara, kanallara, kişilere duyuru"), ("duyurular", "Duyuru geçmişi"), ("duyurusablon", "Duyuru şablonları"), ("buyume", "Haftalık büyüme raporu"), ("yedek", "Veritabanı yedeği"),
     ("gmedyaengel", "Medyayı tüm gruplarda engelle"),
 ]
 
@@ -9860,6 +10045,8 @@ def rich_summary(rich: dict | None) -> str:
     nb = sum(len(r) for v in rich.get('v') or [] for r in v.get('buttons') or [])
     parts = [f"🖼 {RICH_MEDIA_LABELS.get(media['type'], media['type'])}" if media else "🖼 medya yok",
              f"🔘 {nb} buton", f"🎲 {len(rich.get('v') or [])} seçenek"]
+    if rich.get('cp'):
+        parts.append("💎 birebir kopya")
     return " · ".join(parts)
 
 RICH_MEDIA_LABELS = {'photo': "Fotoğraf", 'video': "Video", 'animation': "GIF", 'document': "Dosya", 'audio': "Müzik",
@@ -9925,6 +10112,22 @@ async def send_rich(chat_id, rich: dict | None, *, reply_msg=None, users=(), tit
     if extra_rows:
         markup = InlineKeyboardMarkup(list(markup.inline_keyboard if markup else ()) + [list(r) for r in extra_rows])
     media = rich.get('m')
+    cp = rich.get('cp')
+    if cp and not header:  # premium emojili mesaj birebir kopyalanır; kaynak silinmişse normal gönderime düşer
+        kw = {'reply_markup': markup} if markup is not None else {}
+        if silent:
+            kw['disable_notification'] = True
+        target = chat_id
+        if reply_msg is not None:
+            target, kw['reply_to_message_id'] = reply_msg.chat_id, reply_msg.message_id
+        elif thread_id:
+            kw['message_thread_id'] = thread_id
+        try:
+            res = await bot.copy_message(target, cp['c'], cp['m'], **kw)
+            if getattr(res, 'message_id', None):
+                return [res]
+        except TelegramError as e:
+            logger.debug(f"Kopya gönderilemedi, normal gönderiliyor {chat_id}: {e}")
     if not text.strip() and not media:
         if not markup:
             return []
@@ -10090,14 +10293,19 @@ async def send_rules(chat_id: str, reply_msg, user=None) -> bool:
 
 def rich_from_command(msg, skip: int = 1) -> dict | None:
     """/setwelcome metin  ·  medyaya/mesaja yanıt: /setwelcome [açıklama]  → zengin mesaj (None: içerik yok)."""
-    text_html = cmd_args_html(msg, skip)
+    text_html = own = cmd_args_html(msg, skip)
     reply = getattr(msg, 'reply_to_message', None)
     media = msg_media(reply) if reply else None
     if reply and not text_html:
         text_html = msg_html(reply)
     if not text_html and not media:
         return None
-    return build_rich(text_html, media)
+    rich = build_rich(text_html, media)
+    if (reply is not None and not own and '<tg-emoji' in text_html and len(rich['v']) == 1
+            and not rich['v'][0]['buttons'] and not re.search(r'\{\w+\}', text_html)):
+        # premium emoji: bot yazarak gönderemez ama mesajı kopyalayabilir → kaynak mesaj birebir kopyalanır
+        rich['cp'] = {'c': reply.chat_id, 'm': reply.message_id}
+    return rich
 
 RICH_HELP = (
     "<b>Biçim:</b> mesajı Telegram'da nasıl yazarsan (kalın, italik, link, spoiler, alıntı) öyle kaydedilir.\n"
@@ -10234,7 +10442,9 @@ async def _set_rich_cmd(update: Update, context, kind: str):
     elif kind == 'goodbye':
         s['goodbye_enabled'] = True
     save_channel_settings(chat_id, channel)
-    await msg.reply_text(f"✅ {label} mesajı kaydedildi ({rich_summary(rich)}). Önizleme:")
+    note = ("\n💎 Premium emoji korunuyor: mesaj birebir kopyalanır. Kaynak mesajı silme (silinirse normal emoji "
+            "ile gönderilir).") if rich.get('cp') else ""
+    await msg.reply_text(f"✅ {label} mesajı kaydedildi ({rich_summary(rich)}).{note}\nÖnizleme:")
     await send_rich(msg.chat_id, rich, reply_msg=msg, users=[update.effective_user], title=await _chat_title(chat_id))
     await send_log(chat_id, f"✏️ {label} mesajı güncellendi | {mention(update.effective_user)}", ParseMode.HTML)
 
@@ -13851,14 +14061,35 @@ def _make_backup() -> str:
             pass
     return path
 
+def _zip_backup(path: str) -> str:
+    import zipfile
+    zpath = path[:-3] + ".zip"
+    with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as z:
+        z.write(path, os.path.basename(path))
+    return zpath
+
 async def backup_job(context: ContextTypes.DEFAULT_TYPE):
     try:
         path = await asyncio.to_thread(_make_backup)
         logger.info(f"Yedek alındı: {path}")
-        if BACKUP_CHAT_ID and os.path.getsize(path) < 45 * 1024 * 1024:
-            with open(path, 'rb') as f:
-                await context.bot.send_document(BACKUP_CHAT_ID, f, filename=os.path.basename(path),
-                                                caption="🗄 Günlük veritabanı yedeği")
+        if not BACKUP_CHAT_ID:
+            return
+        zpath = await asyncio.to_thread(_zip_backup, path)
+        size = os.path.getsize(zpath)
+        if size < 45 * 1024 * 1024:
+            with open(zpath, 'rb') as f:
+                await context.bot.send_document(
+                    BACKUP_CHAT_ID, f, filename=os.path.basename(zpath),
+                    caption=f"🗄 Veritabanı yedeği · {os.path.getsize(path) / 1048576:.1f} MB "
+                            f"(sıkıştırılmış {size / 1048576:.1f} MB)\nGeri yüklemek için zip'teki .db dosyasını "
+                            f"bot_data.db adıyla bot klasörüne koy.")
+        else:
+            await context.bot.send_message(BACKUP_CHAT_ID, f"🗄 Yedek alındı ama Telegram'a sığmıyor "
+                                                           f"({size / 1048576:.0f} MB): {path}")
+        try:
+            os.remove(zpath)
+        except OSError:
+            pass
     except Exception as e:
         logger.error(f"Yedekleme hatası: {e}")
 
@@ -14314,6 +14545,7 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('duyurular', cmd_duyurular))
     app.add_handler(CommandHandler('duyurudur', cmd_duyurudur))
     app.add_handler(CommandHandler('duyurusablon', cmd_duyurusablon))
+    app.add_handler(CommandHandler('buyume', cmd_buyume))
     app.add_handler(PollHandler(duyuru_poll_handler))
     app.add_handler(CommandHandler(['duyurukapat', 'duyuruac'], cmd_duyurukapat, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(duyuru_callback, pattern=r'^dy\|'))
@@ -14460,6 +14692,8 @@ def main():
     job_queue.run_repeating(auto_delete_job, interval=20, first=20)
     job_queue.run_repeating(scheduled_msgs_job, interval=60, first=45)
     job_queue.run_repeating(duyuru_job, interval=30, first=25)
+    job_queue.run_repeating(setup_reminder_job, interval=3600, first=300)
+    job_queue.run_daily(weekly_report_job, time=dtime(10, 0, tzinfo=TZ_TR))
     job_queue.run_repeating(giveaway_job, interval=60, first=50)
     job_queue.run_repeating(web_sync_job, interval=5, first=5)
     job_queue.run_repeating(flush_writes_job, interval=WRITE_FLUSH_EVERY, first=WRITE_FLUSH_EVERY)
