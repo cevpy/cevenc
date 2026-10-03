@@ -41,7 +41,7 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
    - Katılmayanın mesajı silinir; "📢 Kanala katıl → ✅ Katıldım" butonlu uyarı gelir.
 3. **AFK** — `/afk sebep`; etiketlenince "şu an AFK: sebep (2 saattir)"; tekrar yazınca kalkar.
 
-## Faz 3 — Güvenlik
+## Faz 3 — Güvenlik ✅ (tamamlandı)
 1. **Ortak spam kara listesi** — botun bir grubunda spam yüzünden banlanan hesap, diğer gruplara katılınca "şüpheli" işaretlenir.
    - İsteğe bağlı CAS (dünya çapında bilinen spam listesi) kontrolü.
 2. **Kullanıcı sicili (`/sicil`)** — kişinin botun tüm gruplarındaki uyarı, susturma ve ban geçmişi; sadece yetkililere açık.
@@ -49,7 +49,7 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
 4. **Oylamalı susturma (`/oylama`)** — admin yokken üyeler oyla geçici susturur (örn. 5 oy → 1 saat).
    - Yeni üyeler oy veremez; yetkililere karşı kullanılamaz.
 
-## Faz 4 — Çekiliş ve istatistik
+## Faz 4 — Çekiliş ve istatistik ✅ (tamamlandı)
 1. **Çekiliş sistemi** (temel `/cekilis` zaten var; şartlar ve sahte hesap engeli eklenecek) — `/cekilis` ile "🎁 Katıl" butonlu çekiliş; süre bitince kazanan rastgele seçilip duyurulur.
    - Katılım şartı konabilir: kanal üyeliği, en az X mesaj, X gündür grupta olmak.
    - Yeni açılmış ve sahte hesaplar katılamaz.

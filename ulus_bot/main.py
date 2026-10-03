@@ -95,6 +95,7 @@ USERBOT_SESSION = _env_path("TELETHON_SESSION", "ulus_userbot")
 
 TZ_TR = timezone(timedelta(hours=3))
 MESSAGE_STATS_RETENTION_DAYS = max(1, _env_int("MESSAGE_STATS_RETENTION_DAYS", 30))
+MOD_LOG_RETENTION_DAYS = 180  # /sicil ve /info için ceza geçmişi
 
 # Premium emoji: ENV'den custom ID verilirse HTML parse ile kullanılır, yoksa standart emojiye düşer.
 EMOJI_FALLBACKS = {
@@ -739,6 +740,23 @@ def init_db():
                 name TEXT
             );
 
+            CREATE TABLE IF NOT EXISTS name_history (
+                user_id INTEGER NOT NULL,
+                first_name TEXT,
+                last_name TEXT,
+                username TEXT,
+                seen_at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_namehist ON name_history(user_id, seen_at);
+
+            CREATE TABLE IF NOT EXISTS member_events (
+                chat_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_member_events ON member_events(chat_id, at);
+
             CREATE TABLE IF NOT EXISTS tag_optout (
                 chat_id TEXT NOT NULL,
                 user_id INTEGER NOT NULL,
@@ -899,6 +917,11 @@ def _migrate_installer():
             conn.execute("ALTER TABLE channels ADD COLUMN added_by INTEGER")
         if 'bot_id' not in cols:  # sohbeti yöneten bot (NULL = ana bot)
             conn.execute("ALTER TABLE channels ADD COLUMN bot_id INTEGER")
+        gcols = {r[1] for r in conn.execute("PRAGMA table_info(giveaways)")}
+        for col, typedef in (('prize', 'TEXT'), ('winners', 'INTEGER DEFAULT 1'), ('ends_at', 'REAL'), ('req', 'TEXT'),
+                             ('started_by', 'INTEGER')):
+            if col not in gcols:  # çekiliş: ödül, kazanan sayısı, otomatik bitiş, katılım şartları
+                conn.execute(f"ALTER TABLE giveaways ADD COLUMN {col} {typedef}")
         ucols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
         if 'left_at' not in ucols:  # gruptan ayrılan üye (/etiket listesine girmez; tekrar yazınca/katılınca silinir)
             conn.execute("ALTER TABLE users ADD COLUMN left_at REAL")
@@ -1436,6 +1459,9 @@ def _default_channel_settings():
         'fsub_enabled': False, 'fsub_channel': None, 'fsub_title': None, 'fsub_link': None,
         # /etiket: bir mesajda kaç kişi, isim/emoji, sadece son 7 günün aktifleri
         'tag_size': 5, 'tag_style': 'name', 'tag_active_only': False,
+        # Topluluk koruması: ortak kara liste (botun başka grubunda banlı) + CAS, isim takibi, oylamalı susturma
+        'shared_blacklist': True, 'blacklist_action': 'mute', 'cas_enabled': False, 'name_track': True,
+        'vote_mute': True, 'vote_needed': 5, 'vote_mute_minutes': 60,
     }
 
 async def _register_chat(chat_id: str, owner_id: int, chat_type: str, added_by: int | None = -1):
@@ -3803,26 +3829,6 @@ async def set_auto_reject_bot(update: Update, context):
     save_channel_settings(chat_id, channel)
     await update.message.reply_text(f"Bot/sahte hesap reddi {'açıldı' if state else 'kapatıldı'}!")
 
-async def stats(update: Update, context):
-    chat_id = _get_effective_chat_id(update, context)
-    if not chat_id or not get_channel_settings(chat_id):
-        await update.message.reply_text("Önce /kanal ile seç!")
-        return
-    if not has_permission(chat_id, update.effective_user.id, 50):
-        await update.message.reply_text("Yetkin yok!")
-        return
-    channel = get_channel_settings(chat_id)
-    s = channel['stats']
-    await update.message.reply_text(
-        f"📊 İstatistik: {chat_id}\n"
-        f"Banlar: {s.get('bans', 0)}\n"
-        f"Muteler: {s.get('mutes', 0)}\n"
-        f"Kickler: {s.get('kicks', 0)}\n"
-        f"Spam Tespit: {s.get('spams', 0)}\n"
-        f"Yeni Üye: {s.get('joins', 0)}\n"
-        f"İstekler: {s.get('requests', 0)}"
-    )
-
 async def invite_stats(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
     if not chat_id or not get_channel_settings(chat_id):
@@ -3847,97 +3853,6 @@ async def invite_stats(update: Update, context):
 
 async def leaderboard(update: Update, context):
     await _send_leaderboard(update, context, 'toplam')
-
-async def cekilis(update: Update, context):
-    chat_id = _get_effective_chat_id(update, context)
-    if not chat_id or not get_channel_settings(chat_id):
-        await update.message.reply_text("Önce /kanal ile seç!")
-        return
-    if not has_permission(chat_id, update.effective_user.id, 50):
-        await update.message.reply_text("Yetkin yok!")
-        return
-    keyboard = [[ibtn("🎉 Katil", f"giveaway|{chat_id}", GREEN)]]
-    message = await bot.send_message(chat_id, "🎉 Çekiliş başladı! Katılımcı: 0", reply_markup=InlineKeyboardMarkup(keyboard),
-                                     **thread_kw(update.effective_message, chat_id))
-    async with _db_lock:
-        with get_db() as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO giveaways (chat_id, message_id, participants, created_at)
-                VALUES (?, ?, ?, ?)
-            """, (chat_id, message.message_id, json.dumps([]), time.time()))
-            conn.commit()
-    await update.message.reply_text("Çekiliş başladı! Katılmak için butona bas.")
-    await send_log(chat_id, f"🎉 {mention(update.effective_user)} çekiliş başlattı | {chat_id}", ParseMode.HTML)
-
-async def giveaway_button(update: Update, context):
-    query = update.callback_query
-    await query.answer()
-    chat_id = query.data.split("|", 1)[1]
-    if not get_channel_settings(chat_id):
-        await query.message.edit_text("Bu çekiliş geçersiz!")
-        return
-    user_id = query.from_user.id
-    async with _db_lock:
-        with get_db() as conn:
-            row = conn.execute("SELECT participants FROM giveaways WHERE chat_id = ?", (chat_id,)).fetchone()
-            if not row:
-                await query.message.edit_text("Bu çekiliş sona erdi!")
-                return
-            participants = json.loads(row['participants'])
-            if user_id not in participants:
-                participants.append(user_id)
-                conn.execute("UPDATE giveaways SET participants = ? WHERE chat_id = ?", (json.dumps(participants), chat_id))
-                conn.commit()
-                await query.message.edit_text(
-                    f"🎉 Çekiliş devam ediyor! Katılımcı: {len(participants)}",
-                    reply_markup=query.message.reply_markup
-                )
-                await send_log(chat_id, f"🙋 {mention(query.from_user)} çekilişe katıldı | {chat_id}", ParseMode.HTML)
-
-async def giveaway_end(update: Update, context):
-    """/cekilis_bitir — aktif çekilişi bitirir ve kazananı seçer. (/cekilis_bitir 3 → 3 kazanan)"""
-    message = update.effective_message
-    chat_id = _get_effective_chat_id(update, context)
-    if not chat_id or not get_channel_settings(chat_id):
-        await message.reply_text("Önce /kanal ile seç!")
-        return
-    if not has_permission(chat_id, update.effective_user.id, 50):
-        await message.reply_text("Yetkin yok!")
-        return
-    winners_count = 1
-    if context.args and context.args[0].isdigit():
-        winners_count = max(1, min(20, int(context.args[0])))
-    with get_db() as conn:
-        row = conn.execute("SELECT message_id, participants FROM giveaways WHERE chat_id = ?", (chat_id,)).fetchone()
-    if not row:
-        await message.reply_text("Aktif çekiliş yok.")
-        return
-    participants = json.loads(row['participants'])
-    async with _db_lock:
-        with get_db() as conn:
-            conn.execute("DELETE FROM giveaways WHERE chat_id = ?", (chat_id,))
-            conn.commit()
-    try:
-        await bot.edit_message_reply_markup(chat_id, row['message_id'], reply_markup=None)
-    except Exception:
-        pass
-    if not participants:
-        await bot.send_message(chat_id, "🎉 Çekiliş sona erdi! Katılımcı yoktu.", **thread_kw(message, chat_id))
-        return
-    winners = random.sample(participants, min(winners_count, len(participants)))
-    names = []
-    for wid in winners:
-        try:
-            m = await bot.get_chat_member(chat_id, wid)
-            names.append(mention(m.user))
-        except Exception:
-            names.append(mention_html(wid, str(wid)))
-    text = "🎉 Çekiliş sona erdi!\n🏆 Kazanan" + ("lar" if len(names) > 1 else "") + ": " + ", ".join(names)
-    text += f"\n👥 Katılımcı: {len(participants)}"
-    await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, **thread_kw(message, chat_id))
-    if message.chat.type == 'private':
-        await message.reply_text("✅ Çekiliş bitirildi.")
-    await send_log(chat_id, f"🏆 Çekiliş bitti: {', '.join(names)} | {chat_id}", ParseMode.HTML)
 
 _raid_locked: set = set()
 
@@ -4675,12 +4590,14 @@ NUMERIC = {
     'edit_guard_minutes':    (1, 1440, [1, 2, 3, 5, 10, 15, 30, 60, 120, 360, 1440], "{} dk"),
     'welcome_autodel':       (0, 1440, [0, 1, 2, 5, 10, 30, 60, 180, 720, 1440], "{} dk"),
     'tag_size':              (1, 10, [1, 3, 5, 10], "{} kişi"),
+    'vote_needed':           (2, 15, [3, 5, 7, 10, 15], "{} oy"),
+    'vote_mute_minutes':     (10, 1440, [10, 30, 60, 180, 720, 1440], "{} dk"),
 }
 TOGGLE_KEYS = {v[1] for v in PROTECTIONS.values()} | {
     'anti_raid', 'captcha_enabled', 'join_captcha', 'auto_accept', 'auto_reject', 'auto_reject_bot',
     'restrict_no_username', 'welcome_enabled', 'nsfw_scan', 'file_block', 'media_autolock', 'edit_guard',
     'edit_notify', 'reports_enabled', 'recovery_autorestore', 'welcome_clean', 'welcome_batch', 'welcome_dm',
-    'goodbye_enabled', 'fsub_enabled', 'tag_active_only'}
+    'goodbye_enabled', 'fsub_enabled', 'tag_active_only', 'shared_blacklist', 'cas_enabled', 'name_track', 'vote_mute'}
 NIGHT_RESTRICTIONS = [('block_messages', "Mesaj"), ('block_media', "Foto/Video"), ('block_voice', "Ses/Video not"),
                       ('block_sticker', "Sticker/GIF"), ('block_links', "Link önizleme"), ('block_files', "Dosya/Müzik")]
 PAGE_SIZE = 8
@@ -4857,6 +4774,9 @@ async def render_settings(cid: str, page: str = 'main'):
     elif base in ('fsub', 'tag'):
         text, rows = render_fsub_tag_page(cid, base, s, title)
 
+    elif base == 'comm':
+        text, rows = render_comm_page(cid, s, title)
+
     elif base == 'warn':
         wa = s.get('warn_action', 'ban')
         text = (f"⚠️ <b>Uyarılar</b> — {title}\n\n\"Uyar\" cezalı korumalar ve /warn uyarı verir; limit dolunca "
@@ -4958,6 +4878,7 @@ async def render_settings(cid: str, page: str = 'main'):
                 [ibtn("🔤 Kelimeler", f"s|{cid}|p|words.0", BLUE), ibtn("📝 Notlar", f"s|{cid}|p|notes.0", BLUE)],
                 [ibtn("🧩 Filtreler", f"s|{cid}|p|filters.0", BLUE), ibtn("⏰ Zamanlı mesaj", f"s|{cid}|p|sched", BLUE)],
                 [ibtn("📢 Kanal zorunluluğu", f"s|{cid}|p|fsub", BLUE), ibtn("🏷 Etiket", f"s|{cid}|p|tag", BLUE)],
+                [ibtn("🧑‍⚖️ Topluluk koruması", f"s|{cid}|p|comm", BLUE)],
                 [ibtn("✏️ Düzenleme & Rapor", f"s|{cid}|p|edit", BLUE), ibtn("🧾 Log Kanalı", f"s|{cid}|p|log", BLUE)],
                 [ibtn("🌐 Grup Ağı", f"s|{cid}|p|net", BLUE), ibtn("🛟 Kurtarma", f"s|{cid}|p|rec", BLUE)],
                 [ibtn("✖️ Kapat", f"s|{cid}|x", RED)]]
@@ -5288,7 +5209,7 @@ async def _apply_input(kind: str, cid: str, channel: dict, msg, user):
 # ── Panel ekleri: uygunsuz medya, engelli medya listesi, düzenleme & rapor, grup ağı, kurtarma ──
 EXT_PAGES = {'bm', 'edit', 'net', 'rec', 'snapc'}
 EXT_OPS = {'mk', 'mo', 'bd', 'na', 'nr', 'nb', 'nc', 'ns', 'rd', 'sn', 'rg'}
-RICH_OPS = {'pv', 'wr', 'wm', 'zt', 'zp', 'zc', 'zd', 'ts'}
+RICH_OPS = {'pv', 'wr', 'wm', 'zt', 'zp', 'zc', 'zd', 'ts', 'ba'}
 
 def _badmedia_rows(cid: str, s: dict, page_id: str) -> list:
     ai = "🤖 Yapay zeka taraması" + ("" if nsfw_available() else " (kurulu değil)")
@@ -5575,6 +5496,11 @@ async def new_member_handler(update: Update, context):
             except Exception as e:
                 logger.debug(f"Gban uygulanamadı: {e}")
             continue
+        if not user.is_bot:
+            log_member_event(chat_id, user.id, 'join')
+            await track_name(chat_id, user, channel['settings'])
+            if not (adder_is_staff and adder.id != user.id) and await blacklist_on_join(chat_id, user, channel):
+                continue
 
         is_raider = await anti_raid_check(chat_id, user.id, context)
         if is_raider:
@@ -5670,10 +5596,12 @@ async def track_message(update: Update, context):
     if user.is_bot:
         return
     chat_id = str(update.effective_chat.id)
-    if not get_channel_settings(chat_id):
+    channel = get_channel_settings(chat_id)
+    if not channel:
         return
 
     upsert_user(chat_id, user)
+    await track_name(chat_id, user, channel['settings'])
 
     msg_type = _get_msg_type(msg)
     username = user.username or ''
@@ -6972,7 +6900,8 @@ async def weekly_log_cleanup(context):
     async with _db_lock:
         with get_db() as conn:
             conn.execute("DELETE FROM channel_log WHERE timestamp < ?", (week_ago,))
-            conn.execute("DELETE FROM mod_log WHERE timestamp < ?", (week_ago,))
+            conn.execute("DELETE FROM mod_log WHERE timestamp < ?", (now - MOD_LOG_RETENTION_DAYS * 86400,))
+            conn.execute("DELETE FROM member_events WHERE at < ?", (now - 60 * 86400,))
             conn.execute("DELETE FROM admin_flood WHERE sent_at < ?", (now - 3600,))
             conn.commit()
 
@@ -7848,6 +7777,7 @@ async def help_command(update: Update, context):
         "/grupbilgi — Grup hakkinda bilgi\n"
         "/rules — Grup kurallarini gor\n"
         "/afk [sebep] — AFK ol (etiketleyene bilgi verilir, yazınca kalkar)\n"
+        "/oylama — Yanıtladığın kişi için susturma oylaması başlat\n"
         "/etiketme — /etiket listesinden çık (tekrar yazınca geri gir)\n\n"
         "📝 Notlar\n"
         "/notlar — Kayitli notlar\n"
@@ -7882,6 +7812,8 @@ async def help_command(update: Update, context):
         "/filter — Otomatik yanit (or. selam → Aleykum selam; medya ve buton olur)\n"
         "/filters · /stop <kelime> · /stopall — Filtre listesi / sil\n"
         "/etiket <mesaj> · /etiketdur — Üyeleri gruplar hâlinde etiketle / durdur\n"
+        "/sicil @kullanici — Botun tüm gruplarındaki ceza geçmişi ve eski isimleri (özelden gelir)\n"
+        "/cekilis 1g 3 Ödül | kanal=@kanal mesaj=20 gun=7 — Şartlı, süreli çekiliş\n"
         "/yetkim — Rütben ve yetkilerin\n\n"
         "⭐ Üst Admin ve üstü\n"
         "/ban @kullanici [sure] [sebep] · /unban — Ban\n"
@@ -8000,6 +7932,7 @@ GROUP_USER_COMMANDS = [
     ("profil", "Profilin ve uyarıların"), ("top", "Aktiflik sıralaması"), ("info", "Kullanıcı istatistikleri"),
     ("grupbilgi", "Grup bilgisi"), ("id", "ID göster"), ("zar", "Zar at"), ("yazitura", "Yazı tura at"),
     ("report", "Yanıtladığın mesajı yetkililere bildir"), ("afk", "AFK ol"), ("etiketme", "Etiket listesinden çık"),
+    ("oylama", "Susturma oylaması (mesaja yanıt)"),
 ]
 GROUP_ADMIN_COMMANDS = [
     ("settings", "Butonlu ayar paneli"), ("reload", "Admin listesini yenile"), ("warn", "Uyarı ver"), ("unwarn", "1 uyarı geri al"), ("warns", "Uyarıları gör"),
@@ -8009,7 +7942,7 @@ GROUP_ADMIN_COMMANDS = [
     ("notsil", "Not sil"), ("kurulum", "Hızlı kurulum"), ("filter", "Otomatik yanıt ekle"), ("filters", "Filtre listesi"), ("stop", "Filtre sil"),
     ("setwelcome", "Hoş geldin mesajı (medya/buton)"), ("setgoodbye", "Veda mesajı"), ("setrules", "Kuralları yaz"),
     ("zamanla", "Zamanlanmış mesaj ekle"), ("zamanlar", "Zamanlanmış mesajlar"), ("etiket", "Üyeleri etiketle"),
-    ("etiketdur", "Etiketlemeyi durdur"), ("kanalzorunlu", "Kanal zorunluluğu"),
+    ("etiketdur", "Etiketlemeyi durdur"), ("kanalzorunlu", "Kanal zorunluluğu"), ("sicil", "Kullanıcı sicili"),
     ("cekilis", "Çekiliş başlat"), ("cekilis_bitir", "Çekilişi bitir"),
     ("kilit", "Acil durum: grubu kilitle"), ("antiraid_ac", "Grup kilidini aç"), ("yetkim", "Rütben ve yetkilerin"), ("staff", "Yetkili listesi"), ("stats", "Grup istatistikleri"),
     ("medyaengel", "Yanıtlanan medyayı engelle"), ("paketengel", "Sticker paketini engelle"),
@@ -9608,6 +9541,8 @@ async def left_member_handler(update: Update, context):
     with get_db() as conn:
         conn.execute("UPDATE users SET left_at = ? WHERE chat_id = ? AND user_id = ?", (time.time(), chat_id, user.id))
         conn.commit()
+    if get_channel_settings(chat_id):
+        log_member_event(chat_id, user.id, 'leave')
     channel = get_channel_settings(chat_id)
     if not channel or not channel['settings'].get('goodbye_enabled'):
         return
@@ -9909,6 +9844,11 @@ def render_rich_page(cid: str, base: str, s: dict, title: str):
 async def rich_panel_op(cid: str, channel: dict, op: str, args: list, query):
     """pv önizle · wr varsayılana dön · wm medyayı kaldır · zt/zp/zc/zd zamanlanmış mesaj. Dönüş: (sayfa, bildirim)"""
     s = channel['settings']
+    if op == 'ba':
+        if args and args[0] in BLACKLIST_ACTIONS:
+            s['blacklist_action'] = args[0]
+            save_channel_settings(cid, channel)
+        return 'comm', f"Kara liste: {BLACKLIST_ACTIONS.get(s.get('blacklist_action', 'mute'))}"
     if op == 'ts':
         if args and args[0] in ('name', 'emoji'):
             s['tag_style'] = args[0]
@@ -10378,6 +10318,728 @@ def render_fsub_tag_page(cid: str, base: str, s: dict, title: str):
             [toggle_btn("Sadece son 7 günün aktifleri", s.get('tag_active_only'), f"s|{cid}|t|tag_active_only|tag")],
             _back(cid)]
     return text, rows
+
+
+# ═══════════════════════════ ORTAK KARA LİSTE + CAS ═══════════════════════════
+# Botun başka bir grubunda banlanmış (ban_list) ya da CAS (dünya çapındaki spam listesi) kaydı olan kişi katılınca
+# ayara göre: yöneticilere bildir / sustur / banla. Yetkilinin eklediği kişiye dokunulmaz.
+BLACKLIST_ACTIONS = {'notify': "Bildir", 'mute': "Sustur", 'ban': "Banla"}
+CAS_URL = "https://api.cas.chat/check"
+_cas_cache: dict = {}   # user_id -> (zaman, kayıtlı mı)
+
+async def _cas_fetch(user_id: int) -> bool | None:
+    import httpx  # python-telegram-bot ile birlikte kurulu
+    async with httpx.AsyncClient(timeout=4) as cl:
+        r = await cl.get(CAS_URL, params={'user_id': user_id})
+        return bool(r.json().get('ok'))
+
+async def cas_banned(user_id: int) -> bool:
+    """CAS kaydı var mı? (1 saat önbellek; servis yanıt vermezse 'temiz' sayılır)"""
+    c = _cas_cache.get(user_id)
+    if c and time.time() - c[0] < 3600:
+        return c[1]
+    try:
+        res = await _cas_fetch(user_id)
+    except Exception as e:
+        logger.debug(f"CAS sorgulanamadı {user_id}: {e}")
+        return False
+    _cas_cache[user_id] = (time.time(), bool(res))
+    if len(_cas_cache) > 20000:
+        _cas_cache.clear()
+    return bool(res)
+
+def ban_flags(user_id: int, exclude_chat: str | None = None) -> list:
+    """Kişinin bu botun diğer gruplarındaki banları [(chat_id, sebep, zaman)]."""
+    with get_db() as conn:
+        rows = conn.execute("""SELECT b.chat_id, b.reason, b.banned_at FROM ban_list b JOIN channels c ON c.chat_id = b.chat_id
+                               WHERE b.user_id = ? AND b.chat_id != ? AND mybot(c.bot_id) ORDER BY b.banned_at DESC""",
+                            (user_id, str(exclude_chat or ''))).fetchall()
+    return [(r['chat_id'], r['reason'], r['banned_at']) for r in rows]
+
+async def blacklist_reasons(chat_id: str, user, s: dict) -> list:
+    reasons = []
+    if s.get('shared_blacklist', True):
+        flags = ban_flags(user.id, chat_id)
+        if flags:
+            reasons.append(f"botun {len({f[0] for f in flags})} başka grubunda banlı")
+    if s.get('cas_enabled') and await cas_banned(user.id):
+        reasons.append("CAS spam listesinde kayıtlı")
+    return reasons
+
+async def blacklist_on_join(chat_id: str, user, channel: dict) -> bool:
+    """Katılan kişi kara listedeyse ayarlı işlemi uygular. True: kişi kısıtlandı/banlandı (hoş geldin yok)."""
+    s = channel['settings']
+    reasons = await blacklist_reasons(chat_id, user, s)
+    if not reasons:
+        return False
+    action = s.get('blacklist_action', 'mute')
+    why = " · ".join(reasons)
+    who = mention(user)
+    try:
+        if action == 'ban':
+            await bot.ban_chat_member(chat_id, user.id)
+            async with _db_lock:
+                with get_db() as conn:
+                    conn.execute("INSERT OR REPLACE INTO ban_list (chat_id, user_id, username, reason, banned_at, banned_by) "
+                                 "VALUES (?, ?, ?, ?, ?, ?)", (chat_id, user.id, user.username or user.first_name,
+                                                               f"kara liste: {why}", time.time(), cur_bot_id()))
+                    conn.commit()
+            text, markup = f"🚩 {who} kara listede ({why}) → <b>banlandı</b>.", mod_markup(chat_id, user.id, 'ban')
+        elif action == 'mute':
+            await bot.restrict_chat_member(chat_id, user.id, permissions=ChatPermissions.no_permissions())
+            text, markup = (f"🚩 {who} kara listede ({why}) → <b>susturuldu</b>. Yöneticiler serbest bırakabilir.",
+                            mod_markup(chat_id, user.id, 'mute'))
+        else:
+            text, markup = f"🚩 Dikkat: {who} {why}.", mod_markup(chat_id, user.id, 'warn')
+    except TelegramError as e:
+        logger.debug(f"Kara liste işlemi uygulanamadı {chat_id}/{user.id}: {e}")
+        return False
+    try:
+        await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup)
+    except TelegramError as e:
+        logger.debug(f"Kara liste bildirimi gönderilemedi: {e}")
+    await send_log(chat_id, f"{text} | {chat_id}", ParseMode.HTML, reply_markup=markup)
+    await log_mod_action(chat_id, f"karaliste:{action}", user.id, user.username or '', cur_bot_id(), 'bot', why)
+    return action != 'notify'
+
+# ═══════════════════════════ İSİM DEĞİŞİKLİĞİ TAKİBİ ═══════════════════════════
+_name_seen: dict = {}  # user_id -> (ad, soyad, kullanıcı adı) — her mesajda veritabanına gitmemek için
+
+def _name_str(t) -> str:
+    first, last, uname = t
+    return (f"{first} {last}".strip() or "—") + (f" (@{uname})" if uname else "")
+
+async def track_name(chat_id: str, user, s: dict | None = None):
+    """Ad/soyad/kullanıcı adı değişince geçmişe yazar ve (açıksa) log kanalına bildirir."""
+    if not user or getattr(user, 'is_bot', False):
+        return
+    cur = (getattr(user, 'first_name', None) or '', getattr(user, 'last_name', None) or '', getattr(user, 'username', None) or '')
+    prev = _name_seen.get(user.id)
+    if prev is None:
+        with get_db() as conn:
+            row = conn.execute("SELECT first_name, last_name, username FROM name_history WHERE user_id = ? "
+                               "ORDER BY seen_at DESC LIMIT 1", (user.id,)).fetchone()
+        prev = (row['first_name'] or '', row['last_name'] or '', row['username'] or '') if row else None
+    if len(_name_seen) > 50000:
+        _name_seen.clear()
+    _name_seen[user.id] = cur
+    if prev == cur:
+        return
+    with get_db() as conn:
+        conn.execute("INSERT INTO name_history (user_id, first_name, last_name, username, seen_at) VALUES (?, ?, ?, ?, ?)",
+                     (user.id, *cur, time.time()))
+        conn.commit()
+    if prev is not None and (s or {}).get('name_track', True):
+        await send_log(chat_id, f"✏️ İsim değişikliği: {mention(user)} (ID <code>{user.id}</code>)\n"
+                                f"Eski: {html.escape(_name_str(prev))}\nYeni: {html.escape(_name_str(cur))}", ParseMode.HTML)
+
+def name_history(user_id: int, limit: int = 10) -> list:
+    with get_db() as conn:
+        rows = conn.execute("SELECT first_name, last_name, username, seen_at FROM name_history WHERE user_id = ? "
+                            "ORDER BY seen_at DESC LIMIT ?", (user_id, limit)).fetchall()
+    return [((r['first_name'] or '', r['last_name'] or '', r['username'] or ''), r['seen_at']) for r in rows]
+
+# ═══════════════════════════ KULLANICI SİCİLİ (/sicil) ═══════════════════════════
+def _action_kind(action: str) -> str | None:
+    a = (action or '').lower()
+    if 'unban' in a or 'unmute' in a or 'unwarn' in a or a.endswith(':ok'):
+        return None
+    if 'ban' in a:
+        return 'ban'
+    if 'mute' in a or 'sustur' in a:
+        return 'mute'
+    if 'kick' in a or 'atıldı' in a:
+        return 'kick'
+    if 'warn' in a:
+        return 'warn'
+    return None
+
+async def build_sicil(user_id: int) -> str:
+    with get_db() as conn:
+        u = conn.execute("SELECT first_name, last_name, username FROM users WHERE user_id = ? ORDER BY last_seen DESC LIMIT 1",
+                         (user_id,)).fetchone()
+        logs = conn.execute("""SELECT m.chat_id, m.action, m.reason, m.timestamp FROM mod_log m
+                               JOIN channels c ON c.chat_id = m.chat_id
+                               WHERE m.target_user_id = ? AND mybot(c.bot_id) ORDER BY m.timestamp DESC LIMIT 200""",
+                            (user_id,)).fetchall()
+    hist = name_history(user_id)
+    name = _name_str(hist[0][0]) if hist else (_name_str((u['first_name'] or '', u['last_name'] or '', u['username'] or ''))
+                                                 if u else str(user_id))
+    lines = [f"📋 <b>Sicil</b> — {mention_html(user_id, name)} · ID <code>{user_id}</code>"]
+    if len(hist) > 1:
+        lines.append("🏷 Eski isimler: " + " ← ".join(html.escape(_name_str(h[0])) for h in hist[1:6]))
+    flags = ban_flags(user_id)
+    lines.append(f"🚩 Ortak kara liste: {'<b>' + str(len({f[0] for f in flags})) + ' grupta banlı</b>' if flags else 'temiz'}")
+    lines.append(f"🌐 CAS: {'⚠️ kayıtlı' if await cas_banned(user_id) else 'temiz'}")
+    counts = {'warn': 0, 'mute': 0, 'kick': 0, 'ban': 0}
+    shown = []
+    for r in logs:
+        k = _action_kind(r['action'])
+        if not k:
+            continue
+        counts[k] += 1
+        if len(shown) < 15:
+            shown.append(r)
+    lines.append(f"📊 Son {MOD_LOG_RETENTION_DAYS} gün: ⚠️ {counts['warn']} uyarı · 🔇 {counts['mute']} susturma · "
+                 f"👢 {counts['kick']} atma · 🚫 {counts['ban']} ban")
+    if shown:
+        titles = {}
+        for r in shown:
+            if r['chat_id'] not in titles:
+                titles[r['chat_id']] = await _chat_title(r['chat_id'])
+        items = [f"• {datetime.fromtimestamp(r['timestamp'], TZ_TR):%d.%m %H:%M} — {html.escape(titles[r['chat_id']][:30])}: "
+                 f"{html.escape(r['action'])}{(' (' + html.escape((r['reason'] or '')[:60]) + ')') if r['reason'] else ''}"
+                 for r in shown]
+        lines.append("<blockquote expandable>" + "\n".join(items) + "</blockquote>")
+    else:
+        lines.append("Kayıtlı ceza yok.")
+    return "\n".join(lines)
+
+async def cmd_sicil(update: Update, context):
+    """/sicil @kullanıcı | ID | yanıt — botun tüm gruplarındaki ceza geçmişi (grupta yazılırsa özelden gönderilir)."""
+    msg = update.effective_message
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile grup seç!")
+        return
+    if not await require(update, chat_id, 'can_warn'):
+        return
+    target, _ = await _resolve_target_id(update, context)
+    if not target:
+        await msg.reply_text("Kullanım: /sicil @kullanıcı, /sicil ID ya da bir mesaja yanıt olarak /sicil")
+        return
+    text = await build_sicil(target)
+    if update.effective_chat.type == 'private':
+        await msg.reply_text(text, parse_mode=ParseMode.HTML)
+        return
+    try:  # başka grupların bilgisi grupta herkese görünmesin
+        await bot.send_message(update.effective_user.id, text, parse_mode=ParseMode.HTML)
+        await msg.reply_text("📩 Sicil özelden gönderildi.")
+    except TelegramError:
+        await msg.reply_text("📩 Sicili özelden gönderebilmem için önce bana özelden /start yaz.",
+                             reply_markup=InlineKeyboardMarkup([[ibtn("🤖 Bota git", url=f"https://t.me/{context.bot.username}")]]))
+
+# ═══════════════════════════ OYLAMALI SUSTURMA (/oylama) ═══════════════════════════
+VOTE_TTL = 600              # sn: oylama süresi
+VOTE_STARTER_COOLDOWN = 300  # sn: aynı kişi bu sürede bir oylama başlatabilir
+VOTE_MIN_AGE = 86400        # sn: en az bu kadardır grupta olan oy verebilir
+_votes: dict = {}           # (chat_id, hedef) -> {'yes': set, 'at': zaman, 'name': ad}
+_vote_started: dict = {}
+
+def _can_vote(chat_id: str, uid: int) -> bool:
+    with get_db() as conn:
+        r = conn.execute("SELECT joined_at FROM users WHERE chat_id = ? AND user_id = ?", (chat_id, uid)).fetchone()
+    return bool(r) and time.time() - (r['joined_at'] or 0) >= VOTE_MIN_AGE
+
+def _vote_markup(chat_id: str, target: int, n: int, need: int):
+    return InlineKeyboardMarkup([[ibtn(f"🔇 Sustur ({n}/{need})", f"vm|{chat_id}|{target}|y", RED),
+                                  ibtn("❌ İptal (yönetici)", f"vm|{chat_id}|{target}|x")]])
+
+async def cmd_oylama(update: Update, context):
+    """Bir mesaja yanıt: /oylama — üyeler oy verir, yeterli oy gelince kişi geçici susturulur."""
+    msg = update.effective_message
+    chat = update.effective_chat
+    if chat.type not in ('group', 'supergroup'):
+        await msg.reply_text("/oylama grupta, bir mesaja yanıt olarak kullanılır.")
+        return
+    chat_id = str(chat.id)
+    channel = get_channel_settings(chat_id)
+    if not channel:
+        return
+    s = channel['settings']
+    if not s.get('vote_mute', True):
+        await msg.reply_text("Bu grupta oylamalı susturma kapalı.")
+        return
+    reply = msg.reply_to_message
+    if not reply or not reply.from_user:
+        await msg.reply_text("Susturulmasını istediğin kişinin mesajına yanıt olarak /oylama yaz.")
+        return
+    target, voter = reply.from_user, update.effective_user
+    if target.is_bot or target.id == voter.id or await is_staff_user(chat_id, target.id, channel):
+        await msg.reply_text("Bu kişi için oylama başlatılamaz.")
+        return
+    staff = await is_staff_user(chat_id, voter.id, channel)
+    if not staff and not _can_vote(chat_id, voter.id):
+        await msg.reply_text("Yeni üyeler oylama başlatamaz (en az 1 gündür grupta olmalısın).")
+        return
+    now = time.time()
+    if not staff and now - _vote_started.get((chat_id, voter.id), 0) < VOTE_STARTER_COOLDOWN:
+        await msg.reply_text("Kısa süre önce oylama başlattın, biraz bekle.")
+        return
+    key = (chat_id, target.id)
+    if key in _votes and now - _votes[key]['at'] < VOTE_TTL:
+        await msg.reply_text("Bu kişi için zaten bir oylama sürüyor.")
+        return
+    need = max(2, int(s.get('vote_needed') or 5))
+    minutes = int(s.get('vote_mute_minutes') or 60)
+    _votes[key] = {'yes': {voter.id}, 'at': now, 'name': target.first_name or str(target.id)}
+    _vote_started[(chat_id, voter.id)] = now
+    await msg.reply_text(
+        f"🗳 {mention(target)} için <b>susturma oylaması</b> ({human_duration(minutes * 60)})\n"
+        f"Başlatan: {mention(voter)} · {need} oy gerekli · {VOTE_TTL // 60} dk içinde",
+        parse_mode=ParseMode.HTML, reply_markup=_vote_markup(chat_id, target.id, 1, need))
+
+async def vote_callback(update: Update, context):
+    """vm|cid|hedef|y/x"""
+    query = update.callback_query
+    _, chat_id, target_s, op = query.data.split('|')
+    target = int(target_s)
+    key = (chat_id, target)
+    v = _votes.get(key)
+    channel = get_channel_settings(chat_id)
+    if not v or not channel or time.time() - v['at'] > VOTE_TTL:
+        _votes.pop(key, None)
+        await query.answer("Bu oylamanın süresi doldu.", show_alert=True)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except TelegramError:
+            pass
+        return
+    uid = query.from_user.id
+    if op == 'x':
+        if not has_specific_permission(chat_id, uid, 'can_mute'):
+            await deny(update, 'can_mute')
+            return
+        _votes.pop(key, None)
+        await query.answer("Oylama iptal edildi")
+        await query.edit_message_text(f"❌ Oylama {mention(query.from_user)} tarafından iptal edildi.", parse_mode=ParseMode.HTML)
+        return
+    if uid == target:
+        await query.answer("Kendin için oy veremezsin.", show_alert=True)
+        return
+    if not await is_staff_user(chat_id, uid, channel) and not _can_vote(chat_id, uid):
+        await query.answer("Yeni üyeler oy veremez (en az 1 gündür grupta olmalısın).", show_alert=True)
+        return
+    if uid in v['yes']:
+        await query.answer("Zaten oy verdin.")
+        return
+    v['yes'].add(uid)
+    s = channel['settings']
+    need = max(2, int(s.get('vote_needed') or 5))
+    if len(v['yes']) < need:
+        await query.answer("✅ Oyun alındı")
+        try:
+            await query.edit_message_reply_markup(reply_markup=_vote_markup(chat_id, target, len(v['yes']), need))
+        except TelegramError:
+            pass
+        return
+    _votes.pop(key, None)
+    minutes = int(s.get('vote_mute_minutes') or 60)
+    try:
+        await bot.restrict_chat_member(chat_id, target, permissions=ChatPermissions.no_permissions(),
+                                       until_date=int(time.time() + minutes * 60))
+    except TelegramError as e:
+        await query.answer("Susturulamadı (bot yetkisi?)", show_alert=True)
+        logger.debug(f"Oylama susturması uygulanamadı {chat_id}/{target}: {e}")
+        return
+    await query.answer("🔇 Susturuldu")
+    who = mention_html(target, v['name'])
+    await query.edit_message_text(f"🔇 {who} {len(v['yes'])} oyla {human_duration(minutes * 60)} susturuldu.",
+                                  parse_mode=ParseMode.HTML, reply_markup=mod_markup(chat_id, target, 'mute'))
+    await send_log(chat_id, f"🗳 Oylama: {who} {len(v['yes'])} oyla {human_duration(minutes * 60)} susturuldu | {chat_id}",
+                   ParseMode.HTML, reply_markup=mod_markup(chat_id, target, 'mute'))
+    await log_mod_action(chat_id, 'oylama:mute', target, '', uid, query.from_user.username or '', f"{len(v['yes'])} oy")
+
+# ── Panel: topluluk koruması sayfası ──
+def render_comm_page(cid: str, s: dict, title: str):
+    act = s.get('blacklist_action', 'mute')
+    text = (f"🧑‍⚖️ <b>Topluluk koruması</b> — {title}\n\n"
+            "🚩 <b>Ortak kara liste:</b> botun başka bir grubunda banlanan kişi buraya katılınca seçilen işlem uygulanır.\n"
+            "🌐 <b>CAS:</b> dünya çapındaki spam listesinde kayıtlı hesaplar da yakalanır.\n"
+            "✏️ <b>İsim takibi:</b> ad/kullanıcı adı değişiklikleri log kanalına yazılır (geçmiş /sicil'de).\n"
+            "🗳 <b>Oylamalı susturma:</b> üyeler bir mesaja /oylama ile oy verip kişiyi geçici susturabilir "
+            "(yeni üyeler oy veremez, yetkililere kullanılamaz).")
+    rows = [[toggle_btn("🚩 Ortak kara liste", s.get('shared_blacklist', True), f"s|{cid}|t|shared_blacklist|comm"),
+             toggle_btn("🌐 CAS", s.get('cas_enabled'), f"s|{cid}|t|cas_enabled|comm")],
+            [ibtn(("✅ " if act == k else "") + lbl, f"s|{cid}|ba|{k}", GREEN if act == k else None)
+             for k, lbl in BLACKLIST_ACTIONS.items()],
+            [toggle_btn("✏️ İsim takibi", s.get('name_track', True), f"s|{cid}|t|name_track|comm"),
+             toggle_btn("🗳 Oylama", s.get('vote_mute', True), f"s|{cid}|t|vote_mute|comm")],
+            _num_row(cid, 'vote_needed', s, 'comm', "Gerekli oy"),
+            _num_row(cid, 'vote_mute_minutes', s, 'comm', "Susturma"),
+            _back(cid)]
+    return text, rows
+
+# ═══════════════════════════ ÇEKİLİŞ ═══════════════════════════
+# /cekilis [süre] [kazanan] [ödül] [| kanal=@kanal mesaj=20 gun=7]  ·  /cekilis_bitir [kazanan]
+GW_MAX_WINNERS = 20
+
+def _gw_row(chat_id: str):
+    with get_db() as conn:
+        r = conn.execute("SELECT * FROM giveaways WHERE chat_id = ?", (chat_id,)).fetchone()
+    return dict(r) if r else None
+
+def _gw_text(row: dict, count: int) -> str:
+    req = json.loads(row.get('req') or '{}')
+    prize = row.get('prize') or ''
+    lines = [f"🎁 <b>Çekiliş</b>{': ' + html.escape(prize) if prize else ''}",
+             f"🏆 Kazanan sayısı: <b>{row.get('winners') or 1}</b>"]
+    if row.get('ends_at'):
+        lines.append(f"⏰ Bitiş: <b>{datetime.fromtimestamp(row['ends_at'], TZ_TR):%d.%m %H:%M}</b>")
+    conds = []
+    if req.get('channel'):
+        conds.append(f"📢 {html.escape(req.get('channel_title') or 'kanal')} kanalına üye olmak")
+    if req.get('min_msgs'):
+        conds.append(f"💬 grupta en az {req['min_msgs']} mesaj (son {MESSAGE_STATS_RETENTION_DAYS} gün)")
+    if req.get('min_days'):
+        conds.append(f"📅 en az {req['min_days']} gündür grupta olmak")
+    conds.append("🛡 profil fotoğrafı ya da kullanıcı adı olan gerçek hesap")
+    lines.append("📋 <b>Şartlar</b>\n" + "\n".join(conds))
+    lines.append(f"👥 Katılımcı: <b>{count}</b>")
+    return "\n".join(lines)
+
+def _gw_markup(chat_id: str, row: dict, count: int):
+    rows = [[ibtn(f"🎁 Katıl ({count})", f"giveaway|{chat_id}", GREEN)]]
+    req = json.loads(row.get('req') or '{}')
+    if req.get('channel_link'):
+        rows.append([ibtn(f"📢 {(req.get('channel_title') or 'Kanal')[:40]}", url=req['channel_link'], style=BLUE)])
+    return InlineKeyboardMarkup(rows)
+
+def parse_giveaway_args(text: str):
+    """'1g 3 iPhone 15 | kanal=@x mesaj=20 gun=7' → (süre sn | None, kazanan, ödül, şartlar)"""
+    main_part, _, cond_part = (text or '').partition('|')
+    tokens = main_part.split()
+    duration = parse_interval(tokens[0]) if tokens else None
+    if duration:
+        tokens = tokens[1:]
+    winners = 1
+    if tokens and tokens[0].isdigit() and 1 <= int(tokens[0]) <= GW_MAX_WINNERS:
+        winners, tokens = int(tokens[0]), tokens[1:]
+    conds = {}
+    for item in cond_part.split():
+        k, _, v = item.partition('=')
+        k = k.lower().replace('ü', 'u')
+        if k == 'kanal' and v:
+            conds['kanal'] = v
+        elif k in ('mesaj', 'msg') and v.isdigit():
+            conds['min_msgs'] = min(int(v), 100000)
+        elif k in ('gun', 'gn') and v.isdigit():
+            conds['min_days'] = min(int(v), 3650)
+    return duration, winners, " ".join(tokens)[:200], conds
+
+async def cekilis(update: Update, context):
+    msg = update.effective_message
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile seç!")
+        return
+    if not has_permission(chat_id, update.effective_user.id, 50):
+        await msg.reply_text("Yetkin yok!")
+        return
+    if _gw_row(chat_id):
+        await msg.reply_text("Bu grupta süren bir çekiliş var. Bitirmek için: /cekilis_bitir")
+        return
+    body = (msg.text or '').split(maxsplit=1)
+    duration, winners, prize, conds = parse_giveaway_args(body[1] if len(body) > 1 else '')
+    if duration is not None and not 60 <= duration <= 30 * 86400:
+        await msg.reply_text("Süre 1 dakika ile 30 gün arasında olmalı.")
+        return
+    req = {k: v for k, v in conds.items() if k != 'kanal'}
+    if conds.get('kanal'):
+        vals, err = await fsub_set_channel(chat_id, conds['kanal'])
+        if err:
+            await msg.reply_text(f"❌ Kanal şartı: {err}", parse_mode=ParseMode.HTML)
+            return
+        req.update(channel=vals['fsub_channel'], channel_title=vals['fsub_title'], channel_link=vals['fsub_link'])
+    row = {'prize': prize, 'winners': winners, 'ends_at': time.time() + duration if duration else None,
+           'req': json.dumps(req, ensure_ascii=False)}
+    sent = await bot.send_message(chat_id, _gw_text(row, 0), parse_mode=ParseMode.HTML,
+                                  reply_markup=_gw_markup(chat_id, row, 0), **thread_kw(msg, chat_id))
+    async with _db_lock:
+        with get_db() as conn:
+            conn.execute("""INSERT OR REPLACE INTO giveaways (chat_id, message_id, participants, created_at, prize, winners,
+                            ends_at, req, started_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                         (chat_id, sent.message_id, json.dumps([]), time.time(), prize, winners, row['ends_at'], row['req'],
+                          update.effective_user.id))
+            conn.commit()
+    if msg.chat.type == 'private' or duration is None:
+        await msg.reply_text("✅ Çekiliş başladı." + ("" if duration else " Bitirmek için: /cekilis_bitir [kazanan sayısı]") +
+                             "\nŞart eklemek için örnek: /cekilis 1g 3 Ödül | kanal=@kanal mesaj=20 gun=7")
+    await send_log(chat_id, f"🎉 {mention(update.effective_user)} çekiliş başlattı: {html.escape(prize or '-')} | {chat_id}",
+                   ParseMode.HTML)
+
+async def giveaway_eligible(chat_id: str, user, req: dict) -> str | None:
+    """Katılım şartları. Dönüş: uygun değilse sebep."""
+    if user.is_bot:
+        return "Botlar katılamaz."
+    try:
+        m = await bot.get_chat_member(chat_id, user.id)
+        if m.status not in ('member', 'administrator', 'creator') and not (m.status == 'restricted' and getattr(m, 'is_member', False)):
+            return "Önce gruba katılmalısın."
+    except TelegramError:
+        return "Grup üyeliğin doğrulanamadı."
+    if not user.username:
+        try:
+            photos = await bot.get_user_profile_photos(user.id, limit=1)
+            has_photo = bool(getattr(photos, 'total_count', 0))
+        except TelegramError:
+            has_photo = True  # doğrulanamazsa engelleme
+        if not has_photo:
+            return "Profil fotoğrafı ya da kullanıcı adı olmayan hesaplar katılamaz (sahte hesap koruması)."
+    if req.get('channel') and not await fsub_is_member(chat_id, req['channel'], user.id, fresh=True):
+        return f"Önce {req.get('channel_title') or 'kanala'} katılmalısın."
+    if req.get('min_msgs'):
+        with get_db() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM message_stats WHERE chat_id = ? AND user_id = ?", (chat_id, user.id)).fetchone()[0]
+        if n < req['min_msgs']:
+            return f"Grupta en az {req['min_msgs']} mesajın olmalı (şu an {n})."
+    if req.get('min_days'):
+        with get_db() as conn:
+            r = conn.execute("SELECT joined_at FROM users WHERE chat_id = ? AND user_id = ?", (chat_id, user.id)).fetchone()
+        if not r or time.time() - (r['joined_at'] or time.time()) < req['min_days'] * 86400:
+            return f"En az {req['min_days']} gündür grupta olmalısın."
+    return None
+
+async def giveaway_button(update: Update, context):
+    query = update.callback_query
+    chat_id = query.data.split("|", 1)[1]
+    row = _gw_row(chat_id) if get_channel_settings(chat_id) else None
+    if not row:
+        await query.answer("Bu çekiliş sona erdi.", show_alert=True)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except TelegramError:
+            pass
+        return
+    user = query.from_user
+    participants = json.loads(row['participants'])
+    if user.id in participants:
+        await query.answer("Zaten katıldın, bol şans! 🍀")
+        return
+    why = await giveaway_eligible(chat_id, user, json.loads(row.get('req') or '{}'))
+    if why:
+        await query.answer(why, show_alert=True)
+        return
+    async with _db_lock:
+        with get_db() as conn:
+            cur = conn.execute("SELECT participants FROM giveaways WHERE chat_id = ?", (chat_id,)).fetchone()
+            if not cur:
+                await query.answer("Bu çekiliş sona erdi.", show_alert=True)
+                return
+            participants = json.loads(cur['participants'])
+            if user.id not in participants:
+                participants.append(user.id)
+                conn.execute("UPDATE giveaways SET participants = ? WHERE chat_id = ?", (json.dumps(participants), chat_id))
+                conn.commit()
+    await query.answer("🎉 Çekilişe katıldın, bol şans!")
+    try:
+        await query.edit_message_text(_gw_text(row, len(participants)), parse_mode=ParseMode.HTML,
+                                      reply_markup=_gw_markup(chat_id, row, len(participants)))
+    except TelegramError as e:
+        logger.debug(f"Çekiliş mesajı güncellenemedi: {e}")
+
+async def finish_giveaway(chat_id: str, winners_count: int | None = None, thread: dict | None = None) -> str:
+    """Çekilişi bitirir; hâlâ grupta olan katılımcılar arasından kazanan seçer. Dönüş: duyuru metni."""
+    row = _gw_row(chat_id)
+    if not row:
+        return ''
+    async with _db_lock:
+        with get_db() as conn:
+            conn.execute("DELETE FROM giveaways WHERE chat_id = ?", (chat_id,))
+            conn.commit()
+    participants = json.loads(row['participants'])
+    want = winners_count or row.get('winners') or 1
+    pool = participants[:]
+    random.shuffle(pool)
+    names = []
+    for wid in pool:
+        if len(names) >= want:
+            break
+        try:
+            m = await bot.get_chat_member(chat_id, wid)
+        except TelegramError:
+            continue
+        if m.status in ('left', 'kicked'):
+            continue
+        names.append(mention(m.user))
+    prize = row.get('prize') or ''
+    try:
+        await bot.edit_message_text(_gw_text(row, len(participants)) + "\n\n✅ <b>Çekiliş bitti</b>", chat_id=chat_id,
+                                    message_id=row['message_id'], parse_mode=ParseMode.HTML)
+    except Exception as e:
+        logger.debug(f"Çekiliş mesajı kapatılamadı: {e}")
+    if not names:
+        text = "🎉 Çekiliş sona erdi! Şartları sağlayan katılımcı yoktu."
+    else:
+        text = (f"🎉 <b>Çekiliş sona erdi!</b>{' — ' + html.escape(prize) if prize else ''}\n🏆 Kazanan"
+                + ("lar" if len(names) > 1 else "") + ": " + ", ".join(names) + f"\n👥 Katılımcı: {len(participants)}")
+    try:
+        await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, **(thread or {}))
+    except TelegramError as e:
+        logger.debug(f"Çekiliş sonucu gönderilemedi: {e}")
+    await send_log(chat_id, f"🏆 Çekiliş bitti: {', '.join(names) or 'kazanan yok'} | {chat_id}", ParseMode.HTML)
+    return text
+
+async def giveaway_end(update: Update, context):
+    """/cekilis_bitir [kazanan] — aktif çekilişi hemen bitirir."""
+    message = update.effective_message
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await message.reply_text("Önce /kanal ile seç!")
+        return
+    if not has_permission(chat_id, update.effective_user.id, 50):
+        await message.reply_text("Yetkin yok!")
+        return
+    if not _gw_row(chat_id):
+        await message.reply_text("Aktif çekiliş yok.")
+        return
+    n = max(1, min(GW_MAX_WINNERS, int(context.args[0]))) if context.args and context.args[0].isdigit() else None
+    await finish_giveaway(chat_id, n, thread_kw(message, chat_id))
+    if message.chat.type == 'private':
+        await message.reply_text("✅ Çekiliş bitirildi.")
+
+async def giveaway_job(context):
+    with get_db() as conn:
+        due = [r['chat_id'] for r in conn.execute(
+            "SELECT chat_id FROM giveaways WHERE ends_at IS NOT NULL AND ends_at <= ?", (time.time(),))]
+    for cid in due:
+        await finish_giveaway(cid)
+
+# ═══════════════════════════ GRAFİKLİ İSTATİSTİK ═══════════════════════════
+# Tek renk tonu (mavi), katılan/ayrılan için ikinci ton; açık zemin; ızgara ve eksenler geri planda.
+CHART_COLORS = {'surface': '#fcfcfb', 'ink': '#0b0b0b', 'ink2': '#52514e', 'grid': '#e4e3de',
+                'series': '#2a78d6', 'series2': '#eb6834'}
+
+def log_member_event(chat_id: str, user_id: int, kind: str):
+    with get_db() as conn:
+        conn.execute("INSERT INTO member_events (chat_id, user_id, kind, at) VALUES (?, ?, ?, ?)",
+                     (str(chat_id), user_id, kind, time.time()))
+        conn.commit()
+
+def _tr_day(ts: float) -> str:
+    return datetime.fromtimestamp(ts, TZ_TR).strftime('%d.%m')
+
+def stats_data(chat_id: str) -> dict:
+    now = time.time()
+    since30, since7 = now - 30 * 86400, now - 7 * 86400
+    days = [_tr_day(now - i * 86400) for i in range(29, -1, -1)]
+    daily = dict.fromkeys(days, 0)
+    hours = [0] * 24
+    joins, leaves = dict.fromkeys(days, 0), dict.fromkeys(days, 0)
+    with get_db() as conn:
+        for r in conn.execute("SELECT sent_at FROM message_stats WHERE chat_id = ? AND sent_at >= ?", (chat_id, since30)):
+            d = _tr_day(r['sent_at'])
+            if d in daily:
+                daily[d] += 1
+            hours[datetime.fromtimestamp(r['sent_at'], TZ_TR).hour] += 1
+        for r in conn.execute("SELECT kind, at FROM member_events WHERE chat_id = ? AND at >= ?", (chat_id, since30)):
+            d = _tr_day(r['at'])
+            target = joins if r['kind'] == 'join' else leaves
+            if d in target:
+                target[d] += 1
+        top = conn.execute("""SELECT user_id, MAX(first_name) AS name, COUNT(*) AS n FROM message_stats
+                              WHERE chat_id = ? AND sent_at >= ? GROUP BY user_id ORDER BY n DESC LIMIT 8""",
+                           (chat_id, since7)).fetchall()
+        active7 = conn.execute("SELECT COUNT(DISTINCT user_id) FROM message_stats WHERE chat_id = ? AND sent_at >= ?",
+                               (chat_id, since7)).fetchone()[0]
+    return {'days': days, 'daily': [daily[d] for d in days], 'hours': hours,
+            'joins': [joins[d] for d in days], 'leaves': [leaves[d] for d in days],
+            'top': [(re.sub(r'\s+', ' ', re.sub(r'[^\u0000-\uffff]', '', r['name'] or '')).strip()[:18] or str(r['user_id']), r['n'])
+                    for r in top],
+            'msgs7': sum(daily[d] for d in days[-7:]), 'msgs30': sum(daily.values()), 'active7': active7,
+            'joins30': sum(joins.values()), 'leaves30': sum(leaves.values())}
+
+def render_stats_chart(d: dict, title: str) -> bytes | None:
+    """2×2 küçük grafik: günlük mesaj (30 gün) · saatlere göre · katılan/ayrılan · en aktif 8 kişi (7 gün). PNG."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        from matplotlib.ticker import MaxNLocator
+    except Exception as e:
+        logger.debug(f"matplotlib yok, grafik atlanıyor: {e}")
+        return None
+    import io
+    c = CHART_COLORS
+    plt.rcParams.update({'font.family': 'DejaVu Sans', 'font.size': 9, 'text.color': c['ink'], 'axes.labelcolor': c['ink2'],
+                         'xtick.color': c['ink2'], 'ytick.color': c['ink2'], 'axes.edgecolor': c['grid']})
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7.5), dpi=110, facecolor=c['surface'])
+    fig.suptitle(title, fontsize=13, fontweight='bold', color=c['ink'], x=0.02, ha='left')
+
+    def style(ax, name):
+        ax.set_facecolor(c['surface'])
+        ax.set_title(name, loc='left', fontsize=10.5, color=c['ink'], pad=8)
+        for side in ('top', 'right', 'left'):
+            ax.spines[side].set_visible(False)
+        ax.grid(axis='y', color=c['grid'], linewidth=0.8)
+        ax.set_axisbelow(True)
+        ax.tick_params(length=0)
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))  # sayımlar: 0,5 mesaj olmaz
+
+    x = list(range(len(d['days'])))
+    ax = axes[0][0]
+    style(ax, "Günlük mesaj — son 30 gün")
+    ax.bar(x, d['daily'], width=0.75, color=c['series'], edgecolor=c['surface'], linewidth=1)
+    ax.set_xticks(x[::5] + [x[-1]])
+    ax.set_xticklabels([d['days'][i] for i in x[::5]] + [d['days'][-1]])
+    if max(d['daily']) > 0:
+        i = max(range(len(x)), key=lambda k: d['daily'][k])
+        ax.annotate(str(d['daily'][i]), (i, d['daily'][i]), textcoords='offset points', xytext=(0, 3), ha='center',
+                    fontsize=8, color=c['ink2'])
+
+    ax = axes[0][1]
+    style(ax, "Saatlere göre mesaj (Türkiye saati, 30 gün)")
+    ax.bar(range(24), d['hours'], width=0.75, color=c['series'], edgecolor=c['surface'], linewidth=1)
+    ax.set_xticks(range(0, 24, 3))
+    ax.set_xticklabels([f"{h:02d}" for h in range(0, 24, 3)])
+
+    ax = axes[1][0]
+    style(ax, "Katılan / ayrılan — son 30 gün")
+    w = 0.38
+    ax.bar([i - w / 2 for i in x], d['joins'], width=w, color=c['series'], label=f"Katılan ({sum(d['joins'])})")
+    ax.bar([i + w / 2 for i in x], d['leaves'], width=w, color=c['series2'], label=f"Ayrılan ({sum(d['leaves'])})")
+    ax.set_xticks(x[::5] + [x[-1]])
+    ax.set_xticklabels([d['days'][i] for i in x[::5]] + [d['days'][-1]])
+    ax.legend(frameon=False, loc='upper left', fontsize=8.5)
+
+    ax = axes[1][1]
+    style(ax, "En aktif üyeler — son 7 gün")
+    ax.grid(False)
+    ax.spines['bottom'].set_visible(False)
+    top = list(reversed(d['top']))
+    if top:
+        ax.barh(range(len(top)), [n for _, n in top], height=0.6, color=c['series'])
+        ax.set_yticks(range(len(top)))
+        ax.set_yticklabels([n for n, _ in top])
+        ax.set_xticks([])
+        for i, (_, n) in enumerate(top):
+            ax.annotate(str(n), (n, i), textcoords='offset points', xytext=(4, 0), va='center', fontsize=8, color=c['ink2'])
+    else:
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.text(0.5, 0.5, "Henüz veri yok", ha='center', va='center', color=c['ink2'], transform=ax.transAxes)
+    for a in axes.flat:
+        for lbl in a.get_yticklabels():
+            lbl.set_color(c['ink2'])
+    fig.tight_layout(rect=(0, 0, 1, 0.95), h_pad=2.5, w_pad=2)
+    buf = io.BytesIO()
+    fig.savefig(buf, format='png', facecolor=c['surface'])
+    plt.close(fig)
+    return buf.getvalue()
+
+async def stats(update: Update, context):
+    msg = update.effective_message
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile seç!")
+        return
+    if not has_permission(chat_id, update.effective_user.id, 50):
+        await msg.reply_text("Yetkin yok!")
+        return
+    channel = get_channel_settings(chat_id)
+    s = channel['stats']
+    d = stats_data(chat_id)
+    title = await _chat_title(chat_id)
+    text = (f"📊 <b>{html.escape(title)}</b>\n"
+            f"💬 Mesaj: 7 gün <b>{d['msgs7']}</b> · 30 gün <b>{d['msgs30']}</b> · aktif üye (7 gün): <b>{d['active7']}</b>\n"
+            f"👥 30 günde katılan <b>{d['joins30']}</b> · ayrılan <b>{d['leaves30']}</b>\n"
+            f"🛡 Toplam: 🚫 {s.get('bans', 0)} ban · 🔇 {s.get('mutes', 0)} susturma · 👢 {s.get('kicks', 0)} atma · "
+            f"🔁 {s.get('spams', 0)} spam · 🙋 {s.get('requests', 0)} istek")
+    png = await asyncio.to_thread(render_stats_chart, d, f"{title} — istatistik")
+    if png:
+        await msg.reply_photo(png, caption=text, parse_mode=ParseMode.HTML)
+    else:
+        await msg.reply_text(text, parse_mode=ParseMode.HTML)
 
 # ── Notlar (/save, /not, #isim) ──
 _NOTE_NAME = re.compile(r'^[\w\-]{1,32}$')
@@ -11809,6 +12471,9 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler(['kanalzorunlu', 'fsub', 'forcesub'], cmd_kanalzorunlu))
     app.add_handler(CallbackQueryHandler(fsub_callback, pattern=r'^fs\|'))
     app.add_handler(CommandHandler('afk', cmd_afk))
+    app.add_handler(CommandHandler('sicil', cmd_sicil))
+    app.add_handler(CommandHandler(['oylama', 'votemute'], cmd_oylama))
+    app.add_handler(CallbackQueryHandler(vote_callback, pattern=r'^vm\|'))
 
     app.add_handler(CommandHandler('stats', stats))
     app.add_handler(CommandHandler('invitestats', invite_stats))
@@ -11960,6 +12625,7 @@ def main():
     job_queue.run_repeating(clone_health_job, interval=600, first=300)
     job_queue.run_repeating(auto_delete_job, interval=20, first=20)
     job_queue.run_repeating(scheduled_msgs_job, interval=60, first=45)
+    job_queue.run_repeating(giveaway_job, interval=60, first=50)
     job_queue.run_repeating(spam_memory_cleanup, interval=3600, first=3600)
     job_queue.run_repeating(weekly_log_cleanup, interval=86400, first=3600)
     job_queue.run_daily(backup_job, time=dtime(4, 0, tzinfo=TZ_TR))
