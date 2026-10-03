@@ -11733,6 +11733,32 @@ def _panel_chats(kind: str) -> list:
             f"SELECT chat_id, title, chat_type FROM channels WHERE mybot(bot_id) AND chat_type IN {types} "
             "ORDER BY LOWER(COALESCE(title, chat_id))")]
 
+async def fill_missing_titles(chat_ids: list, limit: int = 5):
+    """Adı kayıtlı olmayan sohbetlerin adını Telegram'dan alıp kaydeder (_chat_title veritabanına yazar)."""
+    sem = asyncio.Semaphore(limit)
+
+    async def one(cid):
+        async with sem:
+            await _chat_title(cid)
+    await asyncio.gather(*(one(c) for c in chat_ids))
+
+async def fill_all_titles_job(context=None):
+    """Açılışta: eski kayıtların eksik grup/kanal adlarını arka planda doldurur."""
+    with get_db() as conn:
+        ids = [r[0] for r in conn.execute("SELECT chat_id FROM channels WHERE title IS NULL OR title = '' OR title = chat_id")]
+    if ids:
+        await fill_missing_titles(ids, limit=3)
+        logger.info(f"{len(ids)} sohbetin adı güncellendi")
+
+async def _panel_fill_page(kind: str, page: int):
+    items = _panel_chats(kind)
+    pages = max(1, (len(items) + PANEL_PAGE - 1) // PANEL_PAGE)
+    page = max(0, min(page, pages - 1))
+    missing = [it['chat_id'] for it in items[page * PANEL_PAGE:(page + 1) * PANEL_PAGE]
+               if not it['title'] or it['title'] == it['chat_id']]
+    if missing:
+        await fill_missing_titles(missing)
+
 def _panel_list(kind: str, page: int):
     items = _panel_chats(kind)
     pages = max(1, (len(items) + PANEL_PAGE - 1) // PANEL_PAGE)
@@ -11909,6 +11935,7 @@ async def panel_callback(update: Update, context):
 
     if action == 'ls':
         await query.answer()
+        await _panel_fill_page(parts[2], int(parts[3]))  # adı bilinmeyenler Telegram'dan alınır ve kaydedilir
         await show(*_panel_list(parts[2], int(parts[3])))
     elif action == 'info':
         await query.answer()
@@ -11933,6 +11960,7 @@ async def panel_callback(update: Update, context):
             return
         await query.answer("✅ Çıkıldı" + (" ve kayıt silindi" if mode == 'd' else ""))
         logger.info(f"Panelden sohbetten çıkıldı: {cid} (kayıt {'silindi' if mode == 'd' else 'saklandı'})")
+        await _panel_fill_page(kind, page)
         await show(*_panel_list(kind, page))
     elif action == 'clean':
         await query.answer("Taranıyor…")
@@ -13619,6 +13647,7 @@ def main():
     job_queue.run_repeating(web_sync_job, interval=5, first=5)
     job_queue.run_repeating(flush_writes_job, interval=WRITE_FLUSH_EVERY, first=WRITE_FLUSH_EVERY)
     job_queue.run_repeating(loop_lag_job, interval=10, first=10)
+    job_queue.run_once(fill_all_titles_job, 20)
     job_queue.run_repeating(spam_memory_cleanup, interval=3600, first=3600)
     job_queue.run_repeating(weekly_log_cleanup, interval=86400, first=3600)
     job_queue.run_daily(backup_job, time=dtime(4, 0, tzinfo=TZ_TR))
