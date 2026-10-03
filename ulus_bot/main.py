@@ -1580,6 +1580,7 @@ def _default_channel_settings():
         # /etiket: bir mesajda kaç kişi, isim/emoji, sadece son 7 günün aktifleri
         'tag_size': 5, 'tag_style': 'name', 'tag_active_only': False,
         'invite_enabled': True,
+        'edit_guard_scope': 'member',
         # Topluluk koruması: ortak kara liste (botun başka grubunda banlı) + CAS, isim takibi, oylamalı susturma
         'shared_blacklist': True, 'blacklist_action': 'mute', 'cas_enabled': False, 'name_track': True,
         'vote_mute': True, 'vote_needed': 5, 'vote_mute_minutes': 60,
@@ -2792,7 +2793,7 @@ async def edit_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     with get_db() as conn:
         row = conn.execute("SELECT text FROM msg_cache WHERE chat_id = ? AND message_id = ?",
                            (chat_id, msg.message_id)).fetchone()
-    if age <= limit_min * 60 or await is_exempt_message(chat_id, msg, channel):
+    if age <= limit_min * 60 or await _edit_guard_exempt(chat_id, msg, channel):
         with get_db() as conn:  # izin verilen düzenleme: sonraki karşılaştırma için son hâli sakla
             conn.execute("UPDATE msg_cache SET text = ? WHERE chat_id = ? AND message_id = ?",
                          (new_text[:4000], chat_id, msg.message_id))
@@ -2823,6 +2824,19 @@ async def edit_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 logger.debug(f"Düzenleme bildirimi gönderilemedi ({uid}): {e}")
     await send_log(chat_id, report, ParseMode.HTML)
     raise ApplicationHandlerStop
+
+async def _edit_guard_exempt(chat_id: str, msg, channel: dict) -> bool:
+    """Geç düzenleme korumasından muaf mı? Seçilen kapsama göre adminler / üst adminler de korumaya girer."""
+    if not await is_exempt_message(chat_id, msg, channel):
+        return False
+    user = msg.from_user
+    if not user or msg.sender_chat or getattr(msg, 'is_automatic_forward', False):
+        return True  # anonim admin, kanal ve bağlı kanal gönderileri
+    limit = EDIT_SCOPES.get(channel['settings'].get('edit_guard_scope'), EDIT_SCOPES['member'])[0]
+    lvl = user_level(chat_id, user.id)
+    if not lvl:
+        lvl = LVL_ADMIN  # bot rütbesi olmayan Telegram yöneticisi / muaf liste: admin sayılır
+    return lvl >= limit
 
 async def _edit_notify_targets(chat_id: str, channel: dict) -> list:
     """Grubun Telegram'daki kurucusu + botu gruba ekleyen kişi."""
@@ -5350,7 +5364,10 @@ async def _apply_input(kind: str, cid: str, channel: dict, msg, user):
 
 # ── Panel ekleri: uygunsuz medya, engelli medya listesi, düzenleme & rapor, grup ağı, kurtarma ──
 EXT_PAGES = {'bm', 'edit', 'net', 'rec', 'snapc'}
-EXT_OPS = {'mk', 'mo', 'bd', 'na', 'nr', 'nb', 'nc', 'ns', 'rd', 'sn', 'rg'}
+EXT_OPS = {'mk', 'mo', 'bd', 'na', 'nr', 'nb', 'nc', 'ns', 'rd', 'sn', 'rg', 'es'}
+# Geç düzenleme koruması kimlere uygulanır: bu seviyenin ALTINDAKİLER korumaya tabidir (kurucu her zaman muaf)
+EDIT_SCOPES = {'member': (LVL_ADMIN, "Sadece üyeler"), 'admin': (LVL_UST, "Üyeler + Adminler"),
+               'ust': (LVL_YARDIMCI, "Üyeler + Admin + Üst admin"), 'yardimci': (LVL_KURUCU, "Kurucu hariç herkes")}
 RICH_OPS = {'pv', 'wr', 'wm', 'zt', 'zp', 'zc', 'zd', 'ts', 'ba'}
 
 def _badmedia_rows(cid: str, s: dict, page_id: str) -> list:
@@ -5396,7 +5413,10 @@ async def _render_ext_page(cid: str, base: str, sub: str, channel: dict, title: 
                 "(bot, onların özelden /start yazmış olmasını ister).\n"
                 "• <b>Rapor</b>: üyeler bir mesaja yanıt verip <code>/report</code> veya <code>@admin</code> yazar; "
                 "yetkililere butonlu bildirim gider.")
+        scope = EDIT_SCOPES.get(s.get('edit_guard_scope'), EDIT_SCOPES['member'])[1]
+        text += f"\n\n👥 Kimlere uygulanır: <b>{scope}</b> (değiştirmek için butona dokun; sadece kurucu)"
         rows += [[toggle_btn("Geç düzenleme koruması", s.get('edit_guard'), f"s|{cid}|t|edit_guard|edit")],
+                 [ibtn(f"👥 Kimlere: {scope}", f"s|{cid}|es", BLUE)],
                  _num_row(cid, 'edit_guard_minutes', s, 'edit', "Süre"),
                  [toggle_btn("Kurucuya/ekleyene bildir", s.get('edit_notify', True), f"s|{cid}|t|edit_notify|edit")],
                  [toggle_btn("Rapor sistemi", s.get('reports_enabled', True), f"s|{cid}|t|reports_enabled|edit")],
@@ -5456,6 +5476,17 @@ async def _settings_change_ext(cid: str, channel: dict, op: str, args: list, que
     s = channel['settings']
     uid = query.from_user.id
     by = mention(query.from_user)
+    if op == 'es':
+        if not has_permission(cid, uid, LVL_KURUCU):
+            await query.answer("Bunu sadece grubun kurucusu değiştirebilir.", show_alert=True)
+            return None
+        keys = list(EDIT_SCOPES)
+        cur = s.get('edit_guard_scope') if s.get('edit_guard_scope') in EDIT_SCOPES else 'member'
+        s['edit_guard_scope'] = keys[(keys.index(cur) + 1) % len(keys)]
+        save_channel_settings(cid, channel)
+        label = EDIT_SCOPES[s['edit_guard_scope']][1]
+        await send_log(cid, f"✏️ Düzenleme koruması kapsamı: {label} | {by}", ParseMode.HTML)
+        return 'edit', f"Kimlere: {label}"
     if op in ('mk', 'mo'):
         if op == 'mk':
             ok = await media_lock(cid, int(s.get('media_lock_minutes', 30) or 30), f"panel: {query.from_user.first_name}")
@@ -12408,6 +12439,8 @@ def web_schema() -> list:
         {'id': 'edit', 'title': "✏️ Düzenleme ve rapor", 'fields': [
             _f('edit_guard', 'bool', "✏️ Geç düzenleme koruması",
                hint="Gönderildikten bir süre sonra düzenlenen mesaj silinir; eski ve yeni hâli kurucuya gider."),
+            _f('edit_guard_scope', 'select', "👥 Kimlere uygulanır", 'kurucu',
+               options=[[k, v[1]] for k, v in EDIT_SCOPES.items()], hint="Seçilenler dışındaki rütbeler muaf. Sadece kurucu değiştirir."),
             num('edit_guard_minutes', "Düzenleme süresi"),
             _f('edit_notify', 'bool', "📨 Kurucuya / ekleyene bildir"),
             _f('reports_enabled', 'bool', "🚩 Rapor sistemi (/report, @admin)")]},
