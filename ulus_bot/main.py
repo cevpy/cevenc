@@ -11217,9 +11217,18 @@ def web_api(path: str, body: dict):
     uid = user['id']
     if path == 'chats':
         chats = []
+        fetched = 0
         for c in _web_bot_chats(token):
             if has_permission(c['chat_id'], uid, 50):
-                chats.append({'id': c['chat_id'], 'title': c['title'] or c['chat_id']})
+                title = c['title']
+                if (not title or title == c['chat_id']) and fetched < 25:  # eski kayıt: adı Telegram'dan alınır, kaydedilir
+                    fetched += 1
+                    info = _tg_api(token, 'getChat', {'chat_id': c['chat_id']})
+                    title = (info or {}).get('title') or title
+                    if title and title != c['chat_id']:
+                        with get_db() as conn:
+                            conn.execute("UPDATE channels SET title = ? WHERE chat_id = ?", (title, c['chat_id']))
+                chats.append({'id': c['chat_id'], 'title': title or c['chat_id']})
         return 200, {'user': user.get('first_name') or '', 'brand': _web_brand(token), 'chats': chats}
     chat_id = str(body.get('chat') or '')
     if not re.fullmatch(r'-\d{5,20}', chat_id) or not get_channel_settings(chat_id):
