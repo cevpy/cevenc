@@ -15,6 +15,7 @@ from telegram.ext import (
     TypeHandler,
     JobQueue,
     PollHandler,
+    ExtBot,
 )
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, Bot, MessageEntity,
@@ -252,6 +253,465 @@ class _BotProxy:
 
 bot = _BotProxy()
 
+# ═══════════════════════════ ÇOK DİL (i18n) ═══════════════════════════
+# Kaynak dil Türkçe. Botun gönderdiği her metin (mesaj, açıklama, buton, açılır uyarı, komut menüsü) Telegram'a
+# gitmeden hemen önce hedefin diline çevrilir: grup/kanal → grubun dili (/setlang), özel sohbet → kişinin dili.
+# Katalog (dosyanın sonundaki I18N_* bölümleri) koddaki Türkçe metin satırlarından üretilir; ⟨0⟩ ⟨1⟩ değişken yerleridir,
+# değişkenlerin değeri (isim, sayı, kullanıcı metni) aynen korunur. Katalogda olmayan satır Türkçe kalır.
+# Yöneticinin yazdığı içerik (hoş geldin, kurallar, notlar, filtreler, duyurular) çevrilmez.
+LANG_LABELS = {'tr': "🇹🇷 Türkçe", 'en': "🇬🇧 English", 'ru': "🇷🇺 Русский", 'uk': "🇺🇦 Українська",
+               'az': "🇦🇿 Azərbaycanca", 'uz': "🇺🇿 Oʻzbekcha", 'kk': "🇰🇿 Қазақша", 'ar': "🇸🇦 العربية",
+               'fa': "🇮🇷 فارسی", 'es': "🇪🇸 Español", 'pt': "🇧🇷 Português", 'id': "🇮🇩 Indonesia",
+               'de': "🇩🇪 Deutsch", 'fr': "🇫🇷 Français", 'it': "🇮🇹 Italiano", 'hi': "🇮🇳 हिन्दी"}
+DEFAULT_LANG = 'tr'
+CMD_DEFAULT_LANG = 'en'   # Telegram uygulama dili desteklenmeyen kişiler komut menüsünü ve bot açıklamasını İngilizce görür
+_LANG_OVERRIDE: contextvars.ContextVar = contextvars.ContextVar('ulus_lang', default=None)
+_TR_SKIP: contextvars.ContextVar = contextvars.ContextVar('ulus_tr_skip', default=False)
+_user_lang_cache: dict = {}
+_cq_lang: dict = {}            # callback_query_id -> dil (açılır uyarılar için)
+_I18N_SRC: dict = {}           # kimlik -> Türkçe şablon satırı
+_I18N_TR: dict = {}            # dil -> {kimlik -> çeviri}
+_I18N_IDX: dict = {}           # eşleştirme dizini (ilk kullanımda kurulur)
+_tr_cache: dict = {}           # (dil, satır) -> çeviri
+_PH = re.compile(r'⟨(\d+)⟩')
+
+def _i18n_load():
+    """Dosyanın sonundaki katalog bölümlerini okur (içe aktarmada bir kez)."""
+    g = globals()
+    for line in (g.get('I18N_SRC') or '').split('\n'):
+        k, _, v = line.partition('\t')
+        if k and v:
+            _I18N_SRC[k] = v.replace('\\t', '\t')
+    for name, val in g.items():
+        if name.startswith('I18N_') and name != 'I18N_SRC' and isinstance(val, str) and len(name) <= 7:
+            lang = name[5:].lower()
+            d = {}
+            for line in val.split('\n'):
+                k, _, v = line.partition('\t')
+                if k in _I18N_SRC and v:
+                    d[k] = v.replace('\\t', '\t')
+            if d:
+                _I18N_TR[lang] = d
+
+def available_langs() -> dict:
+    return {k: v for k, v in LANG_LABELS.items() if k == DEFAULT_LANG or k in _I18N_TR}
+
+def _i18n_index():
+    """Şablonlardan tam eşleşme sözlüğü ve kalıp (regex) kovaları kurar. HTML kaçışlı hâller de eklenir."""
+    if _I18N_IDX:
+        return _I18N_IDX
+    exact, buckets, wild = {}, {}, []
+    for k, src in _I18N_SRC.items():
+        variants = {(src, False)}
+        esc = html.escape(src, quote=False)
+        if esc != src:
+            variants.add((esc, True))
+        for text, escaped in variants:
+            if not _PH.search(text):
+                exact.setdefault(text, (k, escaped))
+                continue
+            parts = _PH.split(text)          # [sabit, no, sabit, no, ...]
+            rx, order = '', []
+            for i, p in enumerate(parts):
+                if i % 2 == 0:
+                    rx += re.escape(p)
+                else:
+                    order.append(int(p))
+                    rx += '(.*?)' if i < len(parts) - 2 or parts[-1] else '(.*)'
+            static = ''.join(parts[0::2])
+            entry = (re.compile(rx, re.S), k, escaped, order, len(static))
+            if parts[0][:3].strip() and len(parts[0]) >= 3:
+                buckets.setdefault(('p', parts[0][:3]), []).append(entry)
+            elif len(parts[-1]) >= 3 and parts[-1][-3:].strip():
+                buckets.setdefault(('s', parts[-1][-3:]), []).append(entry)
+            elif re.search(r'[^\W\d_]{2,}', static):
+                wild.append(entry)
+    for v in buckets.values():
+        v.sort(key=lambda e: -e[4])
+    wild.sort(key=lambda e: -e[4])
+    _I18N_IDX.update(exact=exact, buckets=buckets, wild=wild)
+    return _I18N_IDX
+
+def _tr_dst(lang: str, k: str, escaped: bool) -> str | None:
+    t = _I18N_TR.get(lang, {}).get(k)
+    if t is None:
+        return None
+    return html.escape(t, quote=False) if escaped else t
+
+_DECOR_WRAP = re.compile(r'^((?:<(?:b|i|u|s|code|tg-spoiler|blockquote(?: expandable)?)>)+)(.*?)'
+                         r'((?:</(?:b|i|u|s|code|tg-spoiler|blockquote)>)*)$', re.S)
+_DECOR_CLOSE = re.compile(r'^(.*?)((?:</(?:b|i|u|s|code|tg-spoiler|blockquote)>)+)$', re.S)
+_DECOR_LEAD = re.compile(r'^([^\w<&{(\[/@#"\'«]+)(.+)$', re.S)
+_SEPS = (' · ', ' | ', ' — ', ' – ', ': ')
+_LETTERS = re.compile(r'[^\W\d_]{2,}')
+
+def _tr_core(s: str, lang: str, depth: int) -> str | None:
+    """Tam satır eşleşmesi (sabit metin ya da değişkenli kalıp). Bulunamazsa None."""
+    idx = _i18n_index()
+    hit = idx['exact'].get(s)
+    if hit:
+        return _tr_dst(lang, *hit)
+    cands = idx['buckets'].get(('p', s[:3]), []) + idx['buckets'].get(('s', s[-3:]), []) + idx['wild']
+    for rx, k, escaped, order, _ in cands:
+        m = rx.fullmatch(s)
+        if not m:
+            continue
+        dst = _tr_dst(lang, k, escaped)
+        if dst is None:
+            return None
+        vals = {}
+        for n, v in zip(order, m.groups()):
+            vals[n] = _tr_value(v, lang, depth + 1)
+        return _PH.sub(lambda mm: vals.get(int(mm.group(1)), mm.group(0)), dst)
+    return None
+
+def _tr_value(v: str, lang: str, depth: int) -> str:
+    """Kalıptaki değişkenin değeri: sadece bilinen etiketler çevrilir (isimler, sayılar, kullanıcı metni aynen kalır)."""
+    if depth > 3 or not v or not _LETTERS.search(v) or len(v) > 600:
+        return v
+    s = v.strip()
+    t = _tr_core(s, lang, depth) or _tr_decor(s, lang, depth, seps=False)
+    if t is None and ', ' in s:
+        parts = s.split(', ')
+        tp = [(_tr_core(p.strip(), lang, depth) or p) for p in parts]
+        t = ', '.join(tp) if tp != parts else None
+    if t is None:
+        return v
+    return v[:len(v) - len(v.lstrip())] + t + v[len(v.rstrip()):]
+
+def _tr_decor(s: str, lang: str, depth: int, seps: bool = True) -> str | None:
+    """Süslemeleri (kalın/alıntı etiketleri, baştaki emoji/madde işaretleri) ayırıp tekrar dener; ayraçlardan böler."""
+    m = _DECOR_WRAP.match(s)
+    if m and m.group(2).strip():
+        t = _tr_core(m.group(2).strip(), lang, depth) or _tr_decor(m.group(2).strip(), lang, depth, seps)
+        if t is not None:
+            return m.group(1) + t + m.group(3)
+    m = _DECOR_CLOSE.match(s)
+    if m and m.group(1).strip():
+        t = _tr_core(m.group(1).strip(), lang, depth) or _tr_decor(m.group(1).strip(), lang, depth, seps)
+        if t is not None:
+            return m.group(1)[:len(m.group(1)) - len(m.group(1).lstrip())] + t + m.group(2)
+    m = _DECOR_LEAD.match(s)
+    if m and _LETTERS.search(m.group(2)):
+        rest = m.group(2)
+        t = _tr_core(rest, lang, depth) or (_tr_decor(rest, lang, depth, seps) if rest != s else None)
+        if t is not None:
+            return m.group(1) + t
+    if seps:
+        for sep in _SEPS:
+            if sep in s:
+                parts = s.split(sep)
+                out = [(_tr_core(p.strip(), lang, depth) or _tr_decor(p.strip(), lang, depth, False) or p.strip())
+                       if _LETTERS.search(p) else p.strip() for p in parts]
+                if out != [p.strip() for p in parts]:
+                    return sep.join(out)
+    return None
+
+def tr_line(line: str, lang: str) -> str:
+    if not line or lang not in _I18N_TR or not _LETTERS.search(line):
+        return line
+    key = (lang, line)
+    if key in _tr_cache:
+        return _tr_cache[key]
+    s = line.strip()
+    t = _tr_core(s, lang, 0) or _tr_decor(s, lang, 0)
+    out = line if t is None else line[:len(line) - len(line.lstrip())] + t + line[len(line.rstrip()):]
+    if len(_tr_cache) > 20000:
+        _tr_cache.clear()
+    _tr_cache[key] = out
+    return out
+
+def tr_text(text: str, lang: str | None) -> str:
+    """Çok satırlı metni hedef dile çevirir (her satır ayrı eşleşir)."""
+    if not text or not lang or lang == DEFAULT_LANG or lang not in _I18N_TR:
+        return text
+    return '\n'.join(tr_line(ln, lang) for ln in text.split('\n'))
+
+def L(text: str, lang: str | None) -> str:
+    """Kod içinden açık çeviri (grafik etiketleri, web panel, açıklamalar)."""
+    return tr_text(text, lang)
+
+class lang_override:
+    """with lang_override('en'): ... — bu blokta gönderilenler bu dile çevrilir (log kanalı, komut menüsü)."""
+    def __init__(self, lang):
+        self.lang, self.tok = lang, None
+
+    def __enter__(self):
+        self.tok = _LANG_OVERRIDE.set(self.lang)
+        return self
+
+    def __exit__(self, *a):
+        _LANG_OVERRIDE.reset(self.tok)
+
+def user_lang_set(uid) -> str | None:
+    """Kişinin seçtiği dil (seçmediyse None)."""
+    try:
+        uid = int(uid)
+    except (TypeError, ValueError):
+        return None
+    if uid not in _user_lang_cache:
+        try:
+            with get_db() as conn:
+                r = conn.execute("SELECT lang FROM user_lang WHERE user_id = ?", (uid,)).fetchone()
+        except sqlite3.Error:
+            r = None
+        _user_lang_cache[uid] = r['lang'] if r else None
+        if len(_user_lang_cache) > 50000:
+            _user_lang_cache.clear()
+    return _user_lang_cache[uid]
+
+def user_lang(uid) -> str:
+    return user_lang_set(uid) or DEFAULT_LANG
+
+def set_user_lang(uid: int, lang: str):
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO user_lang (user_id, lang, at) VALUES (?, ?, ?)", (uid, lang, time.time()))
+    _user_lang_cache[uid] = lang
+
+def chat_lang(chat_id) -> str:
+    """Grup/kanal → grubun dili; özel sohbet → kişinin dili."""
+    try:
+        cid = int(chat_id)
+    except (TypeError, ValueError):
+        return DEFAULT_LANG
+    if cid < 0:
+        ch = get_channel_settings(str(cid))
+        return ((ch or {}).get('settings') or {}).get('lang') or DEFAULT_LANG
+    return user_lang(cid)
+
+_TR_SEND_KEYS = {'text': 4096, 'caption': 1024}
+
+def _tr_markup(markup, lang: str):
+    if isinstance(markup, InlineKeyboardMarkup):
+        rows, changed = [], False
+        for row in markup.inline_keyboard:
+            r2 = []
+            for b in row:
+                t = tr_line(b.text, lang)
+                if t != b.text:
+                    d = b.to_dict()
+                    d['text'], changed = t, True
+                    b = InlineKeyboardButton.de_json(d, None)
+                r2.append(b)
+            rows.append(r2)
+        return InlineKeyboardMarkup(rows) if changed else markup
+    if isinstance(markup, ReplyKeyboardMarkup):
+        d = markup.to_dict()
+        for row in d.get('keyboard', []):
+            for b in row:
+                if isinstance(b, dict) and b.get('text'):
+                    b['text'] = tr_line(b['text'], lang)
+        if d.get('input_field_placeholder'):
+            d['input_field_placeholder'] = tr_line(d['input_field_placeholder'], lang)[:64]
+        return ReplyKeyboardMarkup.de_json(d, None)
+    if isinstance(markup, ForceReply) and markup.input_field_placeholder:
+        return ForceReply(selective=markup.selective,
+                          input_field_placeholder=tr_line(markup.input_field_placeholder, lang)[:64])
+    return markup
+
+def _request_lang(endpoint: str, data: dict) -> str | None:
+    o = _LANG_OVERRIDE.get()
+    if o:
+        return o
+    if endpoint == 'answerCallbackQuery':
+        return _cq_lang.get(str(data.get('callback_query_id')))
+    if endpoint in ('setMyCommands', 'setMyDescription', 'setMyShortDescription'):
+        return data.get('language_code')
+    if 'chat_id' in data:
+        return chat_lang(data['chat_id'])
+    return None
+
+def i18n_request(endpoint: str, data: dict, lang: str) -> dict:
+    """Telegram'a gidecek isteğin metinlerini çevirir (yeni sözlük döner; çeviri yoksa aynısı)."""
+    if not lang or lang == DEFAULT_LANG or lang not in _I18N_TR or data.get('entities') or data.get('caption_entities'):
+        return data
+    new = dict(data)
+    if not _TR_SKIP.get():
+        for key, limit in _TR_SEND_KEYS.items():
+            if isinstance(new.get(key), str):
+                t = tr_text(new[key], lang)
+                if endpoint == 'answerCallbackQuery':
+                    t = t[:200]
+                if len(t) <= limit:
+                    new[key] = t
+    if new.get('reply_markup') is not None:
+        new['reply_markup'] = _tr_markup(new['reply_markup'], lang)
+    if endpoint == 'setMyCommands' and new.get('commands'):
+        new['commands'] = [BotCommand(c.command, tr_line(c.description, lang)[:256]) for c in new['commands']]
+    for key, limit in (('description', 512), ('short_description', 120)):
+        if isinstance(new.get(key), str):
+            new[key] = tr_text(new[key], lang)[:limit]
+    return new if any(new.get(k) is not data.get(k) for k in new) else data
+
+_ORIG_DO_POST = ExtBot._do_post
+
+async def _i18n_do_post(self, endpoint, data, *args, **kwargs):
+    try:
+        lang = _request_lang(endpoint, data)
+        new = i18n_request(endpoint, data, lang) if lang and lang != DEFAULT_LANG else data
+    except Exception as e:  # çeviri hiçbir zaman gönderimi engellemesin
+        logger.debug(f"Çeviri hatası ({endpoint}): {e}")
+        new = data
+    if new is data:
+        return await _ORIG_DO_POST(self, endpoint, data, *args, **kwargs)
+    try:
+        return await _ORIG_DO_POST(self, endpoint, new, *args, **kwargs)
+    except BadRequest as e:
+        low = str(e).lower()
+        if any(w in low for w in ("parse", "entit", "too long", "button", "tag")):
+            logger.warning(f"Çeviri gönderilemedi, Türkçe gönderiliyor ({endpoint}, {lang}): {e}")
+            return await _ORIG_DO_POST(self, endpoint, data, *args, **kwargs)
+        raise
+
+ExtBot._do_post = _i18n_do_post
+
+def note_callback_lang(update) -> None:
+    q = update.callback_query
+    if q is None:
+        return
+    m = q.message
+    chat = getattr(m, 'chat', None) if m is not None else None
+    _cq_lang[str(q.id)] = chat_lang(chat.id) if chat is not None else user_lang(q.from_user.id)
+    if len(_cq_lang) > 5000:
+        for k in list(_cq_lang)[:2500]:
+            _cq_lang.pop(k, None)
+
+# ── İngilizce komut adları (Türkçe adlar da çalışmaya devam eder) ──
+CMD_ALIASES = {
+    'kanal': 'select', 'kurulum': 'setup', 'etiket': 'tag', 'etiketdur': 'stoptag', 'etiketme': 'notag',
+    'cekilis': 'giveaway', 'cekilis_bitir': 'endgiveaway', 'duyuru': 'broadcast', 'duyurular': 'broadcasts',
+    'duyurudur': 'stopbroadcast', 'duyurusablon': 'templates', 'duyurukapat': 'unsubscribe', 'duyuruac': 'subscribe',
+    'davet': 'invite', 'davetler': 'invites', 'zamanla': 'schedule', 'zamanlar': 'schedules', 'sicil': 'record',
+    'kilit': 'lockdown', 'antiraid_ac': 'unlockdown', 'medyaengel': 'blockmedia', 'paketengel': 'blockpack',
+    'gmedyaengel': 'gblockmedia', 'medyakilit': 'lockmedia', 'medyaac': 'unlockmedia', 'notlar': 'notes',
+    'notsil': 'clear', 'not': 'get', 'yetkim': 'myrank', 'yetkiler': 'perms', 'grupbilgi': 'chatinfo',
+    'profil': 'profile', 'zar': 'dice', 'yazitura': 'coin', 'uyeetiketi': 'membertag', 'buyume': 'growth',
+    'bakim': 'maintenance', 'destek': 'support', 'itiraz': 'appeal', 'kurtar': 'recover', 'klon': 'clone',
+    'klonlar': 'clones', 'engelle': 'block', 'engelkaldir': 'unblock', 'gunluk': 'daily', 'haftalik': 'weekly',
+    'aylik': 'monthly', 'toplam': 'alltime', 'yedek': 'backup', 'gecmis': 'edits', 'denetim': 'audit', 'sil': 'del',
+    'yardimcikurucu': 'cofounder', 'basadmin': 'senioradmin', 'istekonayla': 'approveall', 'temizle': 'purge',
+    'yeniuye': 'newbie', 'linkizin': 'allowlink', 'captchasure': 'captchatime', 'kanalsettings': 'channelsettings',
+    'oylama': 'votemute', 'kanalzorunlu': 'forcesub', 'spamkoruma': 'antispam', 'veda': 'goodbye',
+    'setveda': 'setgoodbye', 'yenile': 'reload', 'rapor': 'report', 'dil': 'setlang',
+}
+ALIAS_TO_TR = {v: k for k, v in CMD_ALIASES.items()}
+
+def canon_cmd(msg) -> str:
+    """Mesajdaki komutun Türkçe (asıl) adı: /blockmedia → medyaengel"""
+    name = (getattr(msg, 'text', None) or '').split()[0].split('@')[0].lower().lstrip('/') if getattr(msg, 'text', None) else ''
+    return ALIAS_TO_TR.get(name, name)
+
+def add_command_aliases(app):
+    """Türkçe adlı komutlara İngilizce eş ad ekler (zaten başka bir komutun adıysa eklenmez)."""
+    used = {c for hs in app.handlers.values() for h in hs if isinstance(h, CommandHandler) for c in h.commands}
+    for hs in app.handlers.values():
+        for h in hs:
+            if not isinstance(h, CommandHandler):
+                continue
+            extra = {CMD_ALIASES[c] for c in h.commands if c in CMD_ALIASES} - used
+            if extra:
+                h.commands = frozenset(h.commands | extra)
+                used |= extra
+
+def menu_variants(text: str) -> set:
+    """Özel menü butonunun tüm dillerdeki hâli (kişi kendi dilindeki butona basar)."""
+    return {text} | {tr_line(text, lg) for lg in _I18N_TR}
+
+def menu_key(text: str) -> str | None:
+    for base in DM_MENU_TEXTS:
+        if text in menu_variants(base):
+            return base
+    return None
+
+# ── /setlang ──
+def lang_keyboard(target: str, current: str | None = None) -> InlineKeyboardMarkup:
+    """target: 'u' (kişinin kendi dili) ya da 'g|<grup>'"""
+    items = list(available_langs().items())
+    rows = []
+    for i in range(0, len(items), 2):
+        rows.append([ibtn(("✅ " if code == current else "") + label, f"lang|{target}|{code}", GREEN if code == current else None)
+                     for code, label in items[i:i + 2]])
+    return InlineKeyboardMarkup(rows)
+
+async def cmd_setlang(update: Update, context):
+    """/setlang [kod] — özelde kendi dilin, grupta grubun dili (yöneticiler)."""
+    msg = update.effective_message
+    chat, user = update.effective_chat, update.effective_user
+    langs = available_langs()
+    arg = (context.args[0].lower() if context.args else '')
+    if chat.type == 'private':
+        if arg in langs:
+            set_user_lang(user.id, arg)
+            await msg.reply_text(f"✅ Dil ayarlandı: {langs[arg]}", reply_markup=dm_menu_keyboard())
+            return
+        cur = user_lang(user.id)
+        await msg.reply_text(f"🌍 <b>Dil / Language</b>\nŞu an: {langs.get(cur, cur)}\n\nDilini seç:",
+                             parse_mode=ParseMode.HTML, reply_markup=lang_keyboard("u", cur))
+        return
+    cid = str(chat.id)
+    if not get_channel_settings(cid):
+        return
+    if not await require(update, cid, 'can_manage_settings'):
+        return
+    if arg in langs:
+        _set_chat_lang(cid, arg)
+        await msg.reply_text(f"✅ Grubun dili: {langs[arg]}")
+        return
+    cur = chat_lang(cid)
+    await msg.reply_text(f"🌍 <b>Grubun dili / Group language</b>\nŞu an: {langs.get(cur, cur)}\n\nBotun bu gruptaki dilini seç:",
+                         parse_mode=ParseMode.HTML, reply_markup=lang_keyboard(f"g|{cid}", cur))
+
+def _set_chat_lang(cid: str, lang: str):
+    ch = get_channel_settings(cid)
+    ch['settings']['lang'] = lang
+    save_channel_settings(cid, ch)
+
+async def lang_callback(update: Update, context):
+    """lang|u|kod — kendi dilin · lang|g|grup|kod — grubun dili"""
+    query = update.callback_query
+    parts = query.data.split('|')
+    langs = available_langs()
+    code = parts[-1]
+    if code == '?':
+        await query.answer()
+        await context.bot.send_message(query.from_user.id, "🌍 <b>Dil / Language</b>\nDilini seç:", parse_mode=ParseMode.HTML,
+                                       reply_markup=lang_keyboard("u", user_lang(query.from_user.id)))
+        return
+    if code not in langs:
+        await query.answer()
+        return
+    if parts[1] == 'u':
+        set_user_lang(query.from_user.id, code)
+        _cq_lang[str(query.id)] = code
+        await query.answer(f"✅ {langs[code]}")
+        with lang_override(code):
+            try:
+                await query.edit_message_text(f"✅ Dil ayarlandı: {langs[code]}")
+            except TelegramError:
+                pass
+            if query.message is not None and query.message.chat.type == 'private':
+                try:
+                    await context.bot.send_message(query.from_user.id, "Menü aşağıda 👇", reply_markup=dm_menu_keyboard())
+                except TelegramError:
+                    pass
+        return
+    cid = parts[2] if len(parts) > 3 else ''
+    if not get_channel_settings(cid) or not has_specific_permission(cid, query.from_user.id, 'can_manage_settings'):
+        await query.answer("Yetkin yok!", show_alert=True)
+        return
+    _set_chat_lang(cid, code)
+    _cq_lang[str(query.id)] = code
+    await query.answer(f"✅ {langs[code]}")
+    try:
+        await query.edit_message_text(f"✅ Grubun dili: {langs[code]}")
+    except TelegramError:
+        pass
+    await send_log(cid, f"🌍 Grubun dili: {langs[code]} | {mention(query.from_user)}", ParseMode.HTML)
+
+START_EN_HINT = ("\n\n🌍 <i>English: this bot protects Telegram groups and channels against spam, links, flood and raids. "
+                 "To use it in your language (English, Русский, العربية…) type /setlang</i>")
+
+
 class UlusJobQueue(JobQueue):
     """Zamanlanmış işler, kuyruğun ait olduğu botun adına çalışır (bir klonun güncellemesi sırasında
     kurulan zamanlayıcı yüzünden ana botun işleri klon bağlamına kaymasın)."""
@@ -280,6 +740,8 @@ async def bot_context_handler(update: Update, context):
     güncellemelerini (aynı grupta iki botumuz varsa çift işlem olmasın diye) yok sayar."""
     _ctx_bot.set(context.bot)
     PERF['updates'] += 1
+    if getattr(update, 'callback_query', None) is not None:
+        note_callback_lang(update)
     chat = update.effective_chat
     if chat and chat.type == 'private':
         note_private_user(context.bot.id, update)
@@ -928,6 +1390,7 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_botrem ON bot_removals(bot_id, at);
             CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+            CREATE TABLE IF NOT EXISTS user_lang (user_id INTEGER PRIMARY KEY, lang TEXT NOT NULL, at REAL);
             CREATE TABLE IF NOT EXISTS admin_actions (
                 chat_id TEXT NOT NULL,
                 user_id INTEGER NOT NULL,
@@ -1400,8 +1863,9 @@ async def send_log(chat_id: str, message: str, parse_mode: str | None = None, re
     log_id = channel.get('log_chat_id') if channel else None
     if log_id:
         try:
-            await safe_send_message(log_id, message, parse_mode=parse_mode, disable_web_page_preview=True,
-                                    reply_markup=reply_markup)
+            with lang_override(chat_lang(chat_id)):
+                await safe_send_message(log_id, message, parse_mode=parse_mode, disable_web_page_preview=True,
+                                        reply_markup=reply_markup)
         except Exception as e:
             logger.debug(f"Log gönderilemedi ({chat_id}): {e}")
 
@@ -1716,7 +2180,8 @@ async def handle_bot_added(update: Update, context):
         owner_id = update.message.from_user.id
         is_new = await _register_chat(chat_id, owner_id, update.message.chat.type)
         if is_new:
-            await update.message.reply_text("Bot eklendi ve kaydedildi! /help ile komutlari gorebilirsin.")
+            await update.message.reply_text("✅ Bot eklendi ve kaydedildi! Komutlar için /help, ayarlar için /settings.\n"
+                                            "🌍 Language / Dil: /setlang")
 
 async def resolve_user(chat_id, user_ref=None, replied_user=None):
     flush_writes()  # bekleyen toplu yazmalar okunmadan önce yazılır
@@ -2721,7 +3186,7 @@ async def check_media_locks(context: ContextTypes.DEFAULT_TYPE):
 async def cmd_medya_engel(update: Update, context):
     """/medyaengel (medyaya yanıt) — o medyayı bu grupta engeller; /paketengel sticker paketini; /gmedyaengel tüm gruplarda."""
     msg = update.effective_message
-    cmd = (msg.text or '').split()[0].split('@')[0].lower().lstrip('/')
+    cmd = canon_cmd(msg)
     chat_id = str(msg.chat_id)
     is_global = cmd == 'gmedyaengel'
     if is_global and update.effective_user.id != FOUNDER_ID:
@@ -2767,7 +3232,7 @@ async def cmd_medya_kilit(update: Update, context):
     if not chat_id or not get_channel_settings(chat_id):
         await msg.reply_text("Önce /kanal ile seç!")
         return
-    cmd = (msg.text or '').split()[0].split('@')[0].lower().lstrip('/')
+    cmd = canon_cmd(msg)
     if not await require(update, chat_id, 'can_manage_settings' if cmd == 'medyaac' else 'can_lock'):
         return
     if cmd == 'medyaac':
@@ -5073,7 +5538,8 @@ async def render_settings(cid: str, page: str = 'main'):
                 [ibtn("🧑‍⚖️ Topluluk koruması", f"s|{cid}|p|comm", BLUE)],
                 [ibtn("✏️ Düzenleme & Rapor", f"s|{cid}|p|edit", BLUE), ibtn("🧾 Log Kanalı", f"s|{cid}|p|log", BLUE)],
                 [ibtn("🌐 Grup Ağı", f"s|{cid}|p|net", BLUE), ibtn("🛟 Kurtarma", f"s|{cid}|p|rec", BLUE)],
-                [ibtn("👮 Admin denetimi", f"s|{cid}|p|audit", BLUE)],
+                [ibtn("👮 Admin denetimi", f"s|{cid}|p|audit", BLUE),
+                 ibtn(f"🌍 Dil: {available_langs().get(s.get('lang') or DEFAULT_LANG, '?')}", f"s|{cid}|p|lang", BLUE)],
                 [ibtn("✖️ Kapat", f"s|{cid}|x", RED)]]
     return text, InlineKeyboardMarkup(rows)
 
@@ -5275,7 +5741,7 @@ async def settings_input_handler(update: Update, context: ContextTypes.DEFAULT_T
     if msg.chat.type != 'private' and not (msg.reply_to_message and msg.reply_to_message.message_id == st['prompt_id']):
         return
     context.user_data.pop('await_input', None)
-    if msg.text and msg.text in DM_MENU_TEXTS:
+    if msg.text and menu_key(msg.text):
         return  # kullanıcı menüye bastı: giriş iptal, menü işleyicisi devam etsin
     try:
         await bot.delete_message(st['prompt_chat'], st['prompt_id'])
@@ -5403,8 +5869,8 @@ async def _apply_input(kind: str, cid: str, channel: dict, msg, user):
     return "Bilinmeyen işlem.", 'main'
 
 # ── Panel ekleri: uygunsuz medya, engelli medya listesi, düzenleme & rapor, grup ağı, kurtarma ──
-EXT_PAGES = {'bm', 'edit', 'net', 'rec', 'snapc', 'audit'}
-EXT_OPS = {'mk', 'mo', 'bd', 'na', 'nr', 'nb', 'nc', 'ns', 'rd', 'sn', 'rg', 'es'}
+EXT_PAGES = {'bm', 'edit', 'net', 'rec', 'snapc', 'audit', 'lang'}
+EXT_OPS = {'mk', 'mo', 'bd', 'na', 'nr', 'nb', 'nc', 'ns', 'rd', 'sn', 'rg', 'es', 'lg'}
 # Geç düzenleme koruması kimlere uygulanır: bu seviyenin ALTINDAKİLER korumaya tabidir (kurucu her zaman muaf)
 EDIT_SCOPES = {'member': (LVL_ADMIN, "Sadece üyeler"), 'admin': (LVL_UST, "Üyeler + Adminler"),
                'ust': (LVL_YARDIMCI, "Üyeler + Admin + Üst admin"), 'yardimci': (LVL_KURUCU, "Kurucu hariç herkes")}
@@ -5461,6 +5927,16 @@ async def _render_ext_page(cid: str, base: str, sub: str, channel: dict, title: 
                  [toggle_btn("Kurucuya/ekleyene bildir", s.get('edit_notify', True), f"s|{cid}|t|edit_notify|edit")],
                  [toggle_btn("Rapor sistemi", s.get('reports_enabled', True), f"s|{cid}|t|reports_enabled|edit")],
                  _back(cid)]
+    elif base == 'lang':
+        cur = s.get('lang') or DEFAULT_LANG
+        text = (f"🌍 <b>Dil / Language</b> — {title}\n\nBotun bu gruptaki mesajları, butonları ve uyarıları seçilen "
+                "dilde olur. Senin yazdığın hoş geldin, kurallar ve notlar değişmez.\n"
+                f"Şu an: <b>{available_langs().get(cur, cur)}</b>")
+        items = list(available_langs().items())
+        for i in range(0, len(items), 2):
+            rows.append([ibtn(("✅ " if code == cur else "") + label, f"s|{cid}|lg|{code}", GREEN if code == cur else None)
+                         for code, label in items[i:i + 2]])
+        rows.append(_back(cid))
     elif base == 'audit':
         with get_db() as conn:
             susp = conn.execute("SELECT COUNT(*) FROM admin_suspend WHERE chat_id = ?", (cid,)).fetchone()[0]
@@ -5532,6 +6008,14 @@ async def _settings_change_ext(cid: str, channel: dict, op: str, args: list, que
     s = channel['settings']
     uid = query.from_user.id
     by = mention(query.from_user)
+    if op == 'lg':
+        if not args or args[0] not in available_langs():
+            return 'lang', "Geçersiz dil"
+        s['lang'] = args[0]
+        save_channel_settings(cid, channel)
+        _cq_lang[str(query.id)] = args[0]
+        await send_log(cid, f"🌍 Grubun dili: {available_langs()[args[0]]} | {by}", ParseMode.HTML)
+        return 'lang', f"✅ {available_langs()[args[0]]}"
     if op == 'es':
         if not has_permission(cid, uid, LVL_KURUCU):
             await query.answer("Bunu sadece grubun kurucusu değiştirebilir.", show_alert=True)
@@ -6390,7 +6874,7 @@ async def cmd_duyurudur(update: Update, context):
 async def cmd_duyurukapat(update: Update, context):
     """Kişi: bu botun özel duyurularını kapatır (/duyuruac ile açar)."""
     uid, bid = update.effective_user.id, context.bot.id
-    off = 1 if (update.effective_message.text or '').lstrip('/').lower().startswith('duyurukapat') else 0
+    off = 1 if canon_cmd(update.effective_message) == 'duyurukapat' else 0
     _dy_mark_user(bid, uid, 0)
     with get_db() as conn:
         conn.execute("UPDATE bot_users SET optout = ? WHERE bot_id = ? AND user_id = ?", (off, bid, uid))
@@ -9491,7 +9975,7 @@ async def help_command(update: Update, context):
         [ibtn("⚙️ Ayarlar Paneli", "help_settings", BLUE)]
     ])
     await update.message.reply_text(
-        fold(admin_section) + "\n\n" + fold(user_section) + brand_footer(),
+        fold(admin_section) + "\n\n" + fold(user_section) + "\n\n🌍 Dil / Language: /setlang" + brand_footer(),
         reply_markup=keyboard, parse_mode=ParseMode.HTML
     )
 
@@ -9525,9 +10009,12 @@ def add_to_chat_markup(bot_username: str) -> InlineKeyboardMarkup:
 async def cmd_menu(update: Update, context):
     await update.message.reply_text("Menü aşağıda 👇", reply_markup=dm_menu_keyboard())
 
+def DM_MENU_ALL() -> set:
+    return set().union(*(menu_variants(t) for t in DM_MENU_TEXTS))
+
 async def dm_menu_handler(update: Update, context):
-    """Özel menü butonları (düz metin olarak gelir)."""
-    text = update.message.text
+    """Özel menü butonları (düz metin olarak gelir; kişinin dilindeki buton da tanınır)."""
+    text = menu_key(update.message.text) or update.message.text
     if text == MENU_HELP:
         await help_command(update, context)
         return
@@ -9571,6 +10058,7 @@ GROUP_USER_COMMANDS = [
     ("profil", "Profilin ve uyarıların"), ("top", "Aktiflik sıralaması"), ("info", "Kullanıcı istatistikleri"),
     ("grupbilgi", "Grup bilgisi"), ("id", "ID göster"), ("zar", "Zar at"), ("yazitura", "Yazı tura at"),
     ("report", "Yanıtladığın mesajı yetkililere bildir"), ("afk", "AFK ol"), ("etiketme", "Etiket listesinden çık"),
+    ("setlang", "Grubun dili / Language"),
     ("oylama", "Susturma oylaması (mesaja yanıt)"), ("davet", "Sana özel davet linki"), ("davetler", "Davet sıralaması"),
 ]
 GROUP_ADMIN_COMMANDS = [
@@ -9592,6 +10080,7 @@ PRIVATE_COMMANDS = [
     ("settings", "Seçili grubun ayarları"), ("itiraz", "Ban itirazı gönder"), ("help", "Yardım"), ("id", "ID göster"),
     ("kurtar", "Admin kurtarma (güvenilir kişiler)"), ("kurulum", "Seçili grup için hızlı kurulum"),
     ("webpanel", "Web panel (tüm ayarlar tek sayfada)"), ("duyurukapat", "Bot duyurularını kapat"),
+    ("setlang", "Dil / Language"),
     ("destek", "Yöneticiye yaz (destek hattı)"),
 ]
 CLONE_OWNER_COMMANDS = [
@@ -9608,25 +10097,42 @@ FOUNDER_COMMANDS = [("klonlar", "Klon botları yönet"), ("perf", "Performans ö
 ]
 
 async def setup_bot_profile(b):
-    """'/' menüsünde herkes kendi rolüne uygun komutları görür; bot profil açıklaması ayarlanır."""
-    def cmds(pairs):
-        return [BotCommand(c, d) for c, d in pairs]
+    """'/' menüsünde herkes kendi rolüne uygun komutları görür; bot profil açıklaması ayarlanır.
+    Her dil için ayrı: Telegram, kişinin uygulama diline göre gösterir (desteklenmeyen dillerde İngilizce).
+    Sadece içerik değişince gönderilir (her yeniden başlatmada onlarca istek atılmasın)."""
+    clone = current_clone()
+    owner = bot_owner_id()
+    name = brand()
+    footer = f"\n\n⚡ Main bot: @{MAIN_BOT.username}" if clone and MAIN_BOT else ""
+    short = f"{name} — grup ve kanal koruma botu: spam, link, flood, raid ve captcha."
+    desc = (f"🛡 {name} Security Bot\n\nGrubunu ve kanalını spam, link, flood, raid ve sahte hesaplara karşı korur. "
+            "Tüm ayarlar butonlu panelden yapılır.\n\nBaşlamak için /start" + footer)
+    extra = CLONE_OWNER_COMMANDS if clone else FOUNDER_COMMANDS
+    langs = list(available_langs())
+
+    def cmds(pairs, lang):
+        return [BotCommand(c if lang == 'tr' else CMD_ALIASES.get(c, c), d) for c, d in pairs]
     try:
-        await b.set_my_commands(cmds(GROUP_USER_COMMANDS), scope=BotCommandScopeAllGroupChats())
-        await b.set_my_commands(cmds(GROUP_ADMIN_COMMANDS + GROUP_USER_COMMANDS),
-                                scope=BotCommandScopeAllChatAdministrators())
-        await b.set_my_commands(cmds(PRIVATE_COMMANDS), scope=BotCommandScopeAllPrivateChats())
-        clone = current_clone()
-        owner = bot_owner_id()
-        if owner:
-            extra = CLONE_OWNER_COMMANDS if clone else FOUNDER_COMMANDS
-            await b.set_my_commands(cmds(PRIVATE_COMMANDS + extra), scope=BotCommandScopeChat(owner))
-        name = brand()
-        footer = f"\n\n⚡ Main bot: @{MAIN_BOT.username}" if clone and MAIN_BOT else ""
-        await b.set_my_short_description(f"{name} — grup ve kanal koruma botu: spam, link, flood, raid ve captcha."[:120])
-        await b.set_my_description(
-            (f"🛡 {name} Security Bot\n\nGrubunu ve kanalını spam, link, flood, raid ve sahte hesaplara karşı korur. "
-             "Tüm ayarlar butonlu panelden yapılır.\n\nBaşlamak için /start" + footer)[:512])
+        import hashlib
+        sig = hashlib.sha1(json.dumps([GROUP_USER_COMMANDS, GROUP_ADMIN_COMMANDS, PRIVATE_COMMANDS, extra, owner, short,
+                                       desc, langs, sorted(_I18N_SRC)[:5], len(_I18N_SRC),
+                                       {k: len(v) for k, v in _I18N_TR.items()}], ensure_ascii=False).encode()).hexdigest()
+        if kv_get(f"profile_sig:{b.id}") != sig:
+            for lang in [None] + langs:  # None: varsayılan (desteklenmeyen uygulama dilleri) → İngilizce
+                tl = lang or CMD_DEFAULT_LANG
+                with lang_override(tl):
+                    await b.set_my_commands(cmds(GROUP_USER_COMMANDS, tl), scope=BotCommandScopeAllGroupChats(),
+                                            language_code=lang)
+                    await b.set_my_commands(cmds(GROUP_ADMIN_COMMANDS + GROUP_USER_COMMANDS, tl),
+                                            scope=BotCommandScopeAllChatAdministrators(), language_code=lang)
+                    await b.set_my_commands(cmds(PRIVATE_COMMANDS, tl), scope=BotCommandScopeAllPrivateChats(),
+                                            language_code=lang)
+                    if owner:
+                        await b.set_my_commands(cmds(PRIVATE_COMMANDS + extra, tl), scope=BotCommandScopeChat(owner),
+                                                language_code=lang)
+                    await b.set_my_short_description(short[:120], language_code=lang)
+                    await b.set_my_description(desc[:512], language_code=lang)
+            kv_set(f"profile_sig:{b.id}", sig)
         if WEBAPP_URL:  # özel sohbetteki menü butonu web paneli açar
             await b.set_chat_menu_button(menu_button=MenuButtonWebApp("⚙️ Panel", WebAppInfo(WEBAPP_URL)))
     except Exception as e:
@@ -10182,7 +10688,10 @@ async def start(update: Update, context):
             body = (f"🛡 <b>{html.escape(brand())} Security Bot</b>\n\nGrup ve kanalların için spam, link, flood, raid ve "
                     "captcha koruması.\n\n1️⃣ Aşağıdaki butonla botu grubuna gerekli yetkilerle ekle.\n"
                     "2️⃣ Alttaki menüden grubunu seç, ⚙️ Ayarlar ile her şeyi butonlarla yönet.")
+        if not user_lang_set(update.effective_user.id):  # dil seçmemiş kişiye İngilizce kısa açıklama
+            body += START_EN_HINT
         markup = add_to_chat_markup(context.bot.username)
+        markup = InlineKeyboardMarkup(list(markup.inline_keyboard) + [[ibtn("🌍 Dil / Language", "lang|u|?", BLUE)]])
         if WEBAPP_URL:
             markup = InlineKeyboardMarkup(list(markup.inline_keyboard) + list(webpanel_markup().inline_keyboard))
         if c and c.get('support_link'):
@@ -10962,6 +11471,13 @@ async def send_rich(chat_id, rich: dict | None, *, reply_msg=None, users=(), tit
         text = "👇"
 
     async def _send(kind, payload, caption, mk, as_html=True):
+        tok = _TR_SKIP.set(not header)  # yöneticinin yazdığı içerik çevrilmez (başlıklı gönderimlerde başlık çevrilir)
+        try:
+            return await _send_inner(kind, payload, caption, mk, as_html)
+        finally:
+            _TR_SKIP.reset(tok)
+
+    async def _send_inner(kind, payload, caption, mk, as_html=True):
         kw = {'reply_markup': mk} if mk is not None else {}
         if silent:
             kw['disable_notification'] = True
@@ -11085,12 +11601,17 @@ async def show_rich_action(update: Update, context, aid: str) -> None:
 
 # ── Kayıtlı zengin mesajlar (ayarlarda) ──
 def welcome_rich(s: dict) -> dict:
-    return s.get('welcome_rich') or rich_from_plain(s.get('welcome_msg') or _default_channel_settings()['welcome_msg'])
+    if s.get('welcome_rich'):
+        return s['welcome_rich']
+    text = s.get('welcome_msg') or _default_channel_settings()['welcome_msg']
+    if text == _default_channel_settings()['welcome_msg']:
+        text = L(text, s.get('lang'))  # değiştirilmemiş varsayılan metin grubun dilinde
+    return rich_from_plain(text)
 
 GOODBYE_DEFAULT = "👋 {ad} aramızdan ayrıldı. Yolun açık olsun!"
 
 def goodbye_rich(s: dict) -> dict:
-    return s.get('goodbye_rich') or rich_from_plain(GOODBYE_DEFAULT)
+    return s.get('goodbye_rich') or rich_from_plain(L(GOODBYE_DEFAULT, s.get('lang')))
 
 def rules_rich(s: dict) -> dict | None:
     if s.get('rules_rich'):
@@ -12629,7 +13150,9 @@ def stats_data(chat_id: str) -> dict:
             'msgs7': sum(daily[d] for d in days[-7:]), 'msgs30': sum(daily.values()), 'active7': active7,
             'joins30': sum(joins.values()), 'leaves30': sum(leaves.values())}
 
-def render_stats_chart(d: dict, title: str) -> bytes | None:
+CHART_LANGS = {'tr', 'en', 'ru', 'uk', 'az', 'uz', 'kk', 'es', 'pt', 'id', 'de', 'fr', 'it'}  # yazı tipi bu alfabeleri çizer
+
+def render_stats_chart(d: dict, title: str, lang: str = DEFAULT_LANG) -> bytes | None:
     """2×2 küçük grafik: günlük mesaj (30 gün) · saatlere göre · katılan/ayrılan · en aktif 8 kişi (7 gün). PNG."""
     try:
         import matplotlib
@@ -12658,7 +13181,8 @@ def render_stats_chart(d: dict, title: str) -> bytes | None:
 
     x = list(range(len(d['days'])))
     ax = axes[0][0]
-    style(ax, "Günlük mesaj — son 30 gün")
+    lang = lang if lang in CHART_LANGS else 'en'
+    style(ax, L("Günlük mesaj — son 30 gün", lang))
     ax.bar(x, d['daily'], width=0.75, color=c['series'], edgecolor=c['surface'], linewidth=1)
     ax.set_xticks(x[::5] + [x[-1]])
     ax.set_xticklabels([d['days'][i] for i in x[::5]] + [d['days'][-1]])
@@ -12668,22 +13192,22 @@ def render_stats_chart(d: dict, title: str) -> bytes | None:
                     fontsize=8, color=c['ink2'])
 
     ax = axes[0][1]
-    style(ax, "Saatlere göre mesaj (Türkiye saati, 30 gün)")
+    style(ax, L("Saatlere göre mesaj (Türkiye saati, 30 gün)", lang))
     ax.bar(range(24), d['hours'], width=0.75, color=c['series'], edgecolor=c['surface'], linewidth=1)
     ax.set_xticks(range(0, 24, 3))
     ax.set_xticklabels([f"{h:02d}" for h in range(0, 24, 3)])
 
     ax = axes[1][0]
-    style(ax, "Katılan / ayrılan — son 30 gün")
+    style(ax, L("Katılan / ayrılan — son 30 gün", lang))
     w = 0.38
-    ax.bar([i - w / 2 for i in x], d['joins'], width=w, color=c['series'], label=f"Katılan ({sum(d['joins'])})")
-    ax.bar([i + w / 2 for i in x], d['leaves'], width=w, color=c['series2'], label=f"Ayrılan ({sum(d['leaves'])})")
+    ax.bar([i - w / 2 for i in x], d['joins'], width=w, color=c['series'], label=L(f"Katılan ({sum(d['joins'])})", lang))
+    ax.bar([i + w / 2 for i in x], d['leaves'], width=w, color=c['series2'], label=L(f"Ayrılan ({sum(d['leaves'])})", lang))
     ax.set_xticks(x[::5] + [x[-1]])
     ax.set_xticklabels([d['days'][i] for i in x[::5]] + [d['days'][-1]])
     ax.legend(frameon=False, loc='upper left', fontsize=8.5)
 
     ax = axes[1][1]
-    style(ax, "En aktif üyeler — son 7 gün")
+    style(ax, L("En aktif üyeler — son 7 gün", lang))
     ax.grid(False)
     ax.spines['bottom'].set_visible(False)
     top = list(reversed(d['top']))
@@ -12697,7 +13221,7 @@ def render_stats_chart(d: dict, title: str) -> bytes | None:
     else:
         ax.set_xticks([])
         ax.set_yticks([])
-        ax.text(0.5, 0.5, "Henüz veri yok", ha='center', va='center', color=c['ink2'], transform=ax.transAxes)
+        ax.text(0.5, 0.5, L("Henüz veri yok", lang), ha='center', va='center', color=c['ink2'], transform=ax.transAxes)
     for a in axes.flat:
         for lbl in a.get_yticklabels():
             lbl.set_color(c['ink2'])
@@ -12725,7 +13249,8 @@ async def stats(update: Update, context):
             f"👥 30 günde katılan <b>{d['joins30']}</b> · ayrılan <b>{d['leaves30']}</b>\n"
             f"🛡 Toplam: 🚫 {s.get('bans', 0)} ban · 🔇 {s.get('mutes', 0)} susturma · 👢 {s.get('kicks', 0)} atma · "
             f"🔁 {s.get('spams', 0)} spam · 🙋 {s.get('requests', 0)} istek")
-    png = await asyncio.to_thread(render_stats_chart, d, f"{title} — istatistik")
+    png = await asyncio.to_thread(render_stats_chart, d, L(f"{title} — istatistik", chat_lang(msg.chat_id)),
+                                  chat_lang(msg.chat_id))
     if png:
         await msg.reply_photo(png, caption=text, parse_mode=ParseMode.HTML)
     else:
@@ -12894,6 +13419,9 @@ def web_schema() -> list:
             _f('cas_enabled', 'bool', "🌐 CAS spam listesi"), _f('name_track', 'bool', "✏️ İsim değişikliği takibi"),
             _f('vote_mute', 'bool', "🗳 Oylamalı susturma"), num('vote_needed', "Gerekli oy"),
             num('vote_mute_minutes', "Oylama susturma süresi")]},
+        {'id': 'lang', 'title': "🌍 Dil / Language", 'fields': [
+            _f('lang', 'select', "Botun bu gruptaki dili", options=[[k, v] for k, v in available_langs().items()],
+               hint="Botun mesajları, butonları ve uyarıları bu dilde olur. Senin yazdığın içerik değişmez.")]},
         {'id': 'audit', 'title': "👮 Admin denetimi", 'fields': [
             _f('admin_audit', 'bool', "📋 Günlük admin özeti", 'kurucu',
                hint="Her akşam kim kaç ban, susturma, uyarı ve silme yaptı (kurucuya ve botu ekleyene)."),
@@ -13180,6 +13708,50 @@ def web_op(chat_id: str, uid: int, body: dict):
         return ("🗑 Engel kaldırıldı", None) if n else (None, "Bulunamadı")
     return None, "Bilinmeyen işlem"
 
+RTL_LANGS = {'ar', 'fa'}
+
+def web_ui_keys() -> list:
+    """Web panel sayfasındaki çevrilecek metinler: L("…") çağrıları ve RICH_HELP."""
+    keys = re.findall(r'L\("((?:[^"\\]|\\.)*)"', WEB_PAGE)
+    m = re.search(r'const RICH_HELP = "((?:[^"\\]|\\.)*)";', WEB_PAGE)
+    return list(dict.fromkeys(keys + ([m.group(1)] if m else [])))
+
+def web_ui(lang: str) -> dict:
+    if lang == DEFAULT_LANG or lang not in _I18N_TR:
+        return {}
+    out = {}
+    for k in web_ui_keys():
+        t = tr_line(k, lang)
+        if t != k:
+            out[k] = t
+    return out
+
+def _web_translate_payload(p: dict, lang: str) -> dict:
+    """Ayar şemasındaki başlık, etiket, açıklama ve seçenek adlarını kişinin diline çevirir (değerler değişmez)."""
+    if lang == DEFAULT_LANG or lang not in _I18N_TR:
+        return p
+    for sec in p.get('sections', []):
+        sec['title'] = L(sec['title'], lang)
+        for f in sec['fields']:
+            f['label'] = L(f['label'], lang)
+            if f.get('hint'):
+                f['hint'] = L(f['hint'], lang)
+            if f.get('options'):
+                f['options'] = [[o[0], L(str(o[1]), lang)] for o in f['options']]
+            if f.get('type') == 'rich' and isinstance(f.get('value'), dict) and f['value'].get('media'):
+                f['value']['media'] = L(f['value']['media'], lang)
+    x = p.get('extras')
+    if x:
+        x['night']['restrictions'] = [[k, L(lbl, lang), on] for k, lbl, on in x['night']['restrictions']]
+        for it in x['staff']:
+            it['role'] = L(it['role'], lang)
+        for it in x['sched']['items']:
+            it['every'] = L(it['every'], lang)
+        for it in x['blocked']['items']:
+            it['label'] = L(it['label'], lang)
+        x['sched']['intervals'] = [[v, L(lbl, lang)] for v, lbl in x['sched']['intervals']]
+    return p
+
 def web_settings_payload(chat_id: str, uid: int) -> dict:
     s = get_channel_settings(chat_id)['settings']
     sections = []
@@ -13192,8 +13764,9 @@ def web_settings_payload(chat_id: str, uid: int) -> dict:
         sections.append({'id': sec['id'], 'title': sec['title'], 'fields': fields})
     with get_db() as conn:
         row = conn.execute("SELECT title FROM channels WHERE chat_id = ?", (chat_id,)).fetchone()
-    return {'chat': chat_id, 'title': (row['title'] if row else None) or chat_id, 'sections': sections,
-            'fsub_channel': s.get('fsub_title'), 'extras': web_extras(chat_id, uid)}
+    return _web_translate_payload({'chat': chat_id, 'title': (row['title'] if row else None) or chat_id,
+                                   'sections': sections, 'fsub_channel': s.get('fsub_title'),
+                                   'extras': web_extras(chat_id, uid)}, user_lang(uid))
 
 def web_save(chat_id: str, uid: int, values: dict):
     """Panelden gelen değişiklikleri doğrulayıp kaydeder. Dönüş: (değişen etiketler, hatalar)."""
@@ -13259,8 +13832,8 @@ def _web_log(token: str, chat_id: str, user: dict, changed: list):
     log_id = channel.get('log_chat_id') if channel else None
     if log_id and changed:
         who = mention_html(user['id'], user.get('first_name') or str(user['id']))
-        _tg_api(token, 'sendMessage', {'chat_id': log_id, 'parse_mode': 'HTML',
-                                       'text': f"🖥 Web panelden değiştirildi: {html.escape(', '.join(changed))[:3000]} | {who}"})
+        text = f"🖥 Web panelden değiştirildi: {html.escape(', '.join(changed))[:3000]} | {who}"
+        _tg_api(token, 'sendMessage', {'chat_id': log_id, 'parse_mode': 'HTML', 'text': L(text, chat_lang(chat_id))})
 
 def _web_brand(token: str) -> str:
     bid = int(token.split(':')[0])
@@ -13289,30 +13862,41 @@ def web_api(path: str, body: dict):
                         with get_db() as conn:
                             conn.execute("UPDATE channels SET title = ? WHERE chat_id = ?", (title, c['chat_id']))
                 chats.append({'id': c['chat_id'], 'title': title or c['chat_id']})
-        return 200, {'user': user.get('first_name') or '', 'brand': _web_brand(token), 'chats': chats}
+        ul = user_lang(uid)
+        return 200, {'user': user.get('first_name') or '', 'brand': _web_brand(token), 'chats': chats, 'lang': ul,
+                     'rtl': ul in RTL_LANGS, 'ui': web_ui(ul), 'langs': [[k, v] for k, v in available_langs().items()]}
+    if path == 'setlang':
+        lang = str(body.get('lang') or '')
+        if lang not in available_langs():
+            return 400, {'error': "Geçersiz dil"}
+        set_user_lang(uid, lang)
+        return 200, {'ok': True}
+    ul = user_lang(uid)
     chat_id = str(body.get('chat') or '')
     if not re.fullmatch(r'-\d{5,20}', chat_id) or not get_channel_settings(chat_id):
-        return 404, {'error': "Grup bulunamadı"}
+        return 404, {'error': L("Grup bulunamadı", ul)}
     if not _web_chat_allowed(token, chat_id, uid):
-        return 403, {'error': "Bu grupta yönetici değilsin (ya da bot Telegram'a ulaşamadı)."}
+        return 403, {'error': L("Bu grupta yönetici değilsin (ya da bot Telegram'a ulaşamadı).", ul)}
     if path == 'settings':
         return 200, web_settings_payload(chat_id, uid)
     if path == 'save':
         if maintenance_on():
-            return 503, {'error': "Bot bakımda, biraz sonra tekrar dene."}
+            return 503, {'error': L("Bot bakımda, biraz sonra tekrar dene.", ul)}
         changed, errors = web_save(chat_id, uid, body.get('values') or {})
         if changed:
             _web_log(token, chat_id, user, changed)
-        return 200, {'changed': changed, 'errors': errors, 'settings': web_settings_payload(chat_id, uid)}
+        return 200, {'changed': [L(c, ul) for c in changed], 'errors': {k: L(v, ul) for k, v in errors.items()},
+                     'settings': web_settings_payload(chat_id, uid)}
     if path == 'op':
         if maintenance_on():
-            return 503, {'error': "Bot bakımda, biraz sonra tekrar dene."}
+            return 503, {'error': L("Bot bakımda, biraz sonra tekrar dene.", ul)}
         msg, err = web_op(chat_id, uid, body)
         if msg:
             with get_db() as conn:
                 conn.execute("INSERT OR REPLACE INTO settings_dirty (chat_id, at) VALUES (?, ?)", (chat_id, time.time()))
             _web_log(token, chat_id, user, [msg])
-        return 200, {'ok': msg, 'error': err, 'extras': web_extras(chat_id, uid)}
+        extras = _web_translate_payload({'extras': web_extras(chat_id, uid)}, ul)['extras']
+        return 200, {'ok': L(msg, ul) if msg else msg, 'error': L(err, ul) if err else err, 'extras': extras}
     return 404, {'error': "Bilinmeyen işlem"}
 
 def webapp(environ, start_response):
@@ -13475,6 +14059,7 @@ input[type=text], input[type=time] { font: inherit; color: var(--text); backgrou
     <h1 id="title">⚙️ Panel</h1>
     <div class="sub" id="sub">Yükleniyor…</div>
     <select class="picker" id="picker" hidden aria-label="Grup seç"></select>
+    <select class="picker" id="langPick" hidden aria-label="Language"></select>
   </header>
   <div id="stats"></div>
   <div id="content"></div>
@@ -13489,6 +14074,11 @@ const initData = tg ? tg.initData : "";
 const base = location.pathname.replace(/\/+$/, "") + "/";
 const $ = (id) => document.getElementById(id);
 let state = { chat: null, fields: {}, changes: {} };
+const UI = {};
+function L(s) {  // çeviri: sunucu kişinin dilindeki karşılıkları gönderir; ⟨0⟩ ⟨1⟩ değişken yerleri
+  const args = Array.prototype.slice.call(arguments, 1);
+  return (UI[s] || s).replace(/⟨(\d+)⟩/g, (m, i) => (args[+i] !== undefined ? String(args[+i]) : m));
+}
 
 if (tg) { tg.ready(); tg.expand(); }
 
@@ -13501,8 +14091,8 @@ async function api(path, extra) {
   const r = await fetch(base + "api/" + path, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(Object.assign({ initData: initData }, extra || {})) });
   let data = {};
-  try { data = await r.json(); } catch (e) { data = { error: "Sunucuya ulaşılamadı" }; }
-  if (!r.ok) throw new Error(data.error || ("Hata " + r.status));
+  try { data = await r.json(); } catch (e) { data = { error: L("Sunucuya ulaşılamadı") }; }
+  if (!r.ok) throw new Error(data.error || L("Hata ⟨0⟩", r.status));
   return data;
 }
 
@@ -13519,7 +14109,7 @@ function el(tag, attrs, children) {
 
 function setDirty() {
   const n = Object.keys(state.changes).length;
-  const label = n ? "Kaydet (" + n + ")" : "Kaydet";
+  const label = n ? L("Kaydet (⟨0⟩)", n) : L("Kaydet");
   if (tg && tg.MainButton) {
     tg.MainButton.setText(label);
     n ? tg.MainButton.show() : tg.MainButton.hide();
@@ -13574,14 +14164,12 @@ function fieldRow(f) {
   if (v.media) {
     const cb = el("input", { type: "checkbox" }); cb.disabled = !f.editable;
     cb.addEventListener("change", () => { removeMedia = cb.checked; send(); });
-    row.appendChild(el("label", { cls: "media" }, [cb, el("span", { text: "🖼 " + v.media + " ekli — kaldırmak için işaretle" })]));
+    row.appendChild(el("label", { cls: "media" }, [cb, el("span", { text: L("🖼 ⟨0⟩ ekli — kaldırmak için işaretle", v.media) })]));
   }
   return row;
 }
 
-const RICH_HELP = "Butonlar: her satıra  Etiket - https://link  (yan yana: &&) · Kurallar - rules · Bilgi - popup:metin · " +
-  "Değişkenler: {kullanıcı} {ad} {grup} {uye_sayisi} · Rastgele mesaj: araya tek başına %%% satırı · " +
-  "Kalın/italik için <b> <i> etiketleri. Medyayı bota /setwelcome ile ekle.";
+const RICH_HELP = "Butonlar: her satıra  Etiket - https://link  (yan yana: &&) · Kurallar - rules · Bilgi - popup:metin · Değişkenler: {kullanıcı} {ad} {grup} {uye_sayisi} · Rastgele mesaj: araya tek başına %%% satırı · Kalın/italik için <b> <i> etiketleri. Medyayı bota /setwelcome ile ekle.";
 
 function render(data) {
   state.fields = {}; state.changes = {}; setDirty();
@@ -13591,8 +14179,8 @@ function render(data) {
     const d = el("details", { cls: "sec" }); if (i === 0) d.open = true;
     d.appendChild(el("summary", { text: sec.title }));
     sec.fields.forEach((f) => { state.fields[f.key] = f; d.appendChild(fieldRow(f)); });
-    if (sec.id === "welcome") d.appendChild(el("div", { cls: "help", text: RICH_HELP }));
-    if (sec.id === "tag" && data.fsub_channel) d.appendChild(el("div", { cls: "help", text: "Zorunlu kanal: " + data.fsub_channel }));
+    if (sec.id === "welcome") d.appendChild(el("div", { cls: "help", text: L(RICH_HELP) }));
+    if (sec.id === "tag" && data.fsub_channel) d.appendChild(el("div", { cls: "help", text: L("Zorunlu kanal: ⟨0⟩", data.fsub_channel) }));
     c.appendChild(d);
   });
   if (data.extras) renderExtras(data.extras);
@@ -13609,7 +14197,7 @@ async function op(payload, okText) {
   try {
     const r = await api("op", Object.assign({ chat: state.chat }, payload));
     if (r.extras) renderExtras(r.extras);
-    toast(r.error ? "⚠️ " + r.error : (r.ok || okText || "✅ Tamam"));
+    toast(r.error ? "⚠️ " + r.error : (r.ok || okText || L("✅ Tamam")));
     if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(r.error ? "warning" : "success");
     return !r.error;
   } catch (e) { toast("❌ " + e.message); return false; }
@@ -13629,14 +14217,14 @@ function itemRow(main, sub, actions) {
 }
 
 function delBtn(label, payload, editable) {
-  const b = el("button", { cls: "btn ghost", type: "button", "aria-label": "Sil", text: "🗑" });
+  const b = el("button", { cls: "btn ghost", type: "button", "aria-label": L("Sil"), text: "🗑" });
   b.disabled = !editable;
-  b.addEventListener("click", async () => { if (await ask(label + " silinsin mi?")) op(payload); });
+  b.addEventListener("click", async () => { if (await ask(L("⟨0⟩ silinsin mi?", label))) op(payload); });
   return b;
 }
 
 function switchEl(checked, disabled, onChange, label) {
-  const input = el("input", { type: "checkbox", role: "switch", "aria-label": label || "Aç/kapat" });
+  const input = el("input", { type: "checkbox", role: "switch", "aria-label": label || L("Aç/kapat") });
   input.checked = !!checked; input.disabled = !!disabled;
   input.addEventListener("change", () => onChange(input.checked, input));
   return el("label", { cls: "sw" }, [input, el("span")]);
@@ -13645,27 +14233,27 @@ function switchEl(checked, disabled, onChange, label) {
 function renderStats(x) {
   const box = $("stats"); box.innerHTML = "";
   const st = x.stats || {};
-  const tiles = [["Mesaj (7 gün)", st.msgs], ["Aktif kişi", st.active], ["Katılan (7 gün)", st.joins],
-                 ["Uyarılı", st.warns], ["Banlı", st.bans]];
+  const tiles = [[L("Mesaj (7 gün)"), st.msgs], [L("Aktif kişi"), st.active], [L("Katılan (7 gün)"), st.joins],
+                 [L("Uyarılı"), st.warns], [L("Banlı"), st.bans]];
   const g = el("div", { cls: "stats" });
   tiles.forEach(([k, v]) => g.appendChild(el("div", { cls: "stat" }, [el("b", { text: String(v || 0) }), el("span", { text: k })])));
   box.appendChild(g);
-  box.appendChild(el("div", { cls: "sub", text: "📋 Log kanalı: " + (x.log || "ayarlı değil (botta /setlog)") }));
+  box.appendChild(el("div", { cls: "sub", text: L("📋 Log kanalı: ⟨0⟩", x.log || L("ayarlı değil (botta /setlog)")) }));
 }
 
 function renderExtras(x) {
   renderStats(x);
   const c = $("extras"); c.innerHTML = "";
   // 🌙 Gece modu
-  const n = x.night, nd = sec("🌙 Gece modu" + (n.enabled ? (n.active ? " · şu an aktif" : " · açık") : ""));
+  const n = x.night, nd = sec(L("🌙 Gece modu") + (n.enabled ? (n.active ? L(" · şu an aktif") : L(" · açık")) : ""));
   let nEnabled = n.enabled;
   nd.appendChild(el("label", { cls: "row" + (n.editable ? "" : " ro") }, [
-    el("div", { cls: "lbl" }, [el("div", { text: "Gece modu" }), el("div", { cls: "hint", text: "Seçili izinler bu saatlerde kapanır, bitince eski izinler geri gelir (UTC+3)." })]),
-    switchEl(n.enabled, !n.editable, (v) => { nEnabled = v; }, "Gece modu")]));
-  const st = el("input", { type: "time", value: n.start, "aria-label": "Başlangıç" }), en = el("input", { type: "time", value: n.end, "aria-label": "Bitiş" });
+    el("div", { cls: "lbl" }, [el("div", { text: L("Gece modu") }), el("div", { cls: "hint", text: L("Seçili izinler bu saatlerde kapanır, bitince eski izinler geri gelir (UTC+3).") })]),
+    switchEl(n.enabled, !n.editable, (v) => { nEnabled = v; }, L("Gece modu"))]));
+  const st = el("input", { type: "time", value: n.start, "aria-label": L("Başlangıç") }), en = el("input", { type: "time", value: n.end, "aria-label": L("Bitiş") });
   st.disabled = en.disabled = !n.editable;
-  nd.appendChild(el("div", { cls: "row" }, [el("div", { cls: "lbl", text: "Başlangıç" }), st]));
-  nd.appendChild(el("div", { cls: "row" }, [el("div", { cls: "lbl", text: "Bitiş" }), en]));
+  nd.appendChild(el("div", { cls: "row" }, [el("div", { cls: "lbl", text: L("Başlangıç") }), st]));
+  nd.appendChild(el("div", { cls: "row" }, [el("div", { cls: "lbl", text: L("Bitiş") }), en]));
   const chips = el("div", { cls: "chips" }), want = {};
   n.restrictions.forEach(([k, lbl, on]) => {
     want[k] = on;
@@ -13673,70 +14261,70 @@ function renderExtras(x) {
     cb.addEventListener("change", () => { want[k] = cb.checked; });
     chips.appendChild(el("label", { cls: "chip" }, [cb, el("span", { text: "🚫 " + lbl })]));
   });
-  nd.appendChild(el("div", { cls: "help", text: "Kapatılacaklar:" }));
+  nd.appendChild(el("div", { cls: "help", text: L("Kapatılacaklar:") }));
   nd.appendChild(chips);
-  const nb = el("button", { cls: "btn", type: "button", text: "Gece modunu kaydet" }); nb.disabled = !n.editable;
+  const nb = el("button", { cls: "btn", type: "button", text: L("Gece modunu kaydet") }); nb.disabled = !n.editable;
   nb.addEventListener("click", () => op({ op: "night", enabled: nEnabled, start: st.value, end: en.value, restrictions: want }));
   nd.appendChild(el("div", { cls: "form" }, [nb]));
   c.appendChild(nd);
   // 📝 Notlar
-  const no = x.notes, nod = sec("📝 Notlar (" + no.items.length + ")");
+  const no = x.notes, nod = sec(L("📝 Notlar (⟨0⟩)", no.items.length));
   no.items.forEach((it) => nod.appendChild(itemRow("#" + it.name, it.preview, [delBtn("#" + it.name, { op: "note_del", name: it.name }, no.editable)])));
-  if (!no.items.length) nod.appendChild(el("div", { cls: "help", text: "Henüz not yok. Üyeler #isim yazınca not gönderilir." }));
+  if (!no.items.length) nod.appendChild(el("div", { cls: "help", text: L("Henüz not yok. Üyeler #isim yazınca not gönderilir.") }));
   if (no.editable) {
-    const nm = el("input", { type: "text", placeholder: "Not adı (örn. kurallar)", maxlength: "32" });
-    const tx = el("textarea", { placeholder: "Not içeriği (biçim: <b>kalın</b>, butonlar: Etiket - https://link)" });
-    const b = el("button", { cls: "btn", type: "button", text: "➕ Not ekle" });
+    const nm = el("input", { type: "text", placeholder: L("Not adı (örn. kurallar)"), maxlength: "32" });
+    const tx = el("textarea", { placeholder: L("Not içeriği (biçim: <b>kalın</b>, butonlar: Etiket - https://link)") });
+    const b = el("button", { cls: "btn", type: "button", text: L("➕ Not ekle") });
     b.addEventListener("click", async () => { if (await op({ op: "note_add", name: nm.value, text: tx.value })) { nm.value = ""; tx.value = ""; } });
     nod.appendChild(el("div", { cls: "form" }, [nm, tx, b]));
   }
   c.appendChild(nod);
   // 🧩 Filtreler
-  const fl = x.filters, fd = sec("🧩 Filtreler / otomatik yanıt (" + fl.items.length + "/" + fl.limit + ")");
-  fl.items.forEach((it) => fd.appendChild(itemRow((it.contains ? "💬 içinde: " : "💬 ") + it.trigger, it.preview,
+  const fl = x.filters, fd = sec(L("🧩 Filtreler / otomatik yanıt (⟨0⟩/⟨1⟩)", fl.items.length, fl.limit));
+  fl.items.forEach((it) => fd.appendChild(itemRow((it.contains ? L("💬 içinde: ⟨0⟩", it.trigger) : "💬 " + it.trigger), it.preview,
     [delBtn(it.trigger, { op: "filter_del", key: it.key }, fl.editable)])));
-  if (!fl.items.length) fd.appendChild(el("div", { cls: "help", text: "Henüz filtre yok." }));
+  if (!fl.items.length) fd.appendChild(el("div", { cls: "help", text: L("Henüz filtre yok.") }));
   if (fl.editable) {
-    const tr = el("input", { type: "text", placeholder: "Tetikleyici (içinde geçsin: *kelime*)", maxlength: "100" });
-    const tx = el("textarea", { placeholder: "Cevap ({kullanıcı} {ad} {grup} değişkenleri, buton satırları)" });
-    const b = el("button", { cls: "btn", type: "button", text: "➕ Filtre ekle" });
+    const tr = el("input", { type: "text", placeholder: L("Tetikleyici (içinde geçsin: *kelime*)"), maxlength: "100" });
+    const tx = el("textarea", { placeholder: L("Cevap ({kullanıcı} {ad} {grup} değişkenleri, buton satırları)") });
+    const b = el("button", { cls: "btn", type: "button", text: L("➕ Filtre ekle") });
     b.addEventListener("click", async () => { if (await op({ op: "filter_add", trigger: tr.value, text: tx.value })) { tr.value = ""; tx.value = ""; } });
     fd.appendChild(el("div", { cls: "form" }, [tr, tx, b]));
-    fd.appendChild(el("div", { cls: "help", text: "Medyalı (sticker/foto) cevap için grupta medyaya yanıt verip /filter kullan." }));
+    fd.appendChild(el("div", { cls: "help", text: L("Medyalı (sticker/foto) cevap için grupta medyaya yanıt verip /filter kullan.") }));
   }
   c.appendChild(fd);
   // ⏰ Zamanlanmış mesajlar
-  const sc = x.sched, sd = sec("⏰ Zamanlanmış mesajlar (" + sc.items.length + ")");
-  sc.items.forEach((it) => sd.appendChild(itemRow(it.preview, "Her " + it.every + " · sıradaki: " + it.next,
-    [switchEl(it.enabled, !sc.editable, () => op({ op: "sched_toggle", id: it.id }), "Açık/kapalı"),
-     delBtn("Bu zamanlanmış mesaj", { op: "sched_del", id: it.id }, sc.editable)])));
-  if (!sc.items.length) sd.appendChild(el("div", { cls: "help", text: "Henüz zamanlanmış mesaj yok." }));
+  const sc = x.sched, sd = sec(L("⏰ Zamanlanmış mesajlar (⟨0⟩)", sc.items.length));
+  sc.items.forEach((it) => sd.appendChild(itemRow(it.preview, L("Her ⟨0⟩ · sıradaki: ⟨1⟩", it.every, it.next),
+    [switchEl(it.enabled, !sc.editable, () => op({ op: "sched_toggle", id: it.id }), L("Açık/kapalı")),
+     delBtn(L("Bu zamanlanmış mesaj"), { op: "sched_del", id: it.id }, sc.editable)])));
+  if (!sc.items.length) sd.appendChild(el("div", { cls: "help", text: L("Henüz zamanlanmış mesaj yok.") }));
   if (sc.editable) {
-    const tx = el("textarea", { placeholder: "Mesaj (buton satırları ve %%% ile rastgele seçenek desteklenir)" });
-    const iv = el("select", { "aria-label": "Aralık" });
+    const tx = el("textarea", { placeholder: L("Mesaj (buton satırları ve %%% ile rastgele seçenek desteklenir)") });
+    const iv = el("select", { "aria-label": L("Aralık") });
     sc.intervals.forEach(([v, l]) => iv.appendChild(el("option", { value: String(v), text: l })));
     iv.value = "21600";
-    const b = el("button", { cls: "btn", type: "button", text: "➕ Zamanlanmış mesaj ekle" });
+    const b = el("button", { cls: "btn", type: "button", text: L("➕ Zamanlanmış mesaj ekle") });
     b.addEventListener("click", async () => { if (await op({ op: "sched_add", text: tx.value, interval: iv.value })) tx.value = ""; });
     sd.appendChild(el("div", { cls: "form" }, [tx, iv, b]));
   }
   c.appendChild(sd);
   // 🚫 Engelli medya
-  const bm = x.blocked, bd = sec("🚫 Engelli medya (" + bm.items.length + ")");
-  bm.items.forEach((it) => bd.appendChild(itemRow(it.label, null, [delBtn("Bu engel", { op: "blocked_del", id: it.id }, bm.editable)])));
-  bd.appendChild(el("div", { cls: "help", text: "Eklemek için grupta medyaya yanıt verip /medyaengel, sticker paketi için /paketengel yaz." }));
+  const bm = x.blocked, bd = sec(L("🚫 Engelli medya (⟨0⟩)", bm.items.length));
+  bm.items.forEach((it) => bd.appendChild(itemRow(it.label, null, [delBtn(L("Bu engel"), { op: "blocked_del", id: it.id }, bm.editable)])));
+  bd.appendChild(el("div", { cls: "help", text: L("Eklemek için grupta medyaya yanıt verip /medyaengel, sticker paketi için /paketengel yaz.") }));
   c.appendChild(bd);
   // 👮 Yetkililer
-  const sf = sec("👮 Yetkililer (" + x.staff.length + ")");
+  const sf = sec(L("👮 Yetkililer (⟨0⟩)", x.staff.length));
   x.staff.forEach((p) => sf.appendChild(itemRow(p.name, p.role + " · " + p.id)));
-  sf.appendChild(el("div", { cls: "help", text: "Rütbe vermek/almak için grupta /admin, /basadmin, /yardimcikurucu; kişiye özel yetkiler için botta /yetkiler." }));
+  sf.appendChild(el("div", { cls: "help", text: L("Rütbe vermek/almak için grupta /admin, /basadmin, /yardimcikurucu; kişiye özel yetkiler için botta /yetkiler.") }));
   c.appendChild(sf);
 }
 
 async function loadChat(chat) {
   state.chat = chat;
   $("content").innerHTML = ""; $("extras").innerHTML = ""; $("stats").innerHTML = "";
-  $("content").appendChild(el("div", { cls: "empty", text: "Yükleniyor…" }));
+  $("content").appendChild(el("div", { cls: "empty", text: L("Yükleniyor…") }));
   try { render(await api("settings", { chat: chat })); }
   catch (e) { $("content").innerHTML = ""; $("content").appendChild(el("div", { cls: "empty", text: e.message })); }
 }
@@ -13749,27 +14337,33 @@ async function save() {
     const errs = Object.entries(res.errors || {});
     render(res.settings);
     if (errs.length) toast("⚠️ " + errs.map(([k, v]) => ((state.fields[k] || {}).label || k) + ": " + v).join(" · "));
-    else toast(res.changed.length ? "✅ Kaydedildi" : "Değişiklik yok");
+    else toast(res.changed.length ? L("✅ Kaydedildi") : L("Değişiklik yok"));
     if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(errs.length ? "warning" : "success");
   } catch (e) { toast("❌ " + e.message); }
   finally { if (tg && tg.MainButton) tg.MainButton.hideProgress(); }
 }
 
 async function start() {
-  if (!initData) { $("sub").textContent = "Bu sayfa Telegram içinden açılmalı (botta /webpanel)."; return; }
+  if (!initData) { $("sub").textContent = "Bu sayfa Telegram içinden açılmalı (botta /webpanel). / Open this page inside Telegram (/webpanel)."; return; }
   if (tg && tg.MainButton) tg.MainButton.onClick(save); else $("saveBtn").addEventListener("click", save);
   try {
     const d = await api("chats");
+    Object.assign(UI, d.ui || {});
+    document.documentElement.lang = d.lang || "tr";
+    document.documentElement.dir = d.rtl ? "rtl" : "ltr";
+    const lp = $("langPick"); lp.hidden = false;
+    (d.langs || []).forEach(([code, label]) => { const o = el("option", { value: code, text: label }); if (code === d.lang) o.selected = true; lp.appendChild(o); });
+    lp.addEventListener("change", async () => { try { await api("setlang", { lang: lp.value }); location.reload(); } catch (e) { toast("❌ " + e.message); } });
     document.title = d.brand + " Panel";
-    $("sub").textContent = d.brand + " · " + (d.chats.length ? "Yönettiğin gruplar" : "Yönettiğin grup yok");
-    if (!d.chats.length) { $("content").appendChild(el("div", { cls: "empty", text: "Botun yönetici olduğu ve senin yetkili olduğun bir grup bulunamadı." })); return; }
+    $("sub").textContent = d.brand + " · " + (d.chats.length ? L("Yönettiğin gruplar") : L("Yönettiğin grup yok"));
+    if (!d.chats.length) { $("content").appendChild(el("div", { cls: "empty", text: L("Botun yönetici olduğu ve senin yetkili olduğun bir grup bulunamadı.") })); return; }
     const p = $("picker"); p.hidden = d.chats.length < 2;
     d.chats.forEach((c) => p.appendChild(el("option", { value: c.id, text: c.title })));
     const want = new URLSearchParams(location.search).get("chat") || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "";
     const first = d.chats.some((c) => c.id === want) ? want : d.chats[0].id;
     p.value = first;
     p.addEventListener("change", () => {
-      if (Object.keys(state.changes).length && !confirm("Kaydedilmemiş değişiklikler silinsin mi?")) { p.value = state.chat; return; }
+      if (Object.keys(state.changes).length && !confirm(L("Kaydedilmemiş değişiklikler silinsin mi?"))) { p.value = state.chat; return; }
       loadChat(p.value);
     });
     loadChat(first);
@@ -15737,7 +16331,7 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler(['reload', 'admincache', 'yenile'], cmd_reload))
     app.add_handler(CommandHandler('yetkiler', yetkiler, filters=filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler('menu', cmd_menu, filters=filters.ChatType.PRIVATE))
-    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Text(sorted(DM_MENU_TEXTS)), dm_menu_handler))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Text(sorted(DM_MENU_ALL())), dm_menu_handler))
     app.add_handler(MessageHandler(filters.StatusUpdate.CHAT_SHARED, chat_shared_handler))
 
     app.add_handler(CommandHandler('addadmin', add_admin))
@@ -15815,6 +16409,8 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('buyume', cmd_buyume))
     app.add_handler(CommandHandler('bakim', cmd_bakim))
     app.add_handler(CommandHandler(['del', 'sil'], cmd_del))
+    app.add_handler(CommandHandler(['setlang', 'lang', 'language', 'dil'], cmd_setlang))
+    app.add_handler(CallbackQueryHandler(lang_callback, pattern=r'^lang\|'))
     app.add_handler(CommandHandler(['gecmis', 'edits'], cmd_gecmis))
     app.add_handler(CommandHandler(['denetim', 'audit'], cmd_denetim))
     app.add_handler(CallbackQueryHandler(admin_limit_callback, pattern=r'^al\|'))
@@ -15826,7 +16422,7 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.REPLY & ~filters.COMMAND, support_reply_handler),
                     group=-45)
     app.add_handler(MessageHandler(
-        filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE & ~filters.COMMAND & ~filters.Text(sorted(DM_MENU_TEXTS))
+        filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE & ~filters.COMMAND & ~filters.Text(sorted(DM_MENU_ALL()))
         & (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL | filters.VOICE
            | filters.AUDIO | filters.Sticker.ALL | filters.VIDEO_NOTE), support_inbox_handler), group=40)
     app.add_handler(PollHandler(duyuru_poll_handler))
@@ -15925,6 +16521,7 @@ def register_handlers(app, main_bot: bool = True):
         app.add_handler(CallbackQueryHandler(clone_callback, pattern=r'^cl\|'))
         app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, clone_input_handler),
                         group=-60)
+    add_command_aliases(app)  # /tag, /giveaway, /broadcast … (Türkçe adlar da çalışır)
     # Eski/bozuk buton verisi (ör. önceki sürümden kalan butonlar) çökme yerine kibar uyarı versin
     for handlers in app.handlers.values():
         for h in handlers:
@@ -16022,6 +16619,14 @@ def web_request_cli(out_path: str):
     data = b''.join(webapp(environ, start_response))
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump({'status': st['status'], 'headers': st['headers'], 'body': base64.b64encode(data).decode()}, f)
+
+# ═══════════════════════════ ÇEVİRİ KATALOĞU ═══════════════════════════
+# I18N_SRC: kimlik<TAB>Türkçe şablon · I18N_<DİL>: kimlik<TAB>çeviri (⟨0⟩ ⟨1⟩ değişken yerleri, sırası değişebilir).
+# Yeni metin eklenince: python main.py --i18n-check (katalogda olmayan Türkçe satırları listeler).
+I18N_SRC = r'''
+'''
+
+_i18n_load()
 
 if __name__ == '__main__':
     if len(sys.argv) == 3 and sys.argv[1] == '--web-request':
