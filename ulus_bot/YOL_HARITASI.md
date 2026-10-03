@@ -59,6 +59,13 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
 - Ayarlar Telegram içinde açılan web sayfasından yönetilir: sekmeler, açma/kapama anahtarları, önizleme.
 - PythonAnywhere web uygulaması üzerinde çalışır; giriş Telegram doğrulamasıyla.
 
+## Duyuru sistemi ✅ (tamamlandı)
+- `/duyuru -kisiler -gruplar -kanallar "mesaj"` (birleştirilebilir), `all` = hepsi; varsayılan gruplar + kanallar.
+- Mesaja yanıtla `/duyuru` → olduğu gibi kopyalanır (medya, biçim, premium emoji).
+- Önizleme + ✅ Gönder / ❌ İptal; arka planda gönderim, tek ilerleme mesajı, rapor; `/duyurudur`.
+- `-test`, `-sabitle`, `-sessiz`, `-saat 20:00`; `/duyurular` geçmiş; kişiler 🔕 / `/duyurukapat` ile kapatır.
+- Özelden kullananlar kaydedilir; botu engelleyen ve başlatmamış olan bir kez denenip atlanır. Klon sahibi kendi kitlesine gönderir.
+
 ## Önerildi, şimdilik seçilmedi
 - Davet yarışması (haftalık/aylık davet sıralaması)
 - Hesap güven puanı (hesap yaşı, profil fotoğrafı, biyografideki link, premium)
