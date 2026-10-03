@@ -41,6 +41,7 @@ import logging
 import os
 import re
 import signal
+import sys
 
 from dotenv import load_dotenv
 
@@ -13311,5 +13312,26 @@ def main():
 
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
+def web_request_cli(out_path: str):
+    """python main.py --web-request ÇIKTI_DOSYASI — web sunucusu (WSGI) paneli ayrı bir işlemde çalıştırır:
+    istek stdin'den (JSON) okunur, yanıt dosyaya yazılır. Böylece bot kodu web uygulamasının (ör. başka bir botun)
+    işlemine hiç yüklenmez: kütüphane sürümü, .env ve log ayarları karışmaz, panel hatası siteyi düşürmez."""
+    import base64
+    import io
+    req = json.loads(sys.stdin.read() or '{}')
+    body = base64.b64decode(req.get('body') or '')
+    environ = {'REQUEST_METHOD': req.get('method', 'GET'), 'PATH_INFO': req.get('path') or '/',
+               'CONTENT_LENGTH': str(len(body)), 'wsgi.input': io.BytesIO(body)}
+    st = {}
+
+    def start_response(status, headers):
+        st['status'], st['headers'] = status, headers
+    data = b''.join(webapp(environ, start_response))
+    with open(out_path, 'w', encoding='utf-8') as f:
+        json.dump({'status': st['status'], 'headers': st['headers'], 'body': base64.b64encode(data).decode()}, f)
+
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) == 3 and sys.argv[1] == '--web-request':
+        web_request_cli(sys.argv[2])
+    else:
+        main()
