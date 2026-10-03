@@ -67,10 +67,24 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
 - Özelden kullananlar kaydedilir; botu engelleyen ve başlatmamış olan bir kez denenip atlanır. Klon sahibi kendi kitlesine gönderir.
 
 ## Sırada (onaylandı, yapılacak)
-1. **Duyuru tıklama istatistiği** — duyurudaki butona kaç kişi tıkladı (/duyurular'da görünür).
-2. **Hedefli duyuru** — `-aktif` (son 7 günde aktif kişiler), `-sec` (listeden belli grupları seçme).
-3. **Hoş geldin olarak mesaj kopyalama** — yanıtlanan mesaj olduğu gibi (premium emoji dahil) hoş geldin olur; değişkenler bu modda çalışmaz.
-4. **Haftalık büyüme raporu** — her pazartesi sahibine özelden: yeni/ayrılan grup, yeni kişi, en aktif gruplar.
+**A — Duyuru eklentileri**
+1. Duyuru tıklama istatistiği — butona kaç kişi tıkladı (web panel adresi üzerinden yönlendirme ile sayılır).
+2. Hedefli duyuru — `-aktif` (son 7 gün), önizlemede 🎯 grup/kanal seçimi.
+12. Duyuru şablonları — `/duyuru -kaydet isim`, `/duyuru #isim`, `/duyurusablon`.
+13. Anket duyurusu — `/duyuru -anket "Soru\nSeçenek…"`, oylar tek ankette toplanır, sonuç raporu.
+
+**B — Rapor ve takip**
+3. Hoş geldin olarak mesaj kopyalama (premium emoji tam korunur; değişkenler bu modda çalışmaz).
+4. Haftalık büyüme raporu — pazartesi sahibine özelden.
+6. Bot eklenince: ekleyene teşekkür, sahibine "yeni gruba eklendim" bildirimi (ekleyen, üye sayısı).
+7. Kurulum takibi — 1 gün içinde yönetici yapılmazsa ekleyene hatırlatma.
+9. Otomatik gece yedeği — veritabanı zip olarak sahibine özelden.
+
+**C — Yönetim ve iletişim**
+5. Davet linki takibi — kim kaç kişi getirdi, sıralama.
+8. Toplu ayar — bir grubun ayarlarını diğer gruplara uygula.
+10. Bakım modu — `/bakim`, sadece kritik korumalar çalışır.
+11. Özelden destek hattı — kullanıcı yazar, sahibine iletilir, yanıt geri gider.
 
 ## Önerildi, şimdilik seçilmedi
 - Davet yarışması (haftalık/aylık davet sıralaması)
@@ -84,6 +98,8 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
 - Ayar şablonları + yedekle / geri yükle
 - Konuya (topic) özel kurallar
 - Bilgi yarışması
+- Toplu saldırı alarmı (birden fazla grupta aynı anda spam/raid)
+- Şüpheli hesap puanı ile otomatik doğrulama
 
 ## Ertelendi
 - **Federasyon** — farklı sahiplerin grupları ortak ban listesine katılır. Grup ağı şu an sadece aynı sahibin gruplarında çalışıyor.

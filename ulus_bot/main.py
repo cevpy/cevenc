@@ -14,6 +14,7 @@ from telegram.ext import (
     ChatJoinRequestHandler,
     TypeHandler,
     JobQueue,
+    PollHandler,
 )
 from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, Bot, MessageEntity,
@@ -899,7 +900,24 @@ def init_db():
                 blocked INTEGER DEFAULT 0,
                 pinned INTEGER DEFAULT 0,
                 summary TEXT,
-                finished_at REAL
+                finished_at REAL,
+                filters TEXT,
+                poll_id TEXT,
+                poll_result TEXT
+            );
+            CREATE TABLE IF NOT EXISTS duyuru_clicks (
+                did INTEGER NOT NULL,
+                idx INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_dyclicks ON duyuru_clicks(did);
+            CREATE TABLE IF NOT EXISTS duyuru_templates (
+                bot_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at REAL,
+                PRIMARY KEY (bot_id, name)
             );
             CREATE INDEX IF NOT EXISTS idx_announce ON announcements(bot_id, status);
 
@@ -983,6 +1001,10 @@ def _migrate_installer():
         fcols = {r[1] for r in conn.execute("PRAGMA table_info(chat_filters)")}
         if 'is_html' not in fcols:  # eski filtreler düz metin; yeniler biçimli (HTML) kaydedilir
             conn.execute("ALTER TABLE chat_filters ADD COLUMN is_html INTEGER DEFAULT 0")
+        acols = {r[1] for r in conn.execute("PRAGMA table_info(announcements)")}
+        for col in ('filters', 'poll_id', 'poll_result'):
+            if col not in acols:
+                conn.execute(f"ALTER TABLE announcements ADD COLUMN {col} TEXT")
         rcols = {r[1] for r in conn.execute("PRAGMA table_info(clone_requests)")}
         for col, typedef in (('bot_id', 'INTEGER'), ('token', 'TEXT'), ('bot_username', 'TEXT'), ('bot_name', 'TEXT'),
                              ('admin_msg_id', 'INTEGER')):
@@ -5499,7 +5521,8 @@ _DY_TARGET_FLAGS = {
     '-ozel': 'u', '-özel': 'u', '-gruplar': 'g', '-grup': 'g', '-kanallar': 'c', '-kanal': 'c',
     'all': 'all', '-all': 'all', '-hepsi': 'all', 'hepsi': 'all', '-herkes': 'all',
 }
-_DY_OPT_FLAGS = {'-test': 'test', '-sabitle': 'pin', '-pin': 'pin', '-sessiz': 'silent'}
+_DY_OPT_FLAGS = {'-test': 'test', '-sabitle': 'pin', '-pin': 'pin', '-sessiz': 'silent', '-anket': 'poll'}
+DUYURU_ACTIVE_DAYS = 7
 _DY_QUOTES = [('"', '"'), ('&quot;', '&quot;'), ('“', '”'), ('«', '»'), ("'", "'"), ('&#x27;', '&#x27;')]
 _DY_KIND_LABEL = {'g': "grup", 'c': "kanal", 'u': "kişi"}
 _DY_STATUS = {'draft': "📝 taslak", 'scheduled': "⏰ zamanlandı", 'running': "📤 gönderiliyor", 'done': "✅ bitti",
@@ -5542,19 +5565,25 @@ def parse_duyuru(m) -> dict:
     text = m.text or m.caption or ''
     first = re.match(r'^\s*\S+', text)
     i = first.end() if first else 0
-    targets, opts, at, err = set(), set(), None, None
+    targets, opts, at, err, active, save = set(), set(), None, None, 0, None
     while True:
         tok = re.match(r'\s*(\S+)', text[i:])
         if not tok:
             break
         w = tok.group(1).lower()
+        nxt = re.match(r'\s*(\S+)', text[i + tok.end():])
         if w in _DY_TARGET_FLAGS:
             v = _DY_TARGET_FLAGS[w]
             targets |= {'g', 'c', 'u'} if v == 'all' else {v}
         elif w in _DY_OPT_FLAGS:
             opts.add(_DY_OPT_FLAGS[w])
+        elif w in ('-aktif', '-aktifler'):
+            active = DUYURU_ACTIVE_DAYS
+            if nxt and nxt.group(1).isdigit() and 1 <= int(nxt.group(1)) <= 365:
+                active = int(nxt.group(1))
+                i += tok.end() + nxt.end()
+                continue
         elif w in ('-saat', '-zaman'):
-            nxt = re.match(r'\s*(\S+)', text[i + tok.end():])
             hm = re.fullmatch(r'(\d{1,2})[:.](\d{2})', nxt.group(1)) if nxt else None
             if not hm or int(hm.group(1)) > 23 or int(hm.group(2)) > 59:
                 err = "Saat şöyle yazılır: -saat 20:00"
@@ -5566,6 +5595,14 @@ def parse_duyuru(m) -> dict:
             at = when.timestamp()
             i += tok.end() + nxt.end()
             continue
+        elif w in ('-kaydet', '-sablon', '-şablon'):
+            name = nxt.group(1).lstrip('#').lower() if nxt else ''
+            if not re.fullmatch(r'\w{1,32}', name):
+                err = "Şablon adı şöyle yazılır: /duyuru -kaydet guncelleme \"mesaj\""
+                break
+            save = name
+            i += tok.end() + nxt.end()
+            continue
         else:
             break
         i += tok.end()
@@ -5574,28 +5611,41 @@ def parse_duyuru(m) -> dict:
         if len(body) > len(q1) + len(q2) and body.startswith(q1) and body.endswith(q2):
             body = body[len(q1):-len(q2)].strip()
             break
+    tpl = re.fullmatch(r'#(\w{1,32})', body.strip())
     return {'targets': targets or {'g', 'c'}, 'test': 'test' in opts, 'pin': 'pin' in opts,
-            'silent': 'silent' in opts, 'at': at, 'html': body, 'error': err}
+            'silent': 'silent' in opts, 'poll': 'poll' in opts, 'at': at, 'active': active, 'save': save,
+            'template': tpl.group(1).lower() if tpl else None, 'html': body, 'error': err}
 
-def duyuru_targets(kinds, bot_id: int) -> list:
+def duyuru_targets(kinds, bot_id: int, flt: dict | None = None) -> list:
     """[(sohbet_id, tür)] — tür: g grup, c kanal, u kişi (özelden). Kişiler: botu özelden kullananlar + botun
-    gruplarında görülüp henüz denenmemiş olanlar (botu başlatmamışsa Telegram izin vermez, bir kez denenir ve not edilir)."""
+    gruplarında görülüp henüz denenmemiş olanlar (botu başlatmamışsa Telegram izin vermez, bir kez denenir ve not edilir).
+    flt: {'active': gün} son N günde yazan kişiler/gruplar; {'only': [sohbet_id]} sadece seçilen grup/kanallar."""
     flush_writes()
+    flt = flt or {}
+    cut = time.time() - flt['active'] * 86400 if flt.get('active') else 0
+    only = {str(c) for c in flt.get('only') or []}
     out = []
     with get_db() as conn:
         if 'g' in kinds or 'c' in kinds:
             for r in conn.execute("SELECT chat_id, chat_type FROM channels WHERE mybot(bot_id) ORDER BY chat_id"):
                 k = 'c' if r['chat_type'] == 'channel' else 'g'
-                if k in kinds:
-                    out.append((str(r['chat_id']), k))
+                if k not in kinds or (only and str(r['chat_id']) not in only):
+                    continue
+                if cut and k == 'g' and not conn.execute(
+                        "SELECT 1 FROM message_stats WHERE chat_id = ? AND sent_at >= ? LIMIT 1", (r['chat_id'], cut)).fetchone():
+                    continue
+                out.append((str(r['chat_id']), k))
         if 'u' in kinds:
-            known = conn.execute("SELECT user_id FROM bot_users WHERE bot_id = ? AND status = 0 AND optout = 0",
-                                 (bot_id,)).fetchall()
+            mine = "SELECT chat_id FROM channels WHERE mybot(bot_id)"
+            known = conn.execute(
+                "SELECT user_id FROM bot_users WHERE bot_id = ? AND status = 0 AND optout = 0 AND (? = 0 OR last_seen >= ? "
+                f"OR user_id IN (SELECT user_id FROM users WHERE last_seen >= ? AND chat_id IN ({mine})))",
+                (bot_id, cut, cut, cut)).fetchall()
             out += [(str(r['user_id']), 'u') for r in known]
             seen = conn.execute(
-                "SELECT DISTINCT user_id FROM users WHERE is_bot = 0 AND user_id > 0 "
-                "AND chat_id IN (SELECT chat_id FROM channels WHERE mybot(bot_id)) "
-                "AND user_id NOT IN (SELECT user_id FROM bot_users WHERE bot_id = ?)", (bot_id,)).fetchall()
+                f"SELECT DISTINCT user_id FROM users WHERE is_bot = 0 AND user_id > 0 AND last_seen >= ? "
+                f"AND chat_id IN ({mine}) AND user_id NOT IN (SELECT user_id FROM bot_users WHERE bot_id = ?)",
+                (cut, bot_id)).fetchall()
             out += [(str(r['user_id']), 'u') for r in seen]
     return out
 
@@ -5608,15 +5658,61 @@ def _dy_counts(queue) -> str:
 def _dy_optout_rows():
     return [[ibtn("🔕 Duyuruları kapat", "dy|off")]]
 
-async def _dy_send_one(cid: str, kind: str, payload: dict, *, pin=False, silent=False):
-    """Bir hedefe gönderir. Dönüş: gönderilen ilk mesajın id'si (yoksa None)."""
+# ── Buton tıklama sayacı: duyurudaki link butonları web panel adresinden geçip asıl adrese yönlenir ──
+def _dy_sig(did: int, idx: int, uid: int) -> str:
+    import hashlib
+    import hmac
+    return hmac.new((TOKEN or 'ulus').encode(), f"dy:{did}:{idx}:{uid}".encode(), hashlib.sha256).hexdigest()[:12]
+
+def _dy_url_buttons(rich: dict) -> list:
+    """Duyurudaki link butonları (tüm seçeneklerde, sırayla) — tıklama adresindeki numara bu sıradır."""
+    return [b for v in (rich or {}).get('v') or [] for row in v.get('buttons') or [] for b in row if b.get('k') == 'url']
+
+def _dy_tracked(rich: dict, did: int, uid: int) -> dict:
+    if not WEBAPP_URL or not _dy_url_buttons(rich):
+        return rich
+    rich = copy.deepcopy(rich)
+    base = WEBAPP_URL.split('?')[0].rstrip('/')
+    for n, b in enumerate(_dy_url_buttons(rich)):
+        b['v'] = f"{base}/r/{did}/{n}/{uid}/{_dy_sig(did, n, uid)}"
+    return rich
+
+def duyuru_click(did: int, idx: int, uid: int, sig: str) -> str | None:
+    """Web: tıklamayı kaydeder, gidilecek adresi döner (imza yanlışsa None)."""
+    import hmac
+    if not hmac.compare_digest(sig, _dy_sig(did, idx, uid)):
+        return None
+    r = _dy_row(did)
+    if not r:
+        return None
+    payload = json.loads(r['payload'])
+    btns = _dy_url_buttons(payload.get('rich')) if payload.get('mode') == 'rich' else []
+    if not 0 <= idx < len(btns):
+        return None
+    with get_db() as conn:
+        conn.execute("INSERT INTO duyuru_clicks (did, idx, user_id, at) VALUES (?, ?, ?, ?)", (did, idx, uid, time.time()))
+    return btns[idx]['v']
+
+def _dy_clicks(did: int) -> tuple:
+    """(toplam tıklama, tıklayan kişi) — gruplardaki tıklayanlar kişi olarak ayırt edilemez."""
+    with get_db() as conn:
+        r = conn.execute("SELECT COUNT(*), COUNT(DISTINCT CASE WHEN user_id > 0 THEN user_id END) FROM duyuru_clicks "
+                         "WHERE did = ?", (did,)).fetchone()
+    return r[0], r[1]
+
+async def _dy_send_one(cid: str, kind: str, payload: dict, *, pin=False, silent=False, did: int = 0):
+    """Bir hedefe gönderir. Dönüş: (gönderilen ilk mesajın id'si, sabitlendi mi)."""
     extra = _dy_optout_rows() if kind == 'u' else ()
     if payload['mode'] == 'copy':
         res = await bot.copy_message(int(cid), payload['from'], payload['mid'], disable_notification=silent,
                                      reply_markup=InlineKeyboardMarkup(extra) if extra else None)
         mid = getattr(res, 'message_id', None)
+    elif payload['mode'] == 'forward':  # anket: tek anket iletilir, oylar tek yerde toplanır
+        res = await bot.forward_message(int(cid), payload['from'], payload['mid'], disable_notification=silent)
+        mid = getattr(res, 'message_id', None)
     else:
-        sent = await send_rich(int(cid), payload['rich'], extra_rows=extra, silent=silent, raise_errors=True)
+        rich = _dy_tracked(payload['rich'], did, int(cid) if kind == 'u' else 0) if did else payload['rich']
+        sent = await send_rich(int(cid), rich, extra_rows=extra, silent=silent, raise_errors=True)
         mid = sent[0].message_id if sent else None
     if pin and mid and kind in ('g', 'c'):
         try:
@@ -5631,6 +5727,24 @@ def _dy_row(did: int) -> dict | None:
         r = conn.execute("SELECT * FROM announcements WHERE id = ?", (did,)).fetchone()
     return dict(r) if r else None
 
+def _dy_filters(r: dict) -> dict:
+    try:
+        return json.loads(r.get('filters') or '{}')
+    except ValueError:
+        return {}
+
+def _dy_poll_text(r: dict) -> str:
+    """🗳 anket sonucu (seçenek başına oy ve yüzde)."""
+    try:
+        res = json.loads(r.get('poll_result') or 'null')
+    except ValueError:
+        res = None
+    if not res:
+        return "🗳 Henüz oy yok" if r.get('poll_id') else ''
+    total = res['total'] or 0
+    parts = [f"{html.escape(t)} %{round(c * 100 / total) if total else 0} ({c})" for t, c in res['options']]
+    return f"🗳 {total} oy: " + " · ".join(parts)
+
 def _dy_report(r: dict, total: int, done: int) -> str:
     end = r['status'] in ('done', 'stopped')
     head = {'done': "✅ <b>Duyuru #{} tamamlandı</b>", 'stopped': "⏹ <b>Duyuru #{} durduruldu</b>"}.get(
@@ -5643,7 +5757,13 @@ def _dy_report(r: dict, total: int, done: int) -> str:
         lines.append(f"⚠️ Gönderilemedi (bot çıkarılmış / yetkisiz): {r['failed']}")
     if r['pin']:
         lines.append(f"📌 Sabitlendi: {r['pinned']}")
-    if not end:
+    if end:
+        payload = json.loads(r['payload'])
+        if payload.get('mode') == 'rich' and WEBAPP_URL and _dy_url_buttons(payload.get('rich')):
+            lines.append("👆 Buton tıklamaları /duyurular içinde görünür")
+        if r.get('poll_id'):
+            lines.append("🗳 Anket sonuçları /duyurular içinde görünür")
+    else:
         lines.append("\nDurdurmak için /duyurudur")
     return "\n".join(lines)
 
@@ -5661,7 +5781,7 @@ async def _dy_run(did: int) -> None:
         if r['queue']:
             queue = json.loads(r['queue'])
         else:
-            queue = duyuru_targets(set(r['targets']), r['bot_id'])
+            queue = duyuru_targets(set(r['targets']), r['bot_id'], _dy_filters(r))
             r['summary'] = _dy_counts(queue)
         with get_db() as conn:
             conn.execute("UPDATE announcements SET status = 'running', queue = ?, summary = ? WHERE id = ?",
@@ -5678,7 +5798,7 @@ async def _dy_run(did: int) -> None:
         while pos < len(queue) and not run['stop']:
             cid, kind = queue[pos]
             try:
-                _, pinned = await _dy_send_one(cid, kind, payload, pin=bool(r['pin']), silent=bool(r['silent']))
+                _, pinned = await _dy_send_one(cid, kind, payload, pin=bool(r['pin']), silent=bool(r['silent']), did=did)
                 r['sent'] += 1
                 r['pinned'] += int(pinned)
             except (Forbidden, BadRequest) as e:
@@ -5738,10 +5858,13 @@ async def duyuru_job(context):
             continue
         _dy_start(r['id'])
 
-async def _dy_preview(chat_id, payload: dict, reply_msg=None) -> bool | None:
+async def _dy_preview(chat_id, payload: dict) -> bool | None:
     """Duyuruyu sahibine gösterir. Dönüş: premium emoji korunduysa True, düz emojiye döndüyse False, yoksa None."""
     if payload['mode'] == 'copy':
         await bot.copy_message(chat_id, payload['from'], payload['mid'])
+        return None
+    if payload['mode'] == 'forward':
+        await bot.forward_message(chat_id, payload['from'], payload['mid'])
         return None
     sent = await send_rich(chat_id, payload['rich'], raise_errors=True)
     had = any('<tg-emoji' in (v.get('text') or '') for v in payload['rich'].get('v') or [])
@@ -5756,11 +5879,105 @@ DUYURU_HELP = (
     "<code>/duyuru -kisiler \"mesaj\"</code> — botu özelden kullananlar\n"
     "<code>/duyuru -kisiler -kanal \"mesaj\"</code> — kişiler + kanallar (birleştirilebilir)\n"
     "<code>/duyuru all \"mesaj\"</code> — hepsi\n\n"
-    "Seçenekler: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-test</code> (sadece sana) · "
-    "<code>-sabitle</code> (gruplarda sabitle) · <code>-sessiz</code> (bildirimsiz) · <code>-saat 20:00</code> (zamanla)\n\n"
+    "Seçenekler: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (son 7 gün; "
+    "<code>-aktif 30</code>) · <code>-test</code> (sadece sana) · <code>-sabitle</code> · <code>-sessiz</code> · "
+    "<code>-saat 20:00</code>\n"
+    "🎯 Önizlemede belli grup/kanalları seçebilirsin.\n\n"
+    "🗳 Anket: <code>/duyuru -anket -kisiler \"Soru?\nSeçenek 1\nSeçenek 2\"</code> — oylar tek ankette toplanır\n"
+    "💾 Şablon: <code>/duyuru -kaydet isim \"mesaj\"</code> → <code>/duyuru -kisiler #isim</code> · /duyurusablon\n\n"
     "💡 Bir mesaja (resim, video, butonlu ya da premium emojili) yanıt verip <code>/duyuru -kisiler</code> yazarsan "
-    "o mesaj olduğu gibi gönderilir. Metinde buton satırı da yazabilirsin: <code>Kanal - https://t.me/kanal</code>\n\n"
-    "/duyurular — geçmiş ve zamanlananlar · /duyurudur — gönderimi durdur")
+    "o mesaj olduğu gibi gönderilir. Metinde buton satırı da yazabilirsin: <code>Kanal - https://t.me/kanal</code> "
+    "(tıklamalar sayılır)\n\n"
+    "/duyurular — geçmiş, tıklamalar, anket sonuçları · /duyurudur — gönderimi durdur")
+
+DUYURU_EMOJI_WARN = ("⚠️ Premium emojiler Telegram tarafından normal emojiye çevrildi (botlar yazarak premium emoji "
+                     "gönderemiyor). Çözüm: mesajı kendin yaz, ona yanıt verip /duyuru yaz — kopyalanan mesajda korunur.")
+
+def _dy_poll_parts(body_html: str):
+    lines = [ln.strip() for ln in _strip_html(body_html).split('\n') if ln.strip()]
+    if len(lines) < 3:
+        return None
+    return lines[0][:300], [o[:100] for o in lines[1:11]]
+
+def _dy_view(did: int) -> tuple:
+    """Önizleme altındaki özet + butonlar (seçim değişince yeniden çizilir)."""
+    r = _dy_row(did)
+    flt = _dy_filters(r)
+    kinds = set(r['targets'])
+    queue = duyuru_targets(kinds, r['bot_id'], flt)
+    payload = json.loads(r['payload'])
+    lines = [f"👆 <b>Duyuru #{did} önizlemesi</b>", f"🎯 Hedef: {_dy_counts(queue)}"]
+    if flt.get('active'):
+        lines.append(f"🔥 Sadece son {flt['active']} günde aktif olanlar")
+    if flt.get('only'):
+        lines.append(f"✅ Seçili grup/kanal: {len(flt['only'])}")
+    if any(k == 'u' for _, k in queue):
+        lines.append("👤 Kişiler: botu özelden kullananlar; gruplarda görülüp botu hiç başlatmamış olanlara Telegram "
+                     "izin vermez (bir kez denenir, sonra atlanır).")
+    if queue:
+        lines.append(f"⏱ Tahmini süre: ~{max(1, round(len(queue) * (DUYURU_DELAY + 0.04)))} sn")
+    if r['run_at']:
+        lines.append(f"⏰ Gönderim: {datetime.fromtimestamp(r['run_at'], TZ_TR).strftime('%d.%m %H:%M')}")
+    if r['pin']:
+        lines.append("📌 Gruplarda ve kanallarda sabitlenecek")
+    if r['silent']:
+        lines.append("🔕 Bildirimsiz")
+    if payload['mode'] == 'rich' and WEBAPP_URL and _dy_url_buttons(payload['rich']):
+        lines.append("👆 Buton tıklamaları sayılacak")
+    if payload['mode'] == 'forward':
+        lines.append("🗳 Anket iletilecek; oylar bu ankette toplanır")
+    if flt.get('emoji_bad'):
+        lines.append(DUYURU_EMOJI_WARN)
+    rows = []
+    if queue:
+        rows.append([ibtn("⏰ Zamanla" if r['run_at'] else "✅ Gönder", f"dy|go|{did}", GREEN),
+                     ibtn("❌ İptal", f"dy|no|{did}", RED)])
+    else:
+        lines.append("\nGönderilecek kimse yok.")
+    if kinds & {'g', 'c'}:
+        rows.append([ibtn("🎯 Grup/kanal seç", f"dy|sel|{did}|0", BLUE)])
+    if not queue:
+        rows.append([ibtn("❌ Kapat", f"dy|no|{did}", RED)])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+DY_SEL_PAGE = 10
+
+def _dy_sel_view(did: int, page: int) -> tuple:
+    r = _dy_row(did)
+    flt = _dy_filters(r)
+    only = set(flt.get('only') or [])
+    kinds = set(r['targets']) & {'g', 'c'}
+    with get_db() as conn:
+        chats = [x for x in conn.execute("SELECT chat_id, chat_type, title FROM channels WHERE mybot(bot_id) "
+                                         "ORDER BY title COLLATE NOCASE, chat_id")
+                 if ('c' if x['chat_type'] == 'channel' else 'g') in kinds]
+    pages = max(1, -(-len(chats) // DY_SEL_PAGE))
+    page = min(max(page, 0), pages - 1)
+    rows = []
+    for x in chats[page * DY_SEL_PAGE:(page + 1) * DY_SEL_PAGE]:
+        cid = str(x['chat_id'])
+        icon = "📢" if x['chat_type'] == 'channel' else "👥"
+        rows.append([ibtn(f"{'✅' if cid in only else '⬜'} {icon} {(x['title'] or cid)[:40]}", f"dy|t|{did}|{page}|{cid}")])
+    nav = []
+    if page > 0:
+        nav.append(ibtn("◀️ Önceki", f"dy|sel|{did}|{page - 1}"))
+    if page < pages - 1:
+        nav.append(ibtn("Sonraki ▶️", f"dy|sel|{did}|{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([ibtn("🔄 Seçimi temizle", f"dy|sc|{did}|{page}", RED), ibtn("✅ Tamam", f"dy|pv|{did}", GREEN)])
+    text = (f"🎯 <b>Duyuru #{did}: grup/kanal seç</b> (sayfa {page + 1}/{pages})\n\n"
+            f"Seçili: <b>{len(only)}</b> — hiçbiri seçili değilse hepsine gider.")
+    return text, InlineKeyboardMarkup(rows)
+
+def _dy_payload_from(msg, opt):
+    """Yanıtlanan mesaj → kopya; değilse yazılan metin → zengin mesaj. Boşsa None."""
+    src = msg.reply_to_message
+    if src is not None and not getattr(src, 'forum_topic_created', None):
+        return {'mode': 'copy', 'from': src.chat_id, 'mid': src.message_id}
+    if opt['html'].strip():
+        return {'mode': 'rich', 'rich': build_rich(opt['html'], msg_media(msg))}
+    return None
 
 async def duyuru(update: Update, context):
     msg = update.effective_message
@@ -5772,16 +5989,46 @@ async def duyuru(update: Update, context):
     if opt['error']:
         await msg.reply_text(opt['error'])
         return
-    src = msg.reply_to_message
-    if src is not None and not getattr(src, 'forum_topic_created', None):
-        payload = {'mode': 'copy', 'from': src.chat_id, 'mid': src.message_id}
-    elif opt['html'].strip():
-        rich = build_rich(opt['html'], msg_media(msg))
-        payload = {'mode': 'rich', 'rich': rich}
-    else:
-        await msg.reply_text(DUYURU_HELP, parse_mode=ParseMode.HTML)
-        return
     bid = cur_bot_id()
+    poll_id = None
+    if opt['save']:
+        payload = _dy_payload_from(msg, opt)
+        if not payload:
+            await msg.reply_text("Şablon için mesaj yaz ya da bir mesaja yanıt ver.")
+            return
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO duyuru_templates (bot_id, name, payload, created_at) VALUES (?, ?, ?, ?)",
+                         (bid, opt['save'], json.dumps(payload), time.time()))
+        await msg.reply_text(f"💾 Şablon kaydedildi: #{opt['save']}\nKullanmak için: /duyuru -kisiler #{opt['save']}")
+        return
+    if opt['template'] and msg.reply_to_message is None:
+        with get_db() as conn:
+            row = conn.execute("SELECT payload FROM duyuru_templates WHERE bot_id = ? AND name = ?",
+                               (bid, opt['template'])).fetchone()
+        if not row:
+            await msg.reply_text(f"#{opt['template']} adında şablon yok. /duyurusablon ile listeyi gör.")
+            return
+        payload = json.loads(row['payload'])
+    elif opt['poll']:
+        parts = _dy_poll_parts(opt['html'])
+        if not parts:
+            await msg.reply_text("Anket şöyle yazılır:\n/duyuru -anket -kisiler \"Soru?\nSeçenek 1\nSeçenek 2\"")
+            return
+        try:
+            pm = await bot.send_poll(user.id if opt['test'] else msg.chat_id, parts[0], parts[1], is_anonymous=True)
+        except TelegramError as e:
+            await msg.reply_text(f"Anket oluşturulamadı: {e}")
+            return
+        if opt['test']:
+            await msg.reply_text("🧪 Test anketi sadece sana gönderildi.")
+            return
+        payload = {'mode': 'forward', 'from': pm.chat_id, 'mid': pm.message_id}
+        poll_id = getattr(getattr(pm, 'poll', None), 'id', None)
+    else:
+        payload = _dy_payload_from(msg, opt)
+        if not payload:
+            await msg.reply_text(DUYURU_HELP, parse_mode=ParseMode.HTML)
+            return
     if opt['test']:
         try:
             emoji_ok = await _dy_preview(user.id, payload)
@@ -5789,52 +6036,44 @@ async def duyuru(update: Update, context):
             await msg.reply_text(f"Test gönderilemedi: {e}")
             return
         note = "🧪 Test duyurusu sadece sana gönderildi."
-        if emoji_ok is False:
-            note += "\n" + DUYURU_EMOJI_WARN
         if str(msg.chat_id) != str(user.id):
             note += " (özelden)"
+        if emoji_ok is False:
+            note += "\n" + DUYURU_EMOJI_WARN
         await msg.reply_text(note)
         return
-    queue = duyuru_targets(opt['targets'], bid)
+    flt = {'active': opt['active']} if opt['active'] else {}
     with get_db() as conn:
         did = conn.execute(
             "INSERT INTO announcements (bot_id, owner_id, chat_id, created_at, run_at, targets, payload, pin, silent, "
-            "summary) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "filters, poll_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (bid, user.id, str(msg.chat_id), time.time(), opt['at'], ''.join(sorted(opt['targets'])),
-             json.dumps(payload), int(opt['pin']), int(opt['silent']), _dy_counts(queue))).lastrowid
-    try:
-        emoji_ok = await _dy_preview(msg.chat_id, payload)
-    except TelegramError as e:
-        await msg.reply_text(f"Önizleme gönderilemedi: {e}")
-        return
-    lines = [f"👆 <b>Duyuru #{did} önizlemesi</b>", f"🎯 Hedef: {_dy_counts(queue)}"]
-    n_users = sum(1 for _, k in queue if k == 'u')
-    if n_users:
-        lines.append("👤 Kişiler: botu özelden kullananlar; gruplarda görülüp botu hiç başlatmamış olanlara Telegram "
-                     "izin vermez (bir kez denenir, sonra atlanır).")
-    if queue:
-        lines.append(f"⏱ Tahmini süre: ~{max(1, round(len(queue) * (DUYURU_DELAY + 0.04)))} sn")
-    if opt['at']:
-        lines.append(f"⏰ Gönderim: {datetime.fromtimestamp(opt['at'], TZ_TR).strftime('%d.%m %H:%M')}")
-    if opt['pin']:
-        lines.append("📌 Gruplarda ve kanallarda sabitlenecek")
-    if opt['silent']:
-        lines.append("🔕 Bildirimsiz")
-    if emoji_ok is False:
-        lines.append(DUYURU_EMOJI_WARN)
-    if not queue:
-        lines.append("\nGönderilecek kimse yok.")
-        await msg.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-        return
-    go = "⏰ Zamanla" if opt['at'] else "✅ Gönder"
-    kb = InlineKeyboardMarkup([[ibtn(go, f"dy|go|{did}", GREEN), ibtn("❌ İptal", f"dy|no|{did}", RED)]])
-    await msg.reply_text("\n".join(lines), parse_mode=ParseMode.HTML, reply_markup=kb)
+             json.dumps(payload), int(opt['pin']), int(opt['silent']), json.dumps(flt), poll_id)).lastrowid
+    if payload['mode'] != 'forward':  # anket zaten önizleme olarak gönderildi
+        try:
+            emoji_ok = await _dy_preview(msg.chat_id, payload)
+        except TelegramError as e:
+            await msg.reply_text(f"Önizleme gönderilemedi: {e}")
+            return
+        if emoji_ok is False:
+            flt['emoji_bad'] = True
+            with get_db() as conn:
+                conn.execute("UPDATE announcements SET filters = ? WHERE id = ?", (json.dumps(flt), did))
+    text, kb = _dy_view(did)
+    await msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
 
-DUYURU_EMOJI_WARN = ("⚠️ Premium emojiler Telegram tarafından normal emojiye çevrildi (botlar yazarak premium emoji "
-                     "gönderemiyor). Çözüm: mesajı kendin yaz, ona yanıt verip /duyuru yaz — kopyalanan mesajda korunur.")
+async def duyuru_poll_handler(update: Update, context):
+    """Duyuru anketinin oyları (Telegram, botun gönderdiği anketin güncel durumunu yollar)."""
+    poll = update.poll
+    if not poll:
+        return
+    res = {'total': poll.total_voter_count, 'options': [[o.text, o.voter_count] for o in poll.options]}
+    with get_db() as conn:
+        conn.execute("UPDATE announcements SET poll_result = ? WHERE poll_id = ?", (json.dumps(res), poll.id))
 
 async def duyuru_callback(update: Update, context):
-    """dy|go|id · dy|no|id · dy|x|id (zamanlananı iptal) · dy|s|id (durdur) · dy|off (kişi: duyuruları kapat)"""
+    """dy|go|id · dy|no|id · dy|sel|id|sayfa · dy|t|id|sayfa|sohbet · dy|sc|id|sayfa · dy|pv|id ·
+    dy|x|id (zamanlananı iptal) · dy|s|id (durdur) · dy|td|isim (şablon sil) · dy|off (kişi: duyuruları kapat)"""
     query = update.callback_query
     parts = query.data.split('|')
     if parts[1] == 'off':
@@ -5843,6 +6082,19 @@ async def duyuru_callback(update: Update, context):
             conn.execute("UPDATE bot_users SET optout = 1 WHERE bot_id = ? AND user_id = ?",
                          (context.bot.id, query.from_user.id))
         await query.answer("🔕 Duyurular kapatıldı. Tekrar açmak için /duyuruac", show_alert=True)
+        return
+    if parts[1] == 'td':
+        if not is_bot_owner(query.from_user.id):
+            await query.answer("Yetkisiz!", show_alert=True)
+            return
+        with get_db() as conn:
+            conn.execute("DELETE FROM duyuru_templates WHERE bot_id = ? AND name = ?", (cur_bot_id(), parts[2]))
+        await query.answer("🗑 Silindi")
+        text, kb = _dy_templates_view()
+        try:
+            await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        except TelegramError:
+            pass
         return
     try:
         did = int(parts[2])
@@ -5854,7 +6106,7 @@ async def duyuru_callback(update: Update, context):
         await query.answer("Yetkisiz ya da geçersiz.", show_alert=True)
         return
     act = parts[1]
-    if act in ('go', 'no') and r['status'] != 'draft':
+    if act in ('go', 'no', 'sel', 't', 'sc', 'pv') and r['status'] != 'draft':
         await query.answer("Bu duyuru zaten işlendi.")
         return
     if act == 'go':
@@ -5880,6 +6132,25 @@ async def duyuru_callback(update: Update, context):
             await query.edit_message_text(f"❌ Duyuru #{did} iptal edildi.")
         except TelegramError:
             pass
+    elif act in ('sel', 't', 'sc', 'pv'):
+        page = int(parts[3]) if len(parts) > 3 and parts[3].lstrip('-').isdigit() else 0
+        if act in ('t', 'sc'):
+            flt = _dy_filters(r)
+            only = list(flt.get('only') or [])
+            if act == 'sc':
+                only = []
+            elif len(parts) > 4:
+                cid = parts[4]
+                only = [c for c in only if c != cid] if cid in only else only + [cid]
+            flt['only'] = only
+            with get_db() as conn:
+                conn.execute("UPDATE announcements SET filters = ? WHERE id = ?", (json.dumps(flt), did))
+        await query.answer()
+        text, kb = _dy_view(did) if act == 'pv' else _dy_sel_view(did, page)
+        try:
+            await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        except TelegramError:
+            pass
     elif act == 'x':
         with get_db() as conn:
             n = conn.execute("UPDATE announcements SET status = 'cancelled' WHERE id = ? AND status = 'scheduled'",
@@ -5898,19 +6169,26 @@ async def duyuru_callback(update: Update, context):
 def _dy_list(owner_id: int) -> tuple:
     bid = cur_bot_id()
     with get_db() as conn:
-        rows = conn.execute("SELECT * FROM announcements WHERE bot_id = ? AND status != 'draft' "
-                            "ORDER BY id DESC LIMIT 10", (bid,)).fetchall()
+        rows = [dict(r) for r in conn.execute("SELECT * FROM announcements WHERE bot_id = ? AND status != 'draft' "
+                                              "ORDER BY id DESC LIMIT 10", (bid,))]
     if not rows:
         return "📢 Henüz duyuru yok.\n\n" + re.sub(r'<[^>]+>', '', DUYURU_HELP.split('\n\n')[1]), None
     lines, kb = ["📢 <b>Son duyurular</b>\n"], []
     for r in rows:
         when = datetime.fromtimestamp(r['run_at'] or r['created_at'], TZ_TR).strftime('%d.%m %H:%M')
         payload = json.loads(r['payload'])
-        what = ("📋 kopya mesaj" if payload['mode'] == 'copy'
-                else html.escape(rich_plain(payload['rich'], 40) or "(medya)"))
-        lines.append(f"<b>#{r['id']}</b> {_DY_STATUS.get(r['status'], r['status'])} · {when}\n"
-                     f"   {what}\n   🎯 {html.escape(r['summary'] or '')}"
-                     + (f"\n   ✅ {r['sent']} · 🚫 {r['blocked']} · ⚠️ {r['failed']}" if r['status'] in ('running', 'done', 'stopped') else ""))
+        what = {'copy': "📋 kopya mesaj", 'forward': "🗳 anket"}.get(payload['mode']) \
+            or html.escape(rich_plain(payload['rich'], 40) or "(medya)")
+        line = (f"<b>#{r['id']}</b> {_DY_STATUS.get(r['status'], r['status'])} · {when}\n"
+                f"   {what}\n   🎯 {html.escape(r['summary'] or '')}")
+        if r['status'] in ('running', 'done', 'stopped'):
+            line += f"\n   ✅ {r['sent']} · 🚫 {r['blocked']} · ⚠️ {r['failed']}"
+            if payload['mode'] == 'rich' and _dy_url_buttons(payload['rich']):
+                total, uniq = _dy_clicks(r['id'])
+                line += f"\n   👆 {total} tıklama" + (f" ({uniq} kişi)" if uniq else "")
+        if r.get('poll_id'):
+            line += f"\n   {_dy_poll_text(r)}"
+        lines.append(line)
         if r['status'] == 'scheduled':
             kb.append([ibtn(f"❌ #{r['id']} iptal", f"dy|x|{r['id']}", RED)])
         elif r['status'] == 'running':
@@ -5928,6 +6206,28 @@ async def cmd_duyurular(update: Update, context):
     if not is_bot_owner(update.effective_user.id):
         return
     text, kb = _dy_list(update.effective_user.id)
+    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+def _dy_templates_view() -> tuple:
+    with get_db() as conn:
+        rows = conn.execute("SELECT name, payload FROM duyuru_templates WHERE bot_id = ? ORDER BY name",
+                            (cur_bot_id(),)).fetchall()
+    if not rows:
+        return ("💾 Kayıtlı şablon yok.\n\nKaydetmek için: <code>/duyuru -kaydet isim \"mesaj\"</code> "
+                "ya da bir mesaja yanıt verip <code>/duyuru -kaydet isim</code>"), None
+    lines, kb = ["💾 <b>Duyuru şablonları</b>\n"], []
+    for r in rows:
+        p = json.loads(r['payload'])
+        what = "📋 kopya mesaj" if p['mode'] == 'copy' else html.escape(rich_plain(p.get('rich'), 50) or "(medya)")
+        lines.append(f"<code>#{html.escape(r['name'])}</code> — {what}")
+        kb.append([ibtn(f"🗑 #{r['name']}", f"dy|td|{r['name']}", RED)])
+    lines.append("\nKullanım: <code>/duyuru -kisiler #isim</code>")
+    return "\n".join(lines), InlineKeyboardMarkup(kb)
+
+async def cmd_duyurusablon(update: Update, context):
+    if not is_bot_owner(update.effective_user.id):
+        return
+    text, kb = _dy_templates_view()
     await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 async def cmd_duyurudur(update: Update, context):
@@ -8038,7 +8338,8 @@ async def help_command(update: Update, context):
                 f"🤖 {_help_title()} — Bot Sahibi Komutlari\n\n"
                 "/panel — Botunun gruplari ve istatistikleri\n"
                 "/duyuru — Gruplara, kanallara ve kisilere duyuru (/duyuru yaz, kullanimi gor)\n"
-                "/duyurular — Duyuru gecmisi ve zamanlananlar\n"
+                "/duyurular — Duyuru gecmisi, tiklamalar, anket sonuclari\n"
+                "/duyurusablon — Duyuru sablonlari\n"
                 "/gban <id|@kullanici> [sebep] — Botunun tum gruplarinda banla\n"
                 "/ungban <id|@kullanici> — Bani kaldir\n"
                 "/gbanlist — Ban listesi\n"
@@ -8060,7 +8361,8 @@ async def help_command(update: Update, context):
                 "/gmedyaengel — Yanitlanan medyayi tum gruplarda engelle\n"
                 "/kurtar — Admin kurtarma\n"
                 "/duyuru — Gruplara, kanallara ve kisilere duyuru (/duyuru yaz, kullanimi gor)\n"
-                "/duyurular — Duyuru gecmisi ve zamanlananlar\n"
+                "/duyurular — Duyuru gecmisi, tiklamalar, anket sonuclari\n"
+                "/duyurusablon — Duyuru sablonlari\n"
                 "/kanal — Kanal sec\n"
                 "/kanalsettings — Kanal ayarlari\n"
             ))
@@ -8282,13 +8584,13 @@ PRIVATE_COMMANDS = [
 ]
 CLONE_OWNER_COMMANDS = [
     ("panel", "Botunun grupları ve istatistikleri"), ("duyuru", "Gruplara, kanallara, kişilere duyuru"),
-    ("duyurular", "Duyuru geçmişi"),
+    ("duyurular", "Duyuru geçmişi"), ("duyurusablon", "Duyuru şablonları"),
     ("gban", "Botunun gruplarında banla"), ("ungban", "Banı kaldır"), ("gbanlist", "Ban listesi"),
 ]
 FOUNDER_COMMANDS = [("klonlar", "Klon botları yönet"), ("perf", "Performans ölçümü"), 
     ("panel", "Yönetim paneli"), ("gban", "Global ban"), ("ungban", "Global banı kaldır"),
     ("gbanlist", "Global ban listesi"), ("engelle", "Kullanıcı/sohbet engelle"), ("engelkaldir", "Engeli kaldır"),
-    ("duyuru", "Gruplara, kanallara, kişilere duyuru"), ("duyurular", "Duyuru geçmişi"), ("yedek", "Veritabanı yedeği"),
+    ("duyuru", "Gruplara, kanallara, kişilere duyuru"), ("duyurular", "Duyuru geçmişi"), ("duyurusablon", "Duyuru şablonları"), ("yedek", "Veritabanı yedeği"),
     ("gmedyaengel", "Medyayı tüm gruplarda engelle"),
 ]
 
@@ -11766,6 +12068,13 @@ def webapp(environ, start_response):
                 return reply(400, {'error': "Geçersiz istek"})
             status, data = web_api(path.rsplit('/api/', 1)[1].strip('/'), body)
             return reply(status, data)
+        rm = re.search(r'/r/(\d+)/(\d+)/(\d+)/([0-9a-f]{12})/?$', path)
+        if rm and method == 'GET':  # duyuru butonu: tıklamayı say, asıl adrese yönlendir
+            target = duyuru_click(int(rm.group(1)), int(rm.group(2)), int(rm.group(3)), rm.group(4))
+            if not target:
+                return reply(404, "Bağlantı geçersiz", 'text/plain; charset=utf-8')
+            start_response("302 Found", [('Location', target), ('Content-Length', '0'), ('Cache-Control', 'no-store')])
+            return [b'']
         if path.rstrip('/').endswith('/health'):
             return reply(200, "ok", 'text/plain; charset=utf-8')
         if method == 'GET':
@@ -14004,6 +14313,8 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('duyuru', duyuru))
     app.add_handler(CommandHandler('duyurular', cmd_duyurular))
     app.add_handler(CommandHandler('duyurudur', cmd_duyurudur))
+    app.add_handler(CommandHandler('duyurusablon', cmd_duyurusablon))
+    app.add_handler(PollHandler(duyuru_poll_handler))
     app.add_handler(CommandHandler(['duyurukapat', 'duyuruac'], cmd_duyurukapat, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(duyuru_callback, pattern=r'^dy\|'))
     app.add_handler(CommandHandler('profil', profil))
