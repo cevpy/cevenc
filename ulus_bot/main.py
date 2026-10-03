@@ -2306,11 +2306,13 @@ async def newbie_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYP
 #   2) Tehlikeli dosya türleri (.apk, .exe …)
 #   3) İsteğe bağlı yapay zeka taraması (pip install nudenet) — arka planda, uygunsuz bulunan listeye eklenir
 #   4) Saldırı sezilince otomatik medya kilidi; kanalda art arda uygunsuz gönderi → koruma modu (lockdown)
-try:
-    from nudenet import NudeDetector  # isteğe bağlı; kurulu değilse tarama kapalı kalır
-except Exception as _nsfw_import_error:  # kurulu değil ya da platform desteklemiyor
-    NudeDetector = None
-    logger.info(f"NudeNet yok, yapay zeka medya taraması kapalı: {_nsfw_import_error}")
+NudeDetector = None
+if '--web-request' not in sys.argv:  # web panel isteği medya taramaz: ağır kütüphane her istekte yüklenmesin
+    try:
+        from nudenet import NudeDetector  # isteğe bağlı; kurulu değilse tarama kapalı kalır
+    except Exception as _nsfw_import_error:  # kurulu değil ya da platform desteklemiyor
+        NudeDetector = None
+        logger.info(f"NudeNet yok, yapay zeka medya taraması kapalı: {_nsfw_import_error}")
 
 DANGEROUS_EXTS = {'apk', 'xapk', 'apkm', 'apks', 'exe', 'scr', 'bat', 'cmd', 'com', 'msi', 'jar', 'vbs', 'vbe',
                   'js', 'jse', 'ps1', 'dll', 'lnk', 'hta', 'pif', 'wsf', 'reg', 'cpl'}
