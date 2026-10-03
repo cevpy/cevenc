@@ -928,6 +928,32 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_botrem ON bot_removals(bot_id, at);
             CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+            CREATE TABLE IF NOT EXISTS admin_actions (
+                chat_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                target_id INTEGER DEFAULT 0,
+                n INTEGER DEFAULT 1,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_adminact ON admin_actions(chat_id, user_id, at);
+            CREATE INDEX IF NOT EXISTS idx_adminact_at ON admin_actions(chat_id, at);
+            CREATE TABLE IF NOT EXISTS admin_suspend (
+                chat_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT,
+                tg_rights TEXT,
+                at REAL NOT NULL,
+                PRIMARY KEY (chat_id, user_id)
+            );
+            CREATE TABLE IF NOT EXISTS msg_edits (
+                chat_id TEXT NOT NULL,
+                message_id INTEGER NOT NULL,
+                user_id INTEGER,
+                text TEXT,
+                at REAL NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_msgedits ON msg_edits(chat_id, message_id);
             CREATE TABLE IF NOT EXISTS invite_links (
                 chat_id TEXT NOT NULL,
                 user_id INTEGER NOT NULL,
@@ -1581,6 +1607,7 @@ def _default_channel_settings():
         'tag_size': 5, 'tag_style': 'name', 'tag_active_only': False,
         'invite_enabled': True,
         'edit_guard_scope': 'member',
+        'admin_audit': False, 'admin_limit_on': False, 'admin_limit': 10, 'del_log': True,
         # Topluluk koruması: ortak kara liste (botun başka grubunda banlı) + CAS, isim takibi, oylamalı susturma
         'shared_blacklist': True, 'blacklist_action': 'mute', 'cas_enabled': False, 'name_track': True,
         'vote_mute': True, 'vote_needed': 5, 'vote_mute_minutes': 60,
@@ -1768,6 +1795,7 @@ async def log_mod_action(chat_id: str, action: str, target_id: int, target_uname
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (chat_id, action, target_id, target_uname, by_id, by_uname, reason, time.time()))
             conn.commit()
+    await record_admin_action(chat_id, by_id, _mod_kind(action), target_id)
 
 async def apply_punishment(chat_id: str, user_id: int, username: str, reason: str, channel: dict, user=None,
                            thread: dict | None = None, actor_id: int | None = None, actor_username: str = 'bot'):
@@ -2055,8 +2083,11 @@ async def report_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         if act != 'ok':
+            cached = _cached_texts(cid, [row['message_id']]).get(row['message_id'])
             try:
                 await bot.delete_message(cid, row['message_id'])
+                await log_deleted(cid, clicker, [cached or (target, '')], "rapor")
+                await record_admin_action(cid, clicker.id, 'delete', target)
             except Exception as e:
                 logger.debug(f"Raporlanan mesaj silinemedi: {e}")
         if act == 'warn':
@@ -2763,19 +2794,17 @@ def _fmt_age(sec: float) -> str:
     return f"{max(m, 1)} dk"
 
 async def message_cache_handler(update: Update, context):
-    """Geç düzenleme koruması açık gruplarda mesajın ilk hâlini saklar."""
+    """Grup mesajlarının ilk hâlini 2 gün saklar (geç düzenleme koruması, /gecmis, silinen mesaj kaydı). Toplu yazılır."""
     msg = update.message
     if not msg or not msg.from_user:
         return
     chat_id = str(msg.chat_id)
-    channel = get_channel_settings(chat_id)
-    if not channel or not channel['settings'].get('edit_guard'):
+    if not get_channel_settings(chat_id):
         return
     text = message_text(msg) or (f"[{_get_msg_type(msg)}]" if _media_info(msg) else '')
-    with get_db() as conn:
-        conn.execute("INSERT OR REPLACE INTO msg_cache (chat_id, message_id, user_id, text, sent_at) VALUES (?, ?, ?, ?, ?)",
-                     (chat_id, msg.message_id, msg.from_user.id, text[:4000], msg.date.timestamp()))
-        conn.commit()
+    _cache_buf[(chat_id, msg.message_id)] = (chat_id, msg.message_id, msg.from_user.id, text[:4000], msg.date.timestamp())
+    if len(_cache_buf) >= WRITE_FLUSH_MAX:
+        flush_writes()
 
 async def edit_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gönderildikten X dk sonra düzenlenen mesajı siler; grubun kurucusuna ve botu ekleyene eski/yeni hâli gönderir."""
@@ -2790,6 +2819,7 @@ async def edit_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     limit_min = int(s.get('edit_guard_minutes', 5) or 5)
     age = (msg.edit_date - msg.date).total_seconds()
     new_text = message_text(msg) or (f"[{_get_msg_type(msg)}]" if _media_info(msg) else '')
+    flush_writes()
     with get_db() as conn:
         row = conn.execute("SELECT text FROM msg_cache WHERE chat_id = ? AND message_id = ?",
                            (chat_id, msg.message_id)).fetchone()
@@ -3763,6 +3793,10 @@ async def temizle(update: Update, context):
     cmd_msg_id = update.message.message_id
     ids = list(range(cmd_msg_id, max(0, cmd_msg_id - count - 1), -1))  # komut mesajı dahil
     label = "Son 20.000 mesaj" if arg == 'all' else f"Son {count} mesaj"
+    cached = _cached_texts(chat_id, ids)
+    if cached:
+        await log_deleted(chat_id, update.effective_user, [cached[i] for i in sorted(cached)], label)
+    await record_admin_action(chat_id, update.effective_user.id, 'delete', 0, len(cached) or 1)
     context.application.create_task(
         _run_cleanup(chat_id, ids, label, mention(update.effective_user), thread_kw(update.message), context.job_queue),
         update=update)
@@ -4741,12 +4775,14 @@ NUMERIC = {
     'tag_size':              (1, 10, [1, 3, 5, 10], "{} kişi"),
     'vote_needed':           (2, 15, [3, 5, 7, 10, 15], "{} oy"),
     'vote_mute_minutes':     (10, 1440, [10, 30, 60, 180, 720, 1440], "{} dk"),
+    'admin_limit':           (3, 100, [3, 5, 10, 15, 20, 30, 50, 100], "{} işlem/saat"),
 }
 TOGGLE_KEYS = {v[1] for v in PROTECTIONS.values()} | {
     'anti_raid', 'captcha_enabled', 'join_captcha', 'auto_accept', 'auto_reject', 'auto_reject_bot',
     'restrict_no_username', 'welcome_enabled', 'nsfw_scan', 'file_block', 'media_autolock', 'edit_guard',
     'edit_notify', 'reports_enabled', 'recovery_autorestore', 'welcome_clean', 'welcome_batch', 'welcome_dm',
-    'goodbye_enabled', 'fsub_enabled', 'tag_active_only', 'shared_blacklist', 'cas_enabled', 'name_track', 'vote_mute'}
+    'goodbye_enabled', 'fsub_enabled', 'tag_active_only', 'shared_blacklist', 'cas_enabled', 'name_track', 'vote_mute',
+    'admin_audit', 'admin_limit_on', 'del_log'}
 NIGHT_RESTRICTIONS = [('block_messages', "Mesaj"), ('block_media', "Foto/Video"), ('block_voice', "Ses/Video not"),
                       ('block_sticker', "Sticker/GIF"), ('block_links', "Link önizleme"), ('block_files', "Dosya/Müzik")]
 PAGE_SIZE = 8
@@ -5037,6 +5073,7 @@ async def render_settings(cid: str, page: str = 'main'):
                 [ibtn("🧑‍⚖️ Topluluk koruması", f"s|{cid}|p|comm", BLUE)],
                 [ibtn("✏️ Düzenleme & Rapor", f"s|{cid}|p|edit", BLUE), ibtn("🧾 Log Kanalı", f"s|{cid}|p|log", BLUE)],
                 [ibtn("🌐 Grup Ağı", f"s|{cid}|p|net", BLUE), ibtn("🛟 Kurtarma", f"s|{cid}|p|rec", BLUE)],
+                [ibtn("👮 Admin denetimi", f"s|{cid}|p|audit", BLUE)],
                 [ibtn("✖️ Kapat", f"s|{cid}|x", RED)]]
     return text, InlineKeyboardMarkup(rows)
 
@@ -5055,6 +5092,9 @@ async def _settings_change(cid: str, channel: dict, op: str, args: list, query, 
     s = channel['settings']
     uid = query.from_user.id
     by = mention(query.from_user)
+    if op in ('t', 'n') and args and args[0] in KURUCU_KEYS and user_level(cid, uid) < LVL_KURUCU:
+        await query.answer("Bu ayarı sadece grubun kurucusu değiştirebilir.", show_alert=True)
+        return None
     if op == 't' and args:
         key, page = args[0], (args[1] if len(args) > 1 else 'main')
         if key not in TOGGLE_KEYS:
@@ -5363,7 +5403,7 @@ async def _apply_input(kind: str, cid: str, channel: dict, msg, user):
     return "Bilinmeyen işlem.", 'main'
 
 # ── Panel ekleri: uygunsuz medya, engelli medya listesi, düzenleme & rapor, grup ağı, kurtarma ──
-EXT_PAGES = {'bm', 'edit', 'net', 'rec', 'snapc'}
+EXT_PAGES = {'bm', 'edit', 'net', 'rec', 'snapc', 'audit'}
 EXT_OPS = {'mk', 'mo', 'bd', 'na', 'nr', 'nb', 'nc', 'ns', 'rd', 'sn', 'rg', 'es'}
 # Geç düzenleme koruması kimlere uygulanır: bu seviyenin ALTINDAKİLER korumaya tabidir (kurucu her zaman muaf)
 EDIT_SCOPES = {'member': (LVL_ADMIN, "Sadece üyeler"), 'admin': (LVL_UST, "Üyeler + Adminler"),
@@ -5420,6 +5460,22 @@ async def _render_ext_page(cid: str, base: str, sub: str, channel: dict, title: 
                  _num_row(cid, 'edit_guard_minutes', s, 'edit', "Süre"),
                  [toggle_btn("Kurucuya/ekleyene bildir", s.get('edit_notify', True), f"s|{cid}|t|edit_notify|edit")],
                  [toggle_btn("Rapor sistemi", s.get('reports_enabled', True), f"s|{cid}|t|reports_enabled|edit")],
+                 _back(cid)]
+    elif base == 'audit':
+        with get_db() as conn:
+            susp = conn.execute("SELECT COUNT(*) FROM admin_suspend WHERE chat_id = ?", (cid,)).fetchone()[0]
+        text = (f"👮 <b>Admin denetimi</b> — {title}\n\n"
+                "• <b>Günlük özet</b>: her akşam kurucuya ve botu ekleyene kim kaç ban, susturma, uyarı ve silme yaptı.\n"
+                f"• <b>İşlem sınırı</b>: kurucu olmayan bir yetkili 1 saatte {s.get('admin_limit', 10)}'dan fazla "
+                "ban/atma/susturma yaparsa yetkisi askıya alınır, sana butonlu bildirim gelir (banları tek tuşla geri alınır).\n"
+                "• <b>Silinen mesaj kaydı</b>: /del ve /temizle ile silinen mesajlar log kanalına kopyalanır. "
+                "(Telegram, uygulamadan elle silinen mesajları botlara bildirmez.)\n"
+                "Anlık özet: <code>/denetim 7</code> · Mesaj geçmişi: mesaja yanıtla <code>/gecmis</code>\n"
+                f"Askıdaki yetkili: {susp}\n\nBu ayarları sadece kurucu değiştirebilir.")
+        rows += [[toggle_btn("Günlük admin özeti", s.get('admin_audit'), f"s|{cid}|t|admin_audit|audit")],
+                 [toggle_btn("Admin işlem sınırı", s.get('admin_limit_on'), f"s|{cid}|t|admin_limit_on|audit")],
+                 _num_row(cid, 'admin_limit', s, 'audit', "Sınır"),
+                 [toggle_btn("Silinen mesajları log kanalına kopyala", s.get('del_log', True), f"s|{cid}|t|del_log|audit")],
                  _back(cid)]
     elif base == 'net':
         owner = network_of(cid)
@@ -6833,6 +6889,374 @@ async def cmd_destek(update: Update, context):
         "Kullanıcıların bota özelden yazdığı mesajlar sana iletilir; o mesaja <b>yanıt</b> verirsen cevabın kullanıcıya "
         "gider (kimliğin görünmez). Altındaki 🚫 ile kişiyi engelleyebilirsin.\n"
         f"{'/destek kapat — kapat' if on else '/destek ac — aç'}", parse_mode=ParseMode.HTML)
+
+# ═══════════════════════════ ADMİN DENETİMİ: işlem kaydı, günlük özet, işlem sınırı, silinen mesaj kaydı ═══════════════════════════
+# Yetkililerin işlemleri (bot komutları + Telegram'dan elle yapılan ban/susturma) admin_actions tablosuna yazılır.
+# • Günlük özet: kurucuya ve botu ekleyene her akşam kim ne yaptı.
+# • İşlem sınırı: kurucu olmayan bir yetkili 1 saatte sınırdan fazla ban/atma/susturma yaparsa yetkisi askıya alınır.
+# • Silinen mesaj kaydı: /del ve /temizle ile silinen mesajlar log kanalına kopyalanır (Telegram, uygulamadan elle
+#   silinen mesajları botlara bildirmez; onlar kaydedilemez).
+AUDIT_KINDS = {'ban': "🔨 ban", 'kick': "👢 atma", 'mute': "🔇 susturma", 'warn': "⚠️ uyarı", 'delete': "🗑 silme",
+               'unban': "✅ ban kaldırma", 'unmute': "🔊 susturma kaldırma", 'unwarn': "↩️ uyarı geri alma"}
+LIMIT_KINDS = ('ban', 'kick', 'mute')
+AUDIT_HOUR = 22               # günlük özet saati (TR)
+AUDIT_KEEP_DAYS = 35
+EDIT_HISTORY_KEEP_DAYS = 3
+EDIT_HISTORY_MAX = 20         # bir mesaj için saklanan en fazla sürüm
+KURUCU_KEYS = {'admin_audit', 'admin_limit_on', 'admin_limit', 'del_log', 'edit_guard_scope'}
+
+def _mod_kind(action: str) -> str | None:
+    """log_mod_action işlem adı → denetim türü (otomatik koruma cezaları sayılmaz)."""
+    a = (action or '').lower()
+    if a.startswith(('oylama', 'karaliste')) or ':' in a and a.split(':')[0] not in ('buton', 'rapor'):
+        return None
+    a = a.split(':')[-1]
+    for keys, kind in ((('unban', 'ub'), 'unban'), (('unmute', 'um'), 'unmute'), (('unwarn', 'uw'), 'unwarn'),
+                       (('ban', 'bn', 'yasak'), 'ban'), (('kick', 'at', 'atıldı'), 'kick'), (('mute', 'mu', 'sustur'), 'mute'),
+                       (('warn', 'uyar'), 'warn'), (('del', 'sil'), 'delete')):
+        if a in keys or any(k in a for k in keys if len(k) >= 3):
+            return kind
+    return None
+
+def _is_our_bot(uid: int) -> bool:
+    return bool(uid) and (uid == cur_bot_id() or uid == BOT_ID or uid in RUNNING_BOTS)
+
+async def record_admin_action(chat_id: str, admin_id: int, kind: str | None, target_id: int = 0, n: int = 1):
+    """Yetkili işlemini kaydeder; sınır açıksa aşılıp aşılmadığını denetler."""
+    if not kind or not admin_id or _is_our_bot(admin_id):
+        return
+    now = time.time()
+    with get_db() as conn:
+        conn.execute("INSERT INTO admin_actions (chat_id, user_id, kind, target_id, n, at) VALUES (?, ?, ?, ?, ?, ?)",
+                     (str(chat_id), admin_id, kind, target_id or 0, max(1, int(n)), now))
+    if kind in LIMIT_KINDS:
+        await _admin_limit_check(str(chat_id), admin_id)
+
+async def admin_ui_action_handler(update: Update, context):
+    """Telegram uygulamasından elle yapılan ban / susturma / atma (bot komutuyla yapılanlar log_mod_action'dan gelir)."""
+    cm = update.chat_member
+    if not cm or not cm.from_user or cm.from_user.is_bot or cm.chat.type not in ('group', 'supergroup'):
+        return
+    target = cm.new_chat_member.user
+    if not target or target.id == cm.from_user.id or target.is_bot:
+        return
+    old, new = cm.old_chat_member.status, cm.new_chat_member.status
+    kind = None
+    if new == 'kicked' and old != 'kicked':
+        kind = 'ban'
+    elif old == 'kicked' and new in ('left', 'member'):
+        kind = 'unban'
+    elif new == 'left' and old in ('member', 'restricted'):
+        kind = 'kick'
+    elif new == 'restricted' and old != 'restricted' and not getattr(cm.new_chat_member, 'can_send_messages', True):
+        kind = 'mute'
+    elif old == 'restricted' and new == 'member':
+        kind = 'unmute'
+    if kind:
+        await record_admin_action(str(cm.chat.id), cm.from_user.id, kind, target.id)
+
+# ── İşlem sınırı ──
+async def _admin_limit_check(chat_id: str, admin_id: int):
+    channel = get_channel_settings(chat_id)
+    if not channel:
+        return
+    s = channel['settings']
+    if not s.get('admin_limit_on') or user_level(chat_id, admin_id) >= LVL_KURUCU:
+        return
+    limit = int(s.get('admin_limit', 10) or 10)
+    with get_db() as conn:
+        cnt = conn.execute(f"SELECT COALESCE(SUM(n), 0) FROM admin_actions WHERE chat_id = ? AND user_id = ? AND at >= ? "
+                           f"AND kind IN ({','.join('?' * len(LIMIT_KINDS))})",
+                           (chat_id, admin_id, time.time() - 3600, *LIMIT_KINDS)).fetchone()[0]
+        already = conn.execute("SELECT 1 FROM admin_suspend WHERE chat_id = ? AND user_id = ?", (chat_id, admin_id)).fetchone()
+    if cnt >= limit and not already:
+        await suspend_admin(chat_id, admin_id, cnt, limit)
+
+TG_ADMIN_RIGHT_KEYS = ('can_manage_chat', 'can_delete_messages', 'can_manage_video_chats', 'can_restrict_members',
+                       'can_promote_members', 'can_change_info', 'can_invite_users', 'can_pin_messages', 'can_manage_topics',
+                       'can_post_stories', 'can_edit_stories', 'can_delete_stories')
+
+async def suspend_admin(chat_id: str, admin_id: int, count: int, limit: int):
+    """Yetkiliyi askıya alır: bot rütbesi kaldırılır, Telegram yöneticiliği (bot atadıysa) alınır; kurucuya butonlu bildirim."""
+    rights, tg_note = None, ""
+    try:
+        member = await bot.get_chat_member(chat_id, admin_id)
+        if member.status == 'administrator':
+            rights = {k: bool(getattr(member, k, False)) for k in TG_ADMIN_RIGHT_KEYS}
+            await bot.promote_chat_member(chat_id, admin_id, **{k: False for k in TG_ADMIN_RIGHT_KEYS})
+            tg_note = "\n🔻 Telegram yöneticiliği de alındı."
+    except TelegramError as e:
+        tg_note = ("\n⚠️ Telegram yöneticiliği alınamadı (onu bot atamamış olabilir); gerekirse grup ayarlarından elle al. "
+                   f"({html.escape(str(e))[:80]})")
+        rights = None
+    with get_db() as conn:
+        row = conn.execute("SELECT role FROM roles WHERE chat_id = ? AND user_id = ?", (chat_id, admin_id)).fetchone()
+        role = row['role'] if row else None
+        if role:
+            conn.execute("DELETE FROM roles WHERE chat_id = ? AND user_id = ?", (chat_id, admin_id))
+    with get_db() as conn:
+        conn.execute("INSERT OR REPLACE INTO admin_suspend (chat_id, user_id, role, tg_rights, at) VALUES (?, ?, ?, ?, ?)",
+                     (chat_id, admin_id, role, json.dumps(rights) if rights else None, time.time()))
+    invalidate_admin_cache(chat_id)
+    who = mention_html(admin_id, _user_name(admin_id))
+    title = html.escape(await _chat_title(chat_id))
+    text = (f"🚨 <b>Admin işlem sınırı aşıldı</b> — {title}\n\n{who} son 1 saatte <b>{count}</b> ban/atma/susturma yaptı "
+            f"(sınır {limit}). Yetkisi askıya alındı" + (f" (rütbe: {ROLE_NAMES.get(role, role)})" if role else "") + "."
+            + tg_note)
+    kb = InlineKeyboardMarkup([[ibtn("♻️ Yetkisini geri ver", f"al|r|{chat_id}|{admin_id}", GREEN)],
+                               [ibtn("↩️ Son 2 saatteki banlarını kaldır", f"al|u|{chat_id}|{admin_id}", BLUE)],
+                               [ibtn("✅ Tamam, askıda kalsın", f"al|k|{chat_id}|{admin_id}", RED)]])
+    channel = get_channel_settings(chat_id)
+    for uid in await _edit_notify_targets(chat_id, channel):
+        try:
+            await bot.send_message(uid, text, parse_mode=ParseMode.HTML, reply_markup=kb)
+        except TelegramError as e:
+            logger.debug(f"Askı bildirimi gönderilemedi ({uid}): {e}")
+    await send_log(chat_id, text, ParseMode.HTML)
+
+def _user_name(uid: int) -> str:
+    with get_db() as conn:
+        r = conn.execute("SELECT first_name, username FROM users WHERE user_id = ? ORDER BY last_seen DESC LIMIT 1",
+                         (uid,)).fetchone()
+    return (r['first_name'] or r['username']) if r and (r['first_name'] or r['username']) else str(uid)
+
+async def admin_limit_callback(update: Update, context):
+    """al|r|chat|uid — yetkiyi geri ver · al|u|chat|uid — banlarını kaldır · al|k|chat|uid — askıda kalsın"""
+    query = update.callback_query
+    _, act, cid, uid = query.data.split('|')[:4]
+    uid = int(uid)
+    if user_level(cid, query.from_user.id) < LVL_KURUCU:
+        await query.answer("Bunu sadece grubun kurucusu yapabilir.", show_alert=True)
+        return
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM admin_suspend WHERE chat_id = ? AND user_id = ?", (cid, uid)).fetchone()
+    if act == 'u':
+        with get_db() as conn:
+            targets = [r['target_id'] for r in conn.execute(
+                "SELECT DISTINCT target_id FROM admin_actions WHERE chat_id = ? AND user_id = ? AND kind = 'ban' "
+                "AND at >= ? AND target_id > 0", (cid, uid, time.time() - 7200))]
+        done = 0
+        for t in targets:
+            try:
+                await bot.unban_chat_member(cid, t, only_if_banned=True)
+                done += 1
+            except TelegramError as e:
+                logger.debug(f"Ban geri alınamadı {cid}/{t}: {e}")
+        with get_db() as conn:
+            conn.executemany("DELETE FROM ban_list WHERE chat_id = ? AND user_id = ?", [(cid, t) for t in targets])
+        await query.answer(f"↩️ {done} kişinin banı kaldırıldı", show_alert=True)
+        await send_log(cid, f"↩️ {mention_html(uid, _user_name(uid))} kişisinin son banları geri alındı ({done}) | "
+                            f"{mention(query.from_user)}", ParseMode.HTML)
+        return
+    if not row:
+        await query.answer("Askıda değil (zaten çözülmüş).", show_alert=True)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except TelegramError:
+            pass
+        return
+    if act == 'r':
+        if row['role']:
+            with get_db() as conn:
+                conn.execute("INSERT OR REPLACE INTO roles (chat_id, user_id, role) VALUES (?, ?, ?)", (cid, uid, row['role']))
+        note = ""
+        if row['tg_rights']:
+            try:
+                await bot.promote_chat_member(cid, uid, **json.loads(row['tg_rights']))
+            except TelegramError as e:
+                note = f" (Telegram yetkisi geri verilemedi: {e})"
+        with get_db() as conn:
+            conn.execute("DELETE FROM admin_suspend WHERE chat_id = ? AND user_id = ?", (cid, uid))
+        invalidate_admin_cache(cid)
+        await query.answer("♻️ Yetkisi geri verildi" + note[:150], show_alert=True)
+        await send_log(cid, f"♻️ {mention_html(uid, _user_name(uid))} yetkisi geri verildi | {mention(query.from_user)}",
+                       ParseMode.HTML)
+    else:
+        with get_db() as conn:
+            conn.execute("DELETE FROM admin_suspend WHERE chat_id = ? AND user_id = ?", (cid, uid))
+        await query.answer("✅ Yetkisi alınmış olarak kaldı")
+    try:
+        await query.edit_message_reply_markup(reply_markup=None)
+    except TelegramError:
+        pass
+
+# ── Günlük özet ve /denetim ──
+def audit_summary(chat_id: str, days: int = 1) -> str | None:
+    since = time.time() - days * 86400
+    with get_db() as conn:
+        rows = conn.execute("SELECT user_id, kind, SUM(n) c FROM admin_actions WHERE chat_id = ? AND at >= ? "
+                            "GROUP BY user_id, kind", (str(chat_id), since)).fetchall()
+        susp = conn.execute("SELECT user_id FROM admin_suspend WHERE chat_id = ?", (str(chat_id),)).fetchall()
+    if not rows and not susp:
+        return None
+    per: dict = {}
+    for r in rows:
+        per.setdefault(r['user_id'], {})[r['kind']] = r['c']
+    order = sorted(per, key=lambda u: -sum(per[u].values()))
+    lines = []
+    for uid in order[:30]:
+        parts = [f"{AUDIT_KINDS[k]} {per[uid][k]}" for k in AUDIT_KINDS if per[uid].get(k)]
+        lines.append(f"• {mention_html(uid, _user_name(uid))}: " + " · ".join(parts))
+    for r in susp:
+        lines.append(f"⛔ {mention_html(r['user_id'], _user_name(r['user_id']))}: yetkisi askıda")
+    return "\n".join(lines)
+
+async def audit_daily_job(context):
+    with get_db() as conn:
+        chats = [r['chat_id'] for r in conn.execute("SELECT chat_id FROM channels WHERE mybot(bot_id) "
+                                                    "AND chat_type IN ('group','supergroup')")]
+    for cid in chats:
+        channel = get_channel_settings(cid)
+        if not channel or not channel['settings'].get('admin_audit'):
+            continue
+        body = audit_summary(cid, 1)
+        if not body:
+            continue
+        text = (f"👮 <b>Günlük admin özeti</b> — {html.escape(await _chat_title(cid))}\n\n{body}\n\n"
+                "<i>Telegram, uygulamadan elle silinen mesajları botlara bildirmez; silme sayısı /del ve /temizle "
+                "ile yapılanlardır.</i>")
+        for uid in await _edit_notify_targets(cid, channel):
+            try:
+                await bot.send_message(uid, text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+            except TelegramError as e:
+                logger.debug(f"Admin özeti gönderilemedi ({uid}): {e}")
+        await send_log(cid, text, ParseMode.HTML)
+
+async def cmd_denetim(update: Update, context):
+    """/denetim [gün] — yetkililerin son N gündeki işlemleri (kurucu ve yardımcı kurucu)."""
+    msg = update.effective_message
+    chat_id = _get_effective_chat_id(update, context)
+    if not chat_id or not get_channel_settings(chat_id):
+        await msg.reply_text("Önce /kanal ile grup seç!")
+        return
+    if not has_permission(chat_id, update.effective_user.id, LVL_YARDIMCI):
+        await msg.reply_text("Bu komut kurucu ve yardımcı kurucu içindir.")
+        return
+    days = int(context.args[0]) if context.args and context.args[0].isdigit() else 1
+    days = max(1, min(days, 30))
+    body = audit_summary(chat_id, days) or "Bu sürede yetkili işlemi yok."
+    text = (f"👮 <b>Admin denetimi</b> — {html.escape(await _chat_title(chat_id))} (son {days} gün)\n\n{body}\n\n"
+            "Gün sayısı: <code>/denetim 7</code>")
+    if update.effective_chat.type != 'private':
+        try:
+            await bot.send_message(update.effective_user.id, text, parse_mode=ParseMode.HTML)
+            await msg.reply_text("📩 Denetim özeti özelden gönderildi.")
+        except TelegramError:
+            await msg.reply_text("Özelden gönderemedim: önce bota özelden /start yaz.")
+        return
+    await msg.reply_text(text, parse_mode=ParseMode.HTML)
+
+# ── Silinen mesaj kaydı ──
+def _cached_texts(chat_id: str, ids) -> dict:
+    flush_writes()
+    ids = list(ids)
+    out = {}
+    with get_db() as conn:
+        for i in range(0, len(ids), 500):
+            part = ids[i:i + 500]
+            for r in conn.execute(f"SELECT message_id, user_id, text FROM msg_cache WHERE chat_id = ? AND message_id IN "
+                                  f"({','.join('?' * len(part))})", (str(chat_id), *part)):
+                out[r['message_id']] = (r['user_id'], r['text'])
+    return out
+
+async def log_deleted(chat_id: str, by_user, items: list, label: str = "") -> None:
+    """Silinen mesajları log kanalına yazar. items: [(sahip_id, metin)]"""
+    channel = get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('del_log', True) or not channel.get('log_chat_id') or not items:
+        return
+    lines = [f"{mention_html(uid, _user_name(uid)) if uid else '?'}: {html.escape((t or '')[:300])}"
+             for uid, t in items[:25]]
+    more = f"\n… ve {len(items) - 25} mesaj daha" if len(items) > 25 else ""
+    await send_log(chat_id, f"🗑 <b>Silinen mesajlar</b>{(' · ' + html.escape(label)) if label else ''} | "
+                            f"Silen: {mention(by_user)}\n<blockquote expandable>" + "\n".join(lines) + f"{more}</blockquote>",
+                   ParseMode.HTML)
+
+async def cmd_del(update: Update, context):
+    """/del (/sil) — yanıtlanan mesajı siler; içeriği (medya dahil) log kanalına kopyalanır."""
+    msg = update.effective_message
+    chat = update.effective_chat
+    if chat.type not in ('group', 'supergroup'):
+        await msg.reply_text("/del grupta, silinecek mesaja yanıt olarak kullanılır.")
+        return
+    cid = str(chat.id)
+    channel = get_channel_settings(cid)
+    if not channel or not await require(update, cid, 'can_delete'):
+        return
+    target = msg.reply_to_message
+    if target is None or getattr(target, 'forum_topic_created', None):
+        await msg.reply_text("Silinecek mesaja yanıt vererek /del yaz.")
+        return
+    owner = target.from_user
+    log_id = channel.get('log_chat_id')
+    if log_id and channel['settings'].get('del_log', True):
+        head = (f"🗑 <b>Mesaj silindi</b> | Sahibi: {mention(owner) if owner else '?'} | Silen: {mention(update.effective_user)}"
+                f"\n👥 {html.escape(chat.title or cid)}")
+        try:
+            await safe_send_message(log_id, head, parse_mode=ParseMode.HTML)
+            await bot.copy_message(log_id, cid, target.message_id)
+        except TelegramError:
+            await log_deleted(cid, update.effective_user, [(owner.id if owner else 0, message_text(target)
+                                                            or f"[{_get_msg_type(target)}]")])
+    for m in (target, msg):
+        try:
+            await m.delete()
+        except TelegramError as e:
+            logger.debug(f"/del silinemedi: {e}")
+    await record_admin_action(cid, update.effective_user.id, 'delete', owner.id if owner else 0)
+
+# ── Düzenleme geçmişi (/gecmis) ──
+async def edit_history_handler(update: Update, context):
+    """Gruplarda düzenlenen her mesajın önceki hâllerini saklar (geç düzenleme korumasından önce çalışır)."""
+    msg = update.edited_message
+    if not msg or not msg.from_user or msg.chat.type not in ('group', 'supergroup') or msg.location or not msg.edit_date:
+        return
+    chat_id = str(msg.chat_id)
+    new_text = message_text(msg) or (f"[{_get_msg_type(msg)}]" if _media_info(msg) else '')
+    flush_writes()
+    with get_db() as conn:
+        n = conn.execute("SELECT COUNT(*) FROM msg_edits WHERE chat_id = ? AND message_id = ?",
+                         (chat_id, msg.message_id)).fetchone()[0]
+        if n >= EDIT_HISTORY_MAX:
+            return
+        if n == 0:
+            orig = conn.execute("SELECT text FROM msg_cache WHERE chat_id = ? AND message_id = ?",
+                                (chat_id, msg.message_id)).fetchone()
+            if orig and orig['text'] is not None:
+                conn.execute("INSERT INTO msg_edits (chat_id, message_id, user_id, text, at) VALUES (?, ?, ?, ?, ?)",
+                             (chat_id, msg.message_id, msg.from_user.id, orig['text'], msg.date.timestamp()))
+        conn.execute("INSERT INTO msg_edits (chat_id, message_id, user_id, text, at) VALUES (?, ?, ?, ?, ?)",
+                     (chat_id, msg.message_id, msg.from_user.id, new_text[:4000], msg.edit_date.timestamp()))
+
+async def cmd_gecmis(update: Update, context):
+    """/gecmis — yanıtlanan mesajın düzenleme geçmişi (yetkililer)."""
+    msg = update.effective_message
+    chat = update.effective_chat
+    if chat.type not in ('group', 'supergroup'):
+        await msg.reply_text("/gecmis grupta, bir mesaja yanıt olarak kullanılır.")
+        return
+    cid = str(chat.id)
+    if not get_channel_settings(cid) or not await require(update, cid, 'can_delete'):
+        return
+    target = msg.reply_to_message
+    if target is None or getattr(target, 'forum_topic_created', None):
+        await msg.reply_text("Geçmişini görmek istediğin mesaja yanıt vererek /gecmis yaz.")
+        return
+    with get_db() as conn:
+        rows = conn.execute("SELECT text, at FROM msg_edits WHERE chat_id = ? AND message_id = ? ORDER BY at, rowid",
+                            (cid, target.message_id)).fetchall()
+    if not rows:
+        await msg.reply_text(f"Bu mesajın düzenleme kaydı yok (son {EDIT_HISTORY_KEEP_DAYS} gün saklanır).")
+        return
+    owner = target.from_user
+    parts = [f"📝 <b>Düzenleme geçmişi</b> — {mention(owner) if owner else '?'} · {len(rows) - 1} düzenleme\n"]
+    for i, r in enumerate(rows):
+        when = datetime.fromtimestamp(r['at'], TZ_TR).strftime('%d.%m %H:%M:%S')
+        tag = "ilk hâli" if i == 0 else f"{i}. düzenleme"
+        parts.append(f"<b>{i + 1}.</b> {when} · {tag}\n<blockquote expandable>{html.escape((r['text'] or '')[:700])}</blockquote>")
+    text = "\n".join(parts)
+    if len(text) > 4000:
+        text = text[:3900].rsplit('\n', 1)[0] + "\n…"
+    await msg.reply_text(text, parse_mode=ParseMode.HTML)
 
 def upsert_user(chat_id: str, user):
     with get_db() as conn:
@@ -12470,6 +12894,14 @@ def web_schema() -> list:
             _f('cas_enabled', 'bool', "🌐 CAS spam listesi"), _f('name_track', 'bool', "✏️ İsim değişikliği takibi"),
             _f('vote_mute', 'bool', "🗳 Oylamalı susturma"), num('vote_needed', "Gerekli oy"),
             num('vote_mute_minutes', "Oylama susturma süresi")]},
+        {'id': 'audit', 'title': "👮 Admin denetimi", 'fields': [
+            _f('admin_audit', 'bool', "📋 Günlük admin özeti", 'kurucu',
+               hint="Her akşam kim kaç ban, susturma, uyarı ve silme yaptı (kurucuya ve botu ekleyene)."),
+            _f('admin_limit_on', 'bool', "🚨 Admin işlem sınırı", 'kurucu',
+               hint="Kurucu olmayan yetkili 1 saatte sınırdan fazla ban/atma/susturma yaparsa yetkisi askıya alınır."),
+            _f('admin_limit', 'select', "Saatlik sınır", 'kurucu', _numeric_options('admin_limit')),
+            _f('del_log', 'bool', "🗑 Silinen mesajları log kanalına kopyala", 'kurucu',
+               hint="/del ve /temizle ile silinenler. Telegram elle silinenleri botlara bildirmez.")]},
         {'id': 'rec', 'title': "🛟 Admin kurtarma", 'fields': [
             _f('recovery_ids', 'ids', "Güvenilir kişiler (en fazla 3)", 'kurucu',
                hint="Her satıra bir kullanıcı ID'si. Adminler toplu düşürülürse bu kişiler bota /kurtar yazabilir."),
@@ -13357,6 +13789,7 @@ WRITE_FLUSH_EVERY = 2      # sn
 WRITE_FLUSH_MAX = 300      # bu kadar satır birikince beklemeden yazılır
 _stats_buf: list = []      # message_stats satırları
 _users_buf: dict = {}      # (user_id, chat_id) -> users satırı
+_cache_buf: dict = {}      # (chat_id, message_id) -> msg_cache satırı
 
 def perf_wrap(fn):
     """Handler süresini ölçer (çağrı sayısı, toplam, en uzun). Testlerin/yönlendirmenin gördüğü asıl fonksiyon korunur."""
@@ -13395,11 +13828,12 @@ def queue_message_stat(chat_id: str, user, msg_type: str):
 
 def flush_writes():
     """Biriken mesaj sayacı ve üye kayıtlarını tek işlemde yazar. Bu tablolardan okuyan kod önce bunu çağırır."""
-    if not _stats_buf and not _users_buf:
+    if not _stats_buf and not _users_buf and not _cache_buf:
         return
-    stats, users = _stats_buf[:], list(_users_buf.values())
+    stats, users, cache = _stats_buf[:], list(_users_buf.values()), list(_cache_buf.values())
     _stats_buf.clear()
     _users_buf.clear()
+    _cache_buf.clear()
     try:
         with get_db() as conn:
             if users:
@@ -13412,14 +13846,19 @@ def flush_writes():
             if stats:
                 conn.executemany("INSERT INTO message_stats (chat_id, user_id, username, first_name, msg_type, sent_at) "
                                  "VALUES (?, ?, ?, ?, ?, ?)", stats)
+            if cache:
+                conn.executemany("INSERT OR IGNORE INTO msg_cache (chat_id, message_id, user_id, text, sent_at) "
+                                 "VALUES (?, ?, ?, ?, ?)", cache)
     except sqlite3.Error as e:
         logger.error(f"Toplu yazma başarısız ({len(stats)} mesaj, {len(users)} üye): {e}")
         _stats_buf[:0] = stats  # kaybolmasın: bir sonraki turda tekrar denenir
         for u in users:
             _users_buf.setdefault((u[0], u[1]), u)
+        for c in cache:
+            _cache_buf.setdefault((c[0], c[1]), c)
         return
     PERF['flushes'] += 1
-    PERF['flushed_rows'] += len(stats) + len(users)
+    PERF['flushed_rows'] += len(stats) + len(users) + len(cache)
 
 async def flush_writes_job(context):
     flush_writes()
@@ -14969,6 +15408,8 @@ async def db_cleanup_job(context: ContextTypes.DEFAULT_TYPE):
             conn.execute("DELETE FROM newcomers WHERE joined_at < ?", (now - 2 * 86400,))
             conn.execute("DELETE FROM appeals WHERE created_at < ? AND status != 'pending'", (now - 90 * 86400,))
             conn.execute("DELETE FROM msg_cache WHERE sent_at < ?", (now - 2 * 86400,))
+            conn.execute("DELETE FROM msg_edits WHERE at < ?", (now - EDIT_HISTORY_KEEP_DAYS * 86400,))
+            conn.execute("DELETE FROM admin_actions WHERE at < ?", (now - AUDIT_KEEP_DAYS * 86400,))
             conn.execute("DELETE FROM reports WHERE created_at < ?", (now - 30 * 86400,))
             conn.execute("DELETE FROM message_stats WHERE sent_at < ?", (msg_stats_cutoff,))
             conn.commit()
@@ -15262,8 +15703,11 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, left_member_handler), group=1)
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
 
+    app.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.ChatType.GROUPS, edit_history_handler),
+                    group=-14)
     app.add_handler(MessageHandler(filters.UpdateType.EDITED_MESSAGE & filters.ChatType.GROUPS, edit_guard_handler),
                     group=-13)
+    app.add_handler(ChatMemberHandler(admin_ui_action_handler, ChatMemberHandler.CHAT_MEMBER), group=-5)
     app.add_handler(MessageHandler(
         (filters.ChatType.GROUPS | filters.ChatType.CHANNEL)
         & (filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Sticker.ALL | filters.Document.ALL
@@ -15370,6 +15814,10 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('duyurusablon', cmd_duyurusablon))
     app.add_handler(CommandHandler('buyume', cmd_buyume))
     app.add_handler(CommandHandler('bakim', cmd_bakim))
+    app.add_handler(CommandHandler(['del', 'sil'], cmd_del))
+    app.add_handler(CommandHandler(['gecmis', 'edits'], cmd_gecmis))
+    app.add_handler(CommandHandler(['denetim', 'audit'], cmd_denetim))
+    app.add_handler(CallbackQueryHandler(admin_limit_callback, pattern=r'^al\|'))
     app.add_handler(CommandHandler('davet', cmd_davet))
     app.add_handler(CommandHandler('davetler', cmd_davetler))
     app.add_handler(ChatMemberHandler(invite_track_handler, ChatMemberHandler.CHAT_MEMBER), group=-4)
@@ -15528,6 +15976,7 @@ def main():
     job_queue.run_repeating(scheduled_msgs_job, interval=60, first=45)
     job_queue.run_repeating(duyuru_job, interval=30, first=25)
     job_queue.run_repeating(setup_reminder_job, interval=3600, first=300)
+    job_queue.run_daily(audit_daily_job, time=dtime(AUDIT_HOUR, 0, tzinfo=TZ_TR))
     job_queue.run_daily(weekly_report_job, time=dtime(10, 0, tzinfo=TZ_TR))
     job_queue.run_repeating(giveaway_job, interval=60, first=50)
     job_queue.run_repeating(web_sync_job, interval=5, first=5)
