@@ -66,6 +66,12 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
 - `-test`, `-sabitle`, `-sessiz`, `-saat 20:00`; `/duyurular` geçmiş; kişiler 🔕 / `/duyurukapat` ile kapatır.
 - Özelden kullananlar kaydedilir; botu engelleyen ve başlatmamış olan bir kez denenip atlanır. Klon sahibi kendi kitlesine gönderir.
 
+## Sırada (onaylandı, yapılacak)
+1. **Duyuru tıklama istatistiği** — duyurudaki butona kaç kişi tıkladı (/duyurular'da görünür).
+2. **Hedefli duyuru** — `-aktif` (son 7 günde aktif kişiler), `-sec` (listeden belli grupları seçme).
+3. **Hoş geldin olarak mesaj kopyalama** — yanıtlanan mesaj olduğu gibi (premium emoji dahil) hoş geldin olur; değişkenler bu modda çalışmaz.
+4. **Haftalık büyüme raporu** — her pazartesi sahibine özelden: yeni/ayrılan grup, yeni kişi, en aktif gruplar.
+
 ## Önerildi, şimdilik seçilmedi
 - Davet yarışması (haftalık/aylık davet sıralaması)
 - Hesap güven puanı (hesap yaşı, profil fotoğrafı, biyografideki link, premium)
