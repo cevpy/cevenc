@@ -4551,7 +4551,7 @@ async def check_nightmod(context: ContextTypes.DEFAULT_TYPE):
     current_minutes = now.hour * 60 + now.minute
 
     with get_db() as conn:
-        rows = conn.execute("SELECT * FROM nightmod_settings WHERE enabled = 1").fetchall()
+        rows = conn.execute("SELECT * FROM nightmod_settings WHERE enabled = 1 OR is_active = 1").fetchall()
 
     for row in rows:
         chat_id = row['chat_id']
@@ -4563,6 +4563,7 @@ async def check_nightmod(context: ContextTypes.DEFAULT_TYPE):
             should_be_active = current_minutes >= start_total or current_minutes < end_total
         else:
             should_be_active = start_total <= current_minutes < end_total
+        should_be_active = should_be_active and bool(row['enabled'])  # web panelden kapatıldıysa izinler geri gelir
 
         if should_be_active and not is_active:
             await nightmod_activate(chat_id)
@@ -12379,7 +12380,10 @@ def web_schema() -> list:
     for k, (label, skey, _, desc) in PROTECTIONS.items():
         prot += [_f(skey, 'bool', label, hint=desc), _f(f'action_{k}', 'select', "Ceza", options=acts)]
     prot += [num('flood_limit', "🌊 Flood: mesaj sınırı"), num('flood_timeframe', "🌊 Flood: süre"),
-             num('mute_minutes', "🔇 Susturma süresi")]
+             num('media_flood_limit', "🖼 Medya flood: medya sınırı"), num('media_flood_timeframe', "🖼 Medya flood: süre"),
+             num('mute_minutes', "🔇 Susturma süresi"),
+             _f('spam_whitelist', 'ids', "🕊 Spam muaf kişiler",
+                hint="Her satıra bir kullanıcı ID'si. Bu kişilere spam, flood ve link koruması uygulanmaz.")]
     return [
         {'id': 'prot', 'title': "🛡 Korumalar", 'fields': prot},
         {'id': 'words', 'title': "🔤 Kelime ve link listeleri", 'fields': [
@@ -12390,7 +12394,23 @@ def web_schema() -> list:
             _f('join_captcha', 'bool', "📩 Katılım isteğinde özelden doğrulama"),
             _f('anti_raid', 'bool', "🚨 Raid koruması"), num('raid_limit', "Raid: üye sınırı"),
             num('raid_timeframe', "Raid: süre"), num('newbie_minutes', "🐣 Yeni üye kısıtı"),
-            _f('restrict_no_username', 'bool', "Kullanıcı adı olmayanı sustur")]},
+            _f('restrict_no_username', 'bool', "Kullanıcı adı olmayanı sustur"),
+            _f('auto_accept', 'bool', "✅ Katılım isteklerini otomatik kabul et", 'can_requests'),
+            _f('auto_reject', 'bool', "❌ Katılım isteklerini otomatik reddet", 'can_requests'),
+            _f('auto_reject_bot', 'bool', "🤖 Bot / kullanıcı adsız isteği reddet", 'can_requests')]},
+        {'id': 'media', 'title': "🖼 Uygunsuz medya", 'fields': [
+            _f('nsfw_scan', 'bool', "🤖 Yapay zekâ ile +18 tarama",
+               hint="Fotoğraf, sticker ve GIF'ler taranır (sunucuda nudenet kurulu olmalı)."),
+            _f('file_block', 'bool', "📦 Tehlikeli dosyaları sil", hint=".apk .exe .bat .scr gibi dosyalar"),
+            _f('media_autolock', 'bool', "🔒 Saldırıda otomatik medya kilidi",
+               hint="Kısa sürede çok uygunsuz medya gelirse grup medyası geçici kilitlenir."),
+            num('media_lock_minutes', "Kilit süresi")]},
+        {'id': 'edit', 'title': "✏️ Düzenleme ve rapor", 'fields': [
+            _f('edit_guard', 'bool', "✏️ Geç düzenleme koruması",
+               hint="Gönderildikten bir süre sonra düzenlenen mesaj silinir; eski ve yeni hâli kurucuya gider."),
+            num('edit_guard_minutes', "Düzenleme süresi"),
+            _f('edit_notify', 'bool', "📨 Kurucuya / ekleyene bildir"),
+            _f('reports_enabled', 'bool', "🚩 Rapor sistemi (/report, @admin)")]},
         {'id': 'warn', 'title': "⚠️ Uyarılar", 'fields': [
             num('warn_limit', "Uyarı sınırı"),
             _f('warn_action', 'select', "Sınır dolunca", options=[[k, v] for k, v in WARN_ACTION_LABELS.items()]),
@@ -12417,6 +12437,10 @@ def web_schema() -> list:
             _f('cas_enabled', 'bool', "🌐 CAS spam listesi"), _f('name_track', 'bool', "✏️ İsim değişikliği takibi"),
             _f('vote_mute', 'bool', "🗳 Oylamalı susturma"), num('vote_needed', "Gerekli oy"),
             num('vote_mute_minutes', "Oylama susturma süresi")]},
+        {'id': 'rec', 'title': "🛟 Admin kurtarma", 'fields': [
+            _f('recovery_ids', 'ids', "Güvenilir kişiler (en fazla 3)", 'kurucu',
+               hint="Her satıra bir kullanıcı ID'si. Adminler toplu düşürülürse bu kişiler bota /kurtar yazabilir."),
+            _f('recovery_autorestore', 'bool', "♻️ Toplu düşürmede otomatik geri yükle", 'kurucu')]},
     ]
 
 def _btn_source(b: dict) -> str:
@@ -12449,8 +12473,8 @@ def _field_value(key: str, ftype: str, s: dict):
         rich = welcome_rich(s) if kind == 'welcome' else goodbye_rich(s) if kind == 'goodbye' else rules_rich(s)
         media = (rich or {}).get('m')
         return {'text': rich_to_source(rich), 'media': RICH_MEDIA_LABELS.get(media['type'], media['type']) if media else None}
-    if ftype == 'list':
-        return "\n".join(s.get(key) or [])
+    if ftype in ('list', 'ids'):
+        return "\n".join(str(x) for x in s.get(key) or [])
     default = _default_channel_settings().get(key)
     v = s.get(key, default)
     return bool(v) if ftype == 'bool' else v
@@ -12485,6 +12509,20 @@ def _validate_field(f: dict, value, s: dict):
             if it not in out:
                 out.append(it)
         return out, None
+    if t == 'ids':
+        out = []
+        for it in str(value or '').replace(',', '\n').split('\n'):
+            it = it.strip().lstrip('@')
+            if not it:
+                continue
+            if not re.fullmatch(r'\d{3,15}', it) or not valid_id(int(it)):
+                return None, f"Geçersiz ID: {it[:20]} (sadece sayı)"
+            if int(it) not in out:
+                out.append(int(it))
+        limit = 3 if f['key'] == 'recovery_ids' else 500
+        if len(out) > limit:
+            return None, f"En fazla {limit} kişi"
+        return out, None
     if t == 'rich':
         if not isinstance(value, dict):
             return None, "Geçersiz"
@@ -12500,6 +12538,183 @@ def _validate_field(f: dict, value, s: dict):
         return (kind, rich), None
     return None, "Bilinmeyen alan"
 
+# ── Web panel: ayar dışı bölümler (gece modu, notlar, filtreler, zamanlanmış mesajlar, engelli medya, yetkililer) ──
+WEB_TEXT_MAX = 6000
+WEB_SCHED_INTERVALS = [[1800, "30 dakikada bir"], [3600, "Saatte bir"], [7200, "2 saatte bir"], [10800, "3 saatte bir"],
+                       [21600, "6 saatte bir"], [43200, "12 saatte bir"], [86400, "Günde bir"], [259200, "3 günde bir"],
+                       [604800, "Haftada bir"]]
+
+def _web_has(chat_id: str, uid: int, perm: str) -> bool:
+    if perm == 'kurucu':
+        return user_level(chat_id, uid) >= LVL_KURUCU
+    return has_specific_permission(chat_id, uid, perm)
+
+def _hm(h: int, m: int) -> str:
+    return f"{int(h):02d}:{int(m):02d}"
+
+def web_extras(chat_id: str, uid: int) -> dict:
+    flush_writes()
+    nm = _nm_data(chat_id)
+    channel = get_channel_settings(chat_id)
+    week = time.time() - 7 * 86400
+    with get_db() as conn:
+        notes = [{'name': r['name'], 'preview': (_strip_html(r['content'] or '')[:90]
+                                                 or (f"🖼 {r['file_type']}" if r['file_id'] else ''))}
+                 for r in conn.execute("SELECT name, content, file_id, file_type FROM notes WHERE chat_id = ? ORDER BY name",
+                                       (chat_id,))]
+        flt = [{'key': r['trigger_norm'], 'trigger': r['trigger_text'], 'contains': r['mode'] == 'contains',
+                'preview': (_strip_html(r['reply_text'] or '')[:90] or (f"🖼 {r['file_type']}" if r['file_id'] else ''))}
+               for r in conn.execute("SELECT * FROM chat_filters WHERE chat_id = ? ORDER BY trigger_text", (chat_id,))]
+        blocked = [{'id': r['rowid'], 'label': (f"📦 Sticker paketi: {r['uid'][4:]}" if r['kind'] == 'set'
+                                                else f"🖼 {r['note'] or r['kind']}")[:80]}
+                   for r in conn.execute("SELECT rowid, uid, kind, note FROM blocked_media WHERE chat_id = ? "
+                                         "ORDER BY added_at DESC LIMIT 200", (chat_id,))]
+        staff = [{'name': r['fn'] or str(r['user_id']), 'id': r['user_id'], 'role': ROLE_NAMES.get(r['role'], r['role'])}
+                 for r in conn.execute(
+                     "SELECT r.user_id, r.role, (SELECT first_name FROM users u WHERE u.user_id = r.user_id "
+                     "ORDER BY last_seen DESC LIMIT 1) fn FROM roles r WHERE r.chat_id = ?", (chat_id,))]
+        order = {k: i for i, k in enumerate(ROLE_NAMES)}
+        staff.sort(key=lambda x: order.get(next((k for k, v in ROLE_NAMES.items() if v == x['role']), ''), 99))
+        stats = {
+            'msgs': conn.execute("SELECT COUNT(*) FROM message_stats WHERE chat_id = ? AND sent_at >= ?",
+                                 (chat_id, week)).fetchone()[0],
+            'active': conn.execute("SELECT COUNT(DISTINCT user_id) FROM message_stats WHERE chat_id = ? AND sent_at >= ?",
+                                   (chat_id, week)).fetchone()[0],
+            'joins': conn.execute("SELECT COUNT(*) FROM member_events WHERE chat_id = ? AND kind = 'join' AND at >= ?",
+                                  (chat_id, week)).fetchone()[0],
+            'warns': conn.execute("SELECT COUNT(*) FROM warnings WHERE chat_id = ? AND warn_count > 0",
+                                  (chat_id,)).fetchone()[0],
+            'bans': conn.execute("SELECT COUNT(*) FROM ban_list WHERE chat_id = ?", (chat_id,)).fetchone()[0],
+        }
+        log_id = (channel or {}).get('log_chat_id')
+        log_row = conn.execute("SELECT title FROM channels WHERE chat_id = ?", (str(log_id),)).fetchone() if log_id else None
+    sched = []
+    for r in sched_list(chat_id):
+        try:
+            rich = json.loads(r['rich'])
+        except ValueError:
+            rich = {}
+        sched.append({'id': r['id'], 'preview': rich_plain(rich, 90) or "(medya)", 'every': human_duration(r['interval']),
+                      'enabled': bool(r['enabled']),
+                      'next': datetime.fromtimestamp(r['next_at'], TZ_TR).strftime('%d.%m %H:%M')})
+    return {
+        'night': {'enabled': bool(nm['enabled']), 'active': bool(nm['is_active']),
+                  'start': _hm(nm['start_hour'], nm['start_minute']), 'end': _hm(nm['end_hour'], nm['end_minute']),
+                  'restrictions': [[k, lbl, bool(nm['restrictions'].get(k))] for k, lbl in NIGHT_RESTRICTIONS],
+                  'editable': _web_has(chat_id, uid, 'can_manage_settings')},
+        'notes': {'items': notes, 'editable': _web_has(chat_id, uid, 'can_content')},
+        'filters': {'items': flt, 'editable': _web_has(chat_id, uid, 'can_filters'), 'limit': FILTER_LIMIT},
+        'sched': {'items': sched, 'editable': _web_has(chat_id, uid, 'can_content'), 'intervals': WEB_SCHED_INTERVALS},
+        'blocked': {'items': blocked, 'editable': _web_has(chat_id, uid, 'can_manage_settings')},
+        'staff': staff,
+        'stats': stats,
+        'log': ((log_row['title'] if log_row and log_row['title'] else str(log_id)) if log_id else None),
+    }
+
+def _parse_hm(v) -> tuple | None:
+    m = re.fullmatch(r'(\d{1,2}):(\d{2})', str(v or '').strip())
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+def web_op(chat_id: str, uid: int, body: dict):
+    """Panelden tek işlem (not/filtre/zamanlı mesaj ekle-sil, gece modu, engelli medya). Dönüş: (mesaj, hata)."""
+    op = str(body.get('op') or '')
+    need = {'night': 'can_manage_settings', 'note_add': 'can_content', 'note_del': 'can_content',
+            'filter_add': 'can_filters', 'filter_del': 'can_filters', 'sched_add': 'can_content',
+            'sched_toggle': 'can_content', 'sched_del': 'can_content', 'blocked_del': 'can_manage_settings'}.get(op)
+    if not need:
+        return None, "Bilinmeyen işlem"
+    if not _web_has(chat_id, uid, need):
+        return None, "Yetkin yok"
+    if op == 'night':
+        st, en = _parse_hm(body.get('start')), _parse_hm(body.get('end'))
+        if not st or not en:
+            return None, "Saat biçimi SS:DD olmalı"
+        nm = _nm_data(chat_id)
+        want = body.get('restrictions') or {}
+        nm['restrictions'] = {k: bool(want.get(k)) for k, _ in NIGHT_RESTRICTIONS}
+        (nm['start_hour'], nm['start_minute']), (nm['end_hour'], nm['end_minute']) = st, en
+        nm['enabled'] = 1 if body.get('enabled') else 0
+        nm['configured'] = 1
+        save_nightmod(chat_id, nm)  # kapatılırsa ve şu an aktifse bot 1 dk içinde izinleri geri yükler
+        return "🌙 Gece modu kaydedildi", None
+    if op == 'note_add':
+        name = str(body.get('name') or '').strip().lstrip('#').lower()
+        text = source_to_html(str(body.get('text') or '')[:WEB_TEXT_MAX]).strip()
+        if not _NOTE_NAME.match(name):
+            return None, "Not adı: harf, rakam, - veya _ (en fazla 32)"
+        if not text:
+            return None, "Not içeriği boş olamaz"
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO notes (chat_id, name, content, file_id, file_type, created_by, created_at) "
+                         "VALUES (?, ?, ?, NULL, NULL, ?, ?)", (chat_id, name, text, uid, time.time()))
+        return f"📝 #{name} kaydedildi", None
+    if op == 'note_del':
+        with get_db() as conn:
+            n = conn.execute("DELETE FROM notes WHERE chat_id = ? AND name = ?", (chat_id, str(body.get('name')))).rowcount
+        return ("🗑 Not silindi", None) if n else (None, "Not bulunamadı")
+    if op == 'filter_add':
+        parsed = _parse_trigger(str(body.get('trigger') or ''))
+        answer = source_to_html(str(body.get('text') or '')[:3500]).strip()
+        if not parsed:
+            return None, "Tetikleyici geçersiz (en fazla 100 karakter; içinde geçsin diye *kelime*)"
+        if not answer:
+            return None, "Cevap boş olamaz"
+        shown, norm, mode = parsed
+        with get_db() as conn:
+            exists = conn.execute("SELECT 1 FROM chat_filters WHERE chat_id = ? AND trigger_norm = ?", (chat_id, norm)).fetchone()
+            if not exists and conn.execute("SELECT COUNT(*) FROM chat_filters WHERE chat_id = ?",
+                                           (chat_id,)).fetchone()[0] >= FILTER_LIMIT:
+                return None, f"En fazla {FILTER_LIMIT} filtre olabilir"
+            conn.execute("INSERT OR REPLACE INTO chat_filters (chat_id, trigger_norm, trigger_text, mode, reply_text, file_id, "
+                         "file_type, created_by, created_at, is_html) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, 1)",
+                         (chat_id, norm, shown, mode, answer, uid, time.time()))
+        _filter_changed(chat_id)
+        return f"🧩 Filtre {'güncellendi' if exists else 'eklendi'}: {shown}", None
+    if op == 'filter_del':
+        with get_db() as conn:
+            n = conn.execute("DELETE FROM chat_filters WHERE chat_id = ? AND trigger_norm = ?",
+                             (chat_id, str(body.get('key')))).rowcount
+        _filter_changed(chat_id)
+        return ("🗑 Filtre silindi", None) if n else (None, "Filtre bulunamadı")
+    if op == 'sched_add':
+        try:
+            interval = int(body.get('interval'))
+        except (TypeError, ValueError):
+            interval = None
+        if interval not in {i for i, _ in WEB_SCHED_INTERVALS}:
+            return None, "Geçersiz aralık"
+        err = _sched_check(chat_id, interval)
+        if err:
+            return None, _strip_html(err)
+        rich = build_rich(source_to_html(str(body.get('text') or '')[:WEB_TEXT_MAX]))
+        if not rich_plain(rich):
+            return None, "Mesaj boş olamaz"
+        sched_add(chat_id, rich, interval, uid)
+        return "⏰ Zamanlanmış mesaj eklendi", None
+    if op in ('sched_toggle', 'sched_del'):
+        try:
+            sid = int(body.get('id'))
+        except (TypeError, ValueError):
+            return None, "Geçersiz"
+        with get_db() as conn:
+            if op == 'sched_del':
+                n = conn.execute("DELETE FROM scheduled_msgs WHERE id = ? AND chat_id = ?", (sid, chat_id)).rowcount
+            else:
+                n = conn.execute("UPDATE scheduled_msgs SET enabled = 1 - enabled WHERE id = ? AND chat_id = ?",
+                                 (sid, chat_id)).rowcount
+        return ("✅ Güncellendi" if op == 'sched_toggle' else "🗑 Silindi", None) if n else (None, "Bulunamadı")
+    if op == 'blocked_del':
+        try:
+            rid = int(body.get('id'))
+        except (TypeError, ValueError):
+            return None, "Geçersiz"
+        with get_db() as conn:
+            n = conn.execute("DELETE FROM blocked_media WHERE rowid = ? AND chat_id = ?", (rid, chat_id)).rowcount
+        return ("🗑 Engel kaldırıldı", None) if n else (None, "Bulunamadı")
+    return None, "Bilinmeyen işlem"
+
 def web_settings_payload(chat_id: str, uid: int) -> dict:
     s = get_channel_settings(chat_id)['settings']
     sections = []
@@ -12508,12 +12723,12 @@ def web_settings_payload(chat_id: str, uid: int) -> dict:
         for f in sec['fields']:
             fields.append({**{k: v for k, v in f.items() if k != 'perm'},
                            'value': _field_value(f['key'], f['type'], s),
-                           'editable': has_specific_permission(chat_id, uid, f['perm'])})
+                           'editable': _web_has(chat_id, uid, f['perm'])})
         sections.append({'id': sec['id'], 'title': sec['title'], 'fields': fields})
     with get_db() as conn:
         row = conn.execute("SELECT title FROM channels WHERE chat_id = ?", (chat_id,)).fetchone()
     return {'chat': chat_id, 'title': (row['title'] if row else None) or chat_id, 'sections': sections,
-            'fsub_channel': s.get('fsub_title')}
+            'fsub_channel': s.get('fsub_title'), 'extras': web_extras(chat_id, uid)}
 
 def web_save(chat_id: str, uid: int, values: dict):
     """Panelden gelen değişiklikleri doğrulayıp kaydeder. Dönüş: (değişen etiketler, hatalar)."""
@@ -12526,7 +12741,7 @@ def web_save(chat_id: str, uid: int, values: dict):
         if not f:
             errors[key] = "Bilinmeyen ayar"
             continue
-        if not has_specific_permission(chat_id, uid, f['perm']):
+        if not _web_has(chat_id, uid, f['perm']):
             errors[key] = "Yetkin yok"
             continue
         new, err = _validate_field(f, value, s)
@@ -12566,9 +12781,13 @@ async def web_sync_job(context):
         rows = conn.execute("SELECT chat_id, at FROM settings_dirty WHERE at > ?", (_web_sync_last,)).fetchall()
         conn.execute("DELETE FROM settings_dirty WHERE at < ?", (time.time() - 3600,))
         conn.commit()
+    global _blocked_media_cache
     for r in rows:
         _invalidate_settings(r['chat_id'])
+        _filter_changed(r['chat_id'])
         _web_sync_last = max(_web_sync_last, r['at'])
+    if rows:
+        _blocked_media_cache = None  # panelden engel kaldırılmış olabilir
 
 def _web_log(token: str, chat_id: str, user: dict, changed: list):
     channel = get_channel_settings(chat_id)
@@ -12614,10 +12833,21 @@ def web_api(path: str, body: dict):
     if path == 'settings':
         return 200, web_settings_payload(chat_id, uid)
     if path == 'save':
+        if maintenance_on():
+            return 503, {'error': "Bot bakımda, biraz sonra tekrar dene."}
         changed, errors = web_save(chat_id, uid, body.get('values') or {})
         if changed:
             _web_log(token, chat_id, user, changed)
         return 200, {'changed': changed, 'errors': errors, 'settings': web_settings_payload(chat_id, uid)}
+    if path == 'op':
+        if maintenance_on():
+            return 503, {'error': "Bot bakımda, biraz sonra tekrar dene."}
+        msg, err = web_op(chat_id, uid, body)
+        if msg:
+            with get_db() as conn:
+                conn.execute("INSERT OR REPLACE INTO settings_dirty (chat_id, at) VALUES (?, ?)", (chat_id, time.time()))
+            _web_log(token, chat_id, user, [msg])
+        return 200, {'ok': msg, 'error': err, 'extras': web_extras(chat_id, uid)}
     return 404, {'error': "Bilinmeyen işlem"}
 
 def webapp(environ, start_response):
@@ -12684,8 +12914,9 @@ async def cmd_webpanel(update: Update, context):
         await msg.reply_text("🖥 Web panel bota özelden açılır:", reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("🖥 Özelden aç", url=f"https://t.me/{context.bot.username}?start=webpanel")]]))
         return
-    await msg.reply_text("🖥 <b>Web panel</b>\nTüm ayarlar tek sayfada: korumalar, karşılama, listeler, etiket ve "
-                         "topluluk koruması. Değişiklikler birkaç saniye içinde bota yansır.",
+    await msg.reply_text("🖥 <b>Web panel</b>\nTüm ayarlar tek sayfada: korumalar, düzenleme koruması, uygunsuz medya, "
+                         "katılım, karşılama, listeler, gece modu, notlar, filtreler, zamanlanmış mesajlar, engelli medya, "
+                         "yetkililer ve grup istatistikleri. Değişiklikler birkaç saniye içinde bota yansır.",
                          parse_mode=ParseMode.HTML, reply_markup=webpanel_markup(context.user_data.get('selected_channel')))
 
 # Panel sayfası (tek dosya: HTML + JS; Telegram'ın tema renklerini kullanır)
@@ -12754,6 +12985,23 @@ textarea { width: 100%; min-height: 110px; resize: vertical; margin-top: 8px; fo
 .empty { text-align: center; color: var(--hint); padding: 40px 10px; }
 .help { color: var(--hint); font-size: 12.5px; padding: 0 14px 12px; }
 code { font-size: 12px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 8px; margin: 4px 0 12px; }
+.stat { background: var(--card); border-radius: 12px; padding: 10px 12px; }
+.stat b { display: block; font-size: 19px; }
+.stat span { color: var(--hint); font-size: 12px; }
+.item { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.item .lbl div:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn { font: inherit; font-size: 14px; border: 0; border-radius: 10px; padding: 8px 12px; background: var(--accent);
+  color: var(--accent-text); cursor: pointer; flex: none; }
+.btn.ghost { background: transparent; color: var(--danger); padding: 6px 8px; font-size: 17px; }
+.btn:disabled { opacity: .5; }
+.form { padding: 10px 14px 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.form textarea { margin-top: 0; min-height: 80px; }
+input[type=text], input[type=time] { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+.chip { display: flex; align-items: center; gap: 6px; background: var(--bg); border-radius: 18px; padding: 6px 10px; font-size: 14px; }
+.badge { font-size: 12px; color: var(--hint); }
 </style>
 </head>
 <body>
@@ -12763,7 +13011,9 @@ code { font-size: 12px; }
     <div class="sub" id="sub">Yükleniyor…</div>
     <select class="picker" id="picker" hidden aria-label="Grup seç"></select>
   </header>
+  <div id="stats"></div>
   <div id="content"></div>
+  <div id="extras"></div>
 </main>
 <button class="save" id="saveBtn" type="button">Kaydet</button>
 <div class="toast" id="toast" role="status"></div>
@@ -12880,11 +13130,147 @@ function render(data) {
     if (sec.id === "tag" && data.fsub_channel) d.appendChild(el("div", { cls: "help", text: "Zorunlu kanal: " + data.fsub_channel }));
     c.appendChild(d);
   });
+  if (data.extras) renderExtras(data.extras);
+}
+
+function ask(text) {
+  return new Promise((res) => {
+    if (tg && tg.showConfirm) { try { tg.showConfirm(text, (ok) => res(!!ok)); return; } catch (e) {} }
+    res(window.confirm(text));
+  });
+}
+
+async function op(payload, okText) {
+  try {
+    const r = await api("op", Object.assign({ chat: state.chat }, payload));
+    if (r.extras) renderExtras(r.extras);
+    toast(r.error ? "⚠️ " + r.error : (r.ok || okText || "✅ Tamam"));
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(r.error ? "warning" : "success");
+    return !r.error;
+  } catch (e) { toast("❌ " + e.message); return false; }
+}
+
+function sec(title, open) {
+  const d = el("details", { cls: "sec" }); if (open) d.open = true;
+  d.appendChild(el("summary", { text: title }));
+  return d;
+}
+
+function itemRow(main, sub, actions) {
+  const r = el("div", { cls: "item" });
+  r.appendChild(el("div", { cls: "lbl" }, [el("div", { text: main }), sub ? el("div", { cls: "hint", text: sub }) : null]));
+  (actions || []).forEach((a) => a && r.appendChild(a));
+  return r;
+}
+
+function delBtn(label, payload, editable) {
+  const b = el("button", { cls: "btn ghost", type: "button", "aria-label": "Sil", text: "🗑" });
+  b.disabled = !editable;
+  b.addEventListener("click", async () => { if (await ask(label + " silinsin mi?")) op(payload); });
+  return b;
+}
+
+function switchEl(checked, disabled, onChange, label) {
+  const input = el("input", { type: "checkbox", role: "switch", "aria-label": label || "Aç/kapat" });
+  input.checked = !!checked; input.disabled = !!disabled;
+  input.addEventListener("change", () => onChange(input.checked, input));
+  return el("label", { cls: "sw" }, [input, el("span")]);
+}
+
+function renderStats(x) {
+  const box = $("stats"); box.innerHTML = "";
+  const st = x.stats || {};
+  const tiles = [["Mesaj (7 gün)", st.msgs], ["Aktif kişi", st.active], ["Katılan (7 gün)", st.joins],
+                 ["Uyarılı", st.warns], ["Banlı", st.bans]];
+  const g = el("div", { cls: "stats" });
+  tiles.forEach(([k, v]) => g.appendChild(el("div", { cls: "stat" }, [el("b", { text: String(v || 0) }), el("span", { text: k })])));
+  box.appendChild(g);
+  box.appendChild(el("div", { cls: "sub", text: "📋 Log kanalı: " + (x.log || "ayarlı değil (botta /setlog)") }));
+}
+
+function renderExtras(x) {
+  renderStats(x);
+  const c = $("extras"); c.innerHTML = "";
+  // 🌙 Gece modu
+  const n = x.night, nd = sec("🌙 Gece modu" + (n.enabled ? (n.active ? " · şu an aktif" : " · açık") : ""));
+  let nEnabled = n.enabled;
+  nd.appendChild(el("label", { cls: "row" + (n.editable ? "" : " ro") }, [
+    el("div", { cls: "lbl" }, [el("div", { text: "Gece modu" }), el("div", { cls: "hint", text: "Seçili izinler bu saatlerde kapanır, bitince eski izinler geri gelir (UTC+3)." })]),
+    switchEl(n.enabled, !n.editable, (v) => { nEnabled = v; }, "Gece modu")]));
+  const st = el("input", { type: "time", value: n.start, "aria-label": "Başlangıç" }), en = el("input", { type: "time", value: n.end, "aria-label": "Bitiş" });
+  st.disabled = en.disabled = !n.editable;
+  nd.appendChild(el("div", { cls: "row" }, [el("div", { cls: "lbl", text: "Başlangıç" }), st]));
+  nd.appendChild(el("div", { cls: "row" }, [el("div", { cls: "lbl", text: "Bitiş" }), en]));
+  const chips = el("div", { cls: "chips" }), want = {};
+  n.restrictions.forEach(([k, lbl, on]) => {
+    want[k] = on;
+    const cb = el("input", { type: "checkbox" }); cb.checked = on; cb.disabled = !n.editable;
+    cb.addEventListener("change", () => { want[k] = cb.checked; });
+    chips.appendChild(el("label", { cls: "chip" }, [cb, el("span", { text: "🚫 " + lbl })]));
+  });
+  nd.appendChild(el("div", { cls: "help", text: "Kapatılacaklar:" }));
+  nd.appendChild(chips);
+  const nb = el("button", { cls: "btn", type: "button", text: "Gece modunu kaydet" }); nb.disabled = !n.editable;
+  nb.addEventListener("click", () => op({ op: "night", enabled: nEnabled, start: st.value, end: en.value, restrictions: want }));
+  nd.appendChild(el("div", { cls: "form" }, [nb]));
+  c.appendChild(nd);
+  // 📝 Notlar
+  const no = x.notes, nod = sec("📝 Notlar (" + no.items.length + ")");
+  no.items.forEach((it) => nod.appendChild(itemRow("#" + it.name, it.preview, [delBtn("#" + it.name, { op: "note_del", name: it.name }, no.editable)])));
+  if (!no.items.length) nod.appendChild(el("div", { cls: "help", text: "Henüz not yok. Üyeler #isim yazınca not gönderilir." }));
+  if (no.editable) {
+    const nm = el("input", { type: "text", placeholder: "Not adı (örn. kurallar)", maxlength: "32" });
+    const tx = el("textarea", { placeholder: "Not içeriği (biçim: <b>kalın</b>, butonlar: Etiket - https://link)" });
+    const b = el("button", { cls: "btn", type: "button", text: "➕ Not ekle" });
+    b.addEventListener("click", async () => { if (await op({ op: "note_add", name: nm.value, text: tx.value })) { nm.value = ""; tx.value = ""; } });
+    nod.appendChild(el("div", { cls: "form" }, [nm, tx, b]));
+  }
+  c.appendChild(nod);
+  // 🧩 Filtreler
+  const fl = x.filters, fd = sec("🧩 Filtreler / otomatik yanıt (" + fl.items.length + "/" + fl.limit + ")");
+  fl.items.forEach((it) => fd.appendChild(itemRow((it.contains ? "💬 içinde: " : "💬 ") + it.trigger, it.preview,
+    [delBtn(it.trigger, { op: "filter_del", key: it.key }, fl.editable)])));
+  if (!fl.items.length) fd.appendChild(el("div", { cls: "help", text: "Henüz filtre yok." }));
+  if (fl.editable) {
+    const tr = el("input", { type: "text", placeholder: "Tetikleyici (içinde geçsin: *kelime*)", maxlength: "100" });
+    const tx = el("textarea", { placeholder: "Cevap ({kullanıcı} {ad} {grup} değişkenleri, buton satırları)" });
+    const b = el("button", { cls: "btn", type: "button", text: "➕ Filtre ekle" });
+    b.addEventListener("click", async () => { if (await op({ op: "filter_add", trigger: tr.value, text: tx.value })) { tr.value = ""; tx.value = ""; } });
+    fd.appendChild(el("div", { cls: "form" }, [tr, tx, b]));
+    fd.appendChild(el("div", { cls: "help", text: "Medyalı (sticker/foto) cevap için grupta medyaya yanıt verip /filter kullan." }));
+  }
+  c.appendChild(fd);
+  // ⏰ Zamanlanmış mesajlar
+  const sc = x.sched, sd = sec("⏰ Zamanlanmış mesajlar (" + sc.items.length + ")");
+  sc.items.forEach((it) => sd.appendChild(itemRow(it.preview, "Her " + it.every + " · sıradaki: " + it.next,
+    [switchEl(it.enabled, !sc.editable, () => op({ op: "sched_toggle", id: it.id }), "Açık/kapalı"),
+     delBtn("Bu zamanlanmış mesaj", { op: "sched_del", id: it.id }, sc.editable)])));
+  if (!sc.items.length) sd.appendChild(el("div", { cls: "help", text: "Henüz zamanlanmış mesaj yok." }));
+  if (sc.editable) {
+    const tx = el("textarea", { placeholder: "Mesaj (buton satırları ve %%% ile rastgele seçenek desteklenir)" });
+    const iv = el("select", { "aria-label": "Aralık" });
+    sc.intervals.forEach(([v, l]) => iv.appendChild(el("option", { value: String(v), text: l })));
+    iv.value = "21600";
+    const b = el("button", { cls: "btn", type: "button", text: "➕ Zamanlanmış mesaj ekle" });
+    b.addEventListener("click", async () => { if (await op({ op: "sched_add", text: tx.value, interval: iv.value })) tx.value = ""; });
+    sd.appendChild(el("div", { cls: "form" }, [tx, iv, b]));
+  }
+  c.appendChild(sd);
+  // 🚫 Engelli medya
+  const bm = x.blocked, bd = sec("🚫 Engelli medya (" + bm.items.length + ")");
+  bm.items.forEach((it) => bd.appendChild(itemRow(it.label, null, [delBtn("Bu engel", { op: "blocked_del", id: it.id }, bm.editable)])));
+  bd.appendChild(el("div", { cls: "help", text: "Eklemek için grupta medyaya yanıt verip /medyaengel, sticker paketi için /paketengel yaz." }));
+  c.appendChild(bd);
+  // 👮 Yetkililer
+  const sf = sec("👮 Yetkililer (" + x.staff.length + ")");
+  x.staff.forEach((p) => sf.appendChild(itemRow(p.name, p.role + " · " + p.id)));
+  sf.appendChild(el("div", { cls: "help", text: "Rütbe vermek/almak için grupta /admin, /basadmin, /yardimcikurucu; kişiye özel yetkiler için botta /yetkiler." }));
+  c.appendChild(sf);
 }
 
 async function loadChat(chat) {
   state.chat = chat;
-  $("content").innerHTML = "";
+  $("content").innerHTML = ""; $("extras").innerHTML = ""; $("stats").innerHTML = "";
   $("content").appendChild(el("div", { cls: "empty", text: "Yükleniyor…" }));
   try { render(await api("settings", { chat: chat })); }
   catch (e) { $("content").innerHTML = ""; $("content").appendChild(el("div", { cls: "empty", text: e.message })); }
