@@ -19,7 +19,7 @@ from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, Bot, MessageEntity,
     ReplyKeyboardMarkup, KeyboardButton, KeyboardButtonRequestChat, ForceReply, BotCommand,
     BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators,
-    BotCommandScopeChat,
+    BotCommandScopeChat, WebAppInfo, MenuButtonWebApp,
 )
 from telegram.constants import ParseMode, KeyboardButtonStyle
 from telegram.ext import ContextTypes
@@ -68,6 +68,8 @@ logger = logging.getLogger(__name__)
 
 # ─────────────────────────── AYARLAR (.env) ───────────────────────────
 TOKEN = os.getenv("BOT_TOKEN", "").strip()
+# Web panel (Telegram Mini App) adresi, ör. https://kullaniciadi.pythonanywhere.com/ — boşsa panel kapalı
+WEBAPP_URL = os.getenv("WEBAPP_URL", "").strip()
 if not TOKEN:
     raise SystemExit("BOT_TOKEN tanımlı değil! .env dosyasını doldurun.")
 
@@ -757,6 +759,11 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_member_events ON member_events(chat_id, at);
 
+            CREATE TABLE IF NOT EXISTS settings_dirty (
+                chat_id TEXT PRIMARY KEY,
+                at REAL NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS tag_optout (
                 chat_id TEXT NOT NULL,
                 user_id INTEGER NOT NULL,
@@ -917,6 +924,8 @@ def _migrate_installer():
             conn.execute("ALTER TABLE channels ADD COLUMN added_by INTEGER")
         if 'bot_id' not in cols:  # sohbeti yöneten bot (NULL = ana bot)
             conn.execute("ALTER TABLE channels ADD COLUMN bot_id INTEGER")
+        if 'title' not in cols:  # grup adı (web panel listesi için; bot güncel tutar)
+            conn.execute("ALTER TABLE channels ADD COLUMN title TEXT")
         gcols = {r[1] for r in conn.execute("PRAGMA table_info(giveaways)")}
         for col, typedef in (('prize', 'TEXT'), ('winners', 'INTEGER DEFAULT 1'), ('ends_at', 'REAL'), ('req', 'TEXT'),
                              ('started_by', 'INTEGER')):
@@ -4681,6 +4690,13 @@ async def _chat_title(chat_id: str) -> str:
         return cached[1]
     try:
         title = (await bot.get_chat(chat_id)).title or chat_id
+        try:
+            with get_db() as conn:
+                conn.execute("UPDATE channels SET title = ? WHERE chat_id = ? AND COALESCE(title, '') != ?",
+                             (title, str(chat_id), title))
+                conn.commit()
+        except sqlite3.Error:
+            pass
     except Exception as e:
         logger.debug(f"Sohbet adı alınamadı {chat_id}: {e}")
         title = chat_id
@@ -7952,6 +7968,7 @@ PRIVATE_COMMANDS = [
     ("start", "Başlat ve menü"), ("menu", "Menüyü göster"), ("kanal", "Grup/kanal seç"),
     ("settings", "Seçili grubun ayarları"), ("itiraz", "Ban itirazı gönder"), ("help", "Yardım"), ("id", "ID göster"),
     ("kurtar", "Admin kurtarma (güvenilir kişiler)"), ("kurulum", "Seçili grup için hızlı kurulum"),
+    ("webpanel", "Web panel (tüm ayarlar tek sayfada)"),
 ]
 CLONE_OWNER_COMMANDS = [
     ("panel", "Botunun grupları ve istatistikleri"), ("duyuru", "Tüm gruplarına duyuru"),
@@ -7984,6 +8001,8 @@ async def setup_bot_profile(b):
         await b.set_my_description(
             (f"🛡 {name} Security Bot\n\nGrubunu ve kanalını spam, link, flood, raid ve sahte hesaplara karşı korur. "
              "Tüm ayarlar butonlu panelden yapılır.\n\nBaşlamak için /start" + footer)[:512])
+        if WEBAPP_URL:  # özel sohbetteki menü butonu web paneli açar
+            await b.set_chat_menu_button(menu_button=MenuButtonWebApp("⚙️ Panel", WebAppInfo(WEBAPP_URL)))
     except Exception as e:
         logger.warning(f"Komut menüsü / bot açıklaması ayarlanamadı: {e}")
 
@@ -8523,6 +8542,9 @@ async def start(update: Update, context):
     if args and args[0].startswith("ra_"):
         await show_rich_action(update, context, args[0][3:])
         return
+    if args and args[0] == "webpanel":
+        await cmd_webpanel(update, context)
+        return
     if not args or not args[0].startswith("aup_"):
         if update.effective_chat.type != 'private':
             await update.message.reply_text(f"🛡 {html.escape(brand())} aktif! Ayarlar için /settings, komutlar için /help.")
@@ -8535,6 +8557,8 @@ async def start(update: Update, context):
                     "captcha koruması.\n\n1️⃣ Aşağıdaki butonla botu grubuna gerekli yetkilerle ekle.\n"
                     "2️⃣ Alttaki menüden grubunu seç, ⚙️ Ayarlar ile her şeyi butonlarla yönet.")
         markup = add_to_chat_markup(context.bot.username)
+        if WEBAPP_URL:
+            markup = InlineKeyboardMarkup(list(markup.inline_keyboard) + list(webpanel_markup().inline_keyboard))
         if c and c.get('support_link'):
             markup = InlineKeyboardMarkup(list(markup.inline_keyboard) + [[InlineKeyboardButton("💬 Destek", url=c['support_link'])]])
         await update.message.reply_text(body + brand_footer(), parse_mode=ParseMode.HTML, reply_markup=markup)
@@ -11041,6 +11065,643 @@ async def stats(update: Update, context):
     else:
         await msg.reply_text(text, parse_mode=ParseMode.HTML)
 
+
+# ═══════════════════════════ WEB PANEL (Telegram Mini App) ═══════════════════════════
+# Bot (Always-on task) dışarıya port açamaz; panel, aynı veritabanını kullanan bir WSGI web uygulamasıdır.
+# PythonAnywhere → Web → WSGI dosyası:  from main import webapp as application
+# Giriş: Telegram'ın imzaladığı initData (HMAC, bot token'ı ile) — şifre yok. Ana bot ve klonların token'ları geçerli.
+# Değişiklik veritabanına yazılır; bot 5 sn içinde önbelleğini yeniler (settings_dirty).
+WEB_INITDATA_TTL = 24 * 3600
+WEB_MAX_BODY = 256 * 1024
+_web_admin_cache: dict = {}   # (token, chat, uid) -> (zaman, yönetici mi)
+_web_sync_last = 0.0
+
+def _all_bot_tokens() -> list:
+    tokens = [TOKEN] if TOKEN else []
+    try:
+        with get_db() as conn:
+            tokens += [r['token'] for r in conn.execute("SELECT token FROM clones WHERE status != 'deleted' AND token != ''")]
+    except sqlite3.Error:
+        pass
+    return tokens
+
+def verify_init_data(init_data: str):
+    """Telegram Mini App initData doğrulaması. Dönüş: (kullanıcı sözlüğü, bot token'ı) ya da None."""
+    import hashlib
+    import hmac
+    from urllib.parse import parse_qsl
+    if not init_data or len(init_data) > 8192:
+        return None
+    try:
+        data = dict(parse_qsl(init_data, keep_blank_values=True, strict_parsing=True))
+    except ValueError:
+        return None
+    got = data.pop('hash', '')
+    check = "\n".join(f"{k}={v}" for k, v in sorted(data.items())).encode()
+    for token in _all_bot_tokens():
+        secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+        if hmac.compare_digest(hmac.new(secret, check, hashlib.sha256).hexdigest(), got):
+            try:
+                if time.time() - int(data.get('auth_date', 0)) > WEB_INITDATA_TTL:
+                    return None
+                user = json.loads(data.get('user') or '{}')
+            except (ValueError, TypeError):
+                return None
+            return (user, token) if isinstance(user.get('id'), int) else None
+    return None
+
+def _tg_api(token: str, method: str, params: dict) -> dict | None:
+    """Web işleminden (senkron) Bot API çağrısı."""
+    import urllib.request
+    req = urllib.request.Request(f"https://api.telegram.org/bot{token}/{method}",
+                                 data=json.dumps(params).encode(), headers={'Content-Type': 'application/json'})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            res = json.loads(r.read().decode())
+        return res.get('result') if res.get('ok') else None
+    except Exception as e:
+        logger.debug(f"Web Bot API {method}: {e}")
+        return None
+
+def _web_is_real_admin(token: str, chat_id: str, uid: int) -> bool:
+    key = (token, chat_id, uid)
+    c = _web_admin_cache.get(key)
+    if c and time.time() - c[0] < 120:
+        return c[1]
+    m = _tg_api(token, 'getChatMember', {'chat_id': chat_id, 'user_id': uid})
+    ok = bool(m) and m.get('status') in ('administrator', 'creator')
+    _web_admin_cache[key] = (time.time(), ok)
+    return ok
+
+def _web_bot_chats(token: str) -> list:
+    bid = int(token.split(':')[0])
+    main_id = int(TOKEN.split(':')[0]) if TOKEN else 0
+    with get_db() as conn:
+        if bid == main_id:
+            rows = conn.execute("SELECT chat_id, chat_type, title FROM channels WHERE bot_id IS NULL OR bot_id IN (0, -1, ?)",
+                                (bid,)).fetchall()
+        else:
+            rows = conn.execute("SELECT chat_id, chat_type, title FROM channels WHERE bot_id = ?", (bid,)).fetchall()
+    return [dict(r) for r in rows if r['chat_type'] in ('group', 'supergroup')]
+
+def _web_chat_allowed(token: str, chat_id: str, uid: int) -> bool:
+    return any(c['chat_id'] == chat_id for c in _web_bot_chats(token)) and has_permission(chat_id, uid, 50) \
+        and _web_is_real_admin(token, chat_id, uid)
+
+def _numeric_options(key: str) -> list:
+    lo, hi, step, _ = NUMERIC[key]
+    vals = step if isinstance(step, list) else list(range(lo, hi + 1, step))
+    return [[v, _fmt_numeric(key, v)] for v in vals]
+
+def _f(key, kind, label, perm='can_manage_settings', options=None, hint=None):
+    d = {'key': key, 'type': kind, 'label': label, 'perm': perm}
+    if options is not None:
+        d['options'] = options
+    if hint:
+        d['hint'] = hint
+    return d
+
+def web_schema() -> list:
+    """Panelde düzenlenebilen ayarlar. Sunucu sadece buradaki anahtarları ve değerleri kabul eder."""
+    acts = [[k, v] for k, v in ACTION_LABELS.items()]
+    num = lambda k, lbl, perm='can_manage_settings': _f(k, 'select', lbl, perm, _numeric_options(k))  # noqa: E731
+    prot = []
+    for k, (label, skey, _, desc) in PROTECTIONS.items():
+        prot += [_f(skey, 'bool', label, hint=desc), _f(f'action_{k}', 'select', "Ceza", options=acts)]
+    prot += [num('flood_limit', "🌊 Flood: mesaj sınırı"), num('flood_timeframe', "🌊 Flood: süre"),
+             num('mute_minutes', "🔇 Susturma süresi")]
+    return [
+        {'id': 'prot', 'title': "🛡 Korumalar", 'fields': prot},
+        {'id': 'words', 'title': "🔤 Kelime ve link listeleri", 'fields': [
+            _f('banned_words', 'list', "Yasaklı kelimeler", hint="Her satıra bir kelime. Regex için başına re: koy."),
+            _f('link_whitelist', 'list', "İzinli alan adları", hint="Her satıra bir alan adı (örn. youtube.com).")]},
+        {'id': 'join', 'title': "🚪 Katılım", 'fields': [
+            _f('captcha_enabled', 'bool', "🧩 Captcha"), num('captcha_timeout', "Captcha süresi"),
+            _f('join_captcha', 'bool', "📩 Katılım isteğinde özelden doğrulama"),
+            _f('anti_raid', 'bool', "🚨 Raid koruması"), num('raid_limit', "Raid: üye sınırı"),
+            num('raid_timeframe', "Raid: süre"), num('newbie_minutes', "🐣 Yeni üye kısıtı"),
+            _f('restrict_no_username', 'bool', "Kullanıcı adı olmayanı sustur")]},
+        {'id': 'warn', 'title': "⚠️ Uyarılar", 'fields': [
+            num('warn_limit', "Uyarı sınırı"),
+            _f('warn_action', 'select', "Sınır dolunca", options=[[k, v] for k, v in WARN_ACTION_LABELS.items()]),
+            num('warn_action_duration', "Geçici ceza süresi")]},
+        {'id': 'welcome', 'title': "👋 Karşılama", 'fields': [
+            _f('welcome_enabled', 'bool', "Hoş geldin mesajı", 'can_content'),
+            _f('welcome_rich', 'rich', "Hoş geldin mesajı", 'can_content'),
+            _f('welcome_clean', 'bool', "🧹 Yeni gelince eskisini sil", 'can_content'),
+            _f('welcome_batch', 'bool', "👥 Toplu katılımda tek mesaj", 'can_content'),
+            num('welcome_autodel', "⏱ Otomatik sil", 'can_content'),
+            _f('welcome_dm', 'bool', "📩 Özelden gönder", 'can_content'),
+            _f('goodbye_enabled', 'bool', "🚪 Veda mesajı", 'can_content'),
+            _f('goodbye_rich', 'rich', "Veda mesajı", 'can_content'),
+            _f('rules_rich', 'rich', "📜 Kurallar", 'can_content')]},
+        {'id': 'tag', 'title': "🏷 Etiket ve kanal", 'fields': [
+            num('tag_size', "/etiket: bir mesajda"),
+            _f('tag_style', 'select', "/etiket biçimi", options=[['name', "İsimle"], ['emoji', "Emojiyle"]]),
+            _f('tag_active_only', 'bool', "Sadece son 7 günün aktifleri"),
+            _f('fsub_enabled', 'bool', "📢 Kanal zorunluluğu", hint="Kanalı /kanalzorunlu @kanal ile ayarla.")]},
+        {'id': 'comm', 'title': "🧑‍⚖️ Topluluk koruması", 'fields': [
+            _f('shared_blacklist', 'bool', "🚩 Ortak kara liste", hint="Botun başka grubunda banlı kişi katılınca."),
+            _f('blacklist_action', 'select', "Kara liste işlemi", options=[[k, v] for k, v in BLACKLIST_ACTIONS.items()]),
+            _f('cas_enabled', 'bool', "🌐 CAS spam listesi"), _f('name_track', 'bool', "✏️ İsim değişikliği takibi"),
+            _f('vote_mute', 'bool', "🗳 Oylamalı susturma"), num('vote_needed', "Gerekli oy"),
+            num('vote_mute_minutes', "Oylama susturma süresi")]},
+    ]
+
+def _btn_source(b: dict) -> str:
+    target = {'url': b['v'], 'rules': 'rules', 'note': f"#{b['v']}", 'popup': f"popup:{b['v']}"}.get(b['k'], b['v'])
+    color = {str(GREEN): ' #yeşil', str(RED): ' #kırmızı', str(BLUE): ' #mavi'}.get(str(b.get('c')), '')
+    return f"{b['t']} - {target}{color}"
+
+def rich_to_source(rich: dict | None) -> str:
+    """Kayıtlı zengin mesaj → panelde düzenlenen yazı (izinli HTML etiketleri + buton satırları + %%%)."""
+    parts = []
+    for v in (rich or {}).get('v') or []:
+        lines = [html.unescape(v.get('text') or '')] if v.get('text') else []
+        lines += [" && ".join(_btn_source(b) for b in row) for row in v.get('buttons') or []]
+        parts.append("\n".join(lines))
+    return "\n%%%\n".join(p for p in parts if p)
+
+_WEB_TAG = re.compile(r'&lt;(/?(?:b|i|u|s|code|pre|tg-spoiler|blockquote(?: expandable)?)|a href="https?://[^"<>]+"|/a)&gt;')
+
+def source_to_html(src: str) -> str:
+    """Panel yazısı → HTML: her şey kaçışlanır, sadece izinli etiketler geri açılır."""
+    return _WEB_TAG.sub(lambda m: f"<{html.unescape(m.group(1))}>", html.escape(src or '', quote=False))
+
+def _rich_kind(key: str) -> str:
+    return key[:-5]  # welcome_rich → welcome
+
+def _field_value(key: str, ftype: str, s: dict):
+    if ftype == 'rich':
+        kind = _rich_kind(key)
+        rich = welcome_rich(s) if kind == 'welcome' else goodbye_rich(s) if kind == 'goodbye' else rules_rich(s)
+        media = (rich or {}).get('m')
+        return {'text': rich_to_source(rich), 'media': RICH_MEDIA_LABELS.get(media['type'], media['type']) if media else None}
+    if ftype == 'list':
+        return "\n".join(s.get(key) or [])
+    default = _default_channel_settings().get(key)
+    v = s.get(key, default)
+    return bool(v) if ftype == 'bool' else v
+
+def _validate_field(f: dict, value, s: dict):
+    """Dönüş: (yeni değer, hata). Rich alanlar (kind, rich) döndürür."""
+    t = f['type']
+    if t == 'bool':
+        return bool(value), None
+    if t == 'select':
+        allowed = {str(o[0]): o[0] for o in f['options']}
+        if str(value) not in allowed:
+            return None, "Geçersiz seçim"
+        return allowed[str(value)], None
+    if t == 'list':
+        items = [x.strip() for x in str(value or '').split('\n') if x.strip()][:500]
+        out = []
+        for it in items:
+            if len(it) > 100:
+                return None, f"Çok uzun: {it[:20]}…"
+            if f['key'] == 'banned_words':
+                if it.lower().startswith('re:'):
+                    try:
+                        re.compile(it[3:])
+                    except re.error:
+                        return None, f"Geçersiz regex: {it}"
+                else:
+                    it = it.lower()
+            else:
+                it = re.sub(r'^[a-z]+://', '', it.lower())
+                it = it[4:] if it.startswith('www.') else it
+            if it not in out:
+                out.append(it)
+        return out, None
+    if t == 'rich':
+        if not isinstance(value, dict):
+            return None, "Geçersiz"
+        src = str(value.get('text') or '')[:6000]
+        kind = _rich_kind(f['key'])
+        old = welcome_rich(s) if kind == 'welcome' else goodbye_rich(s) if kind == 'goodbye' else rules_rich(s)
+        media = None if value.get('remove_media') else (old or {}).get('m')
+        rich = build_rich(source_to_html(src), media)
+        if kind == 'rules' and not rich_plain(rich) and not media:
+            return ('rules', None), None  # boş kurallar = sil
+        if kind != 'rules' and not rich_plain(rich) and not media:
+            return None, "Mesaj boş olamaz"
+        return (kind, rich), None
+    return None, "Bilinmeyen alan"
+
+def web_settings_payload(chat_id: str, uid: int) -> dict:
+    s = get_channel_settings(chat_id)['settings']
+    sections = []
+    for sec in web_schema():
+        fields = []
+        for f in sec['fields']:
+            fields.append({**{k: v for k, v in f.items() if k != 'perm'},
+                           'value': _field_value(f['key'], f['type'], s),
+                           'editable': has_specific_permission(chat_id, uid, f['perm'])})
+        sections.append({'id': sec['id'], 'title': sec['title'], 'fields': fields})
+    with get_db() as conn:
+        row = conn.execute("SELECT title FROM channels WHERE chat_id = ?", (chat_id,)).fetchone()
+    return {'chat': chat_id, 'title': (row['title'] if row else None) or chat_id, 'sections': sections,
+            'fsub_channel': s.get('fsub_title')}
+
+def web_save(chat_id: str, uid: int, values: dict):
+    """Panelden gelen değişiklikleri doğrulayıp kaydeder. Dönüş: (değişen etiketler, hatalar)."""
+    channel = get_channel_settings(chat_id)
+    s = channel['settings']
+    fields = {f['key']: f for sec in web_schema() for f in sec['fields']}
+    changed, errors = [], {}
+    for key, value in (values or {}).items():
+        f = fields.get(key)
+        if not f:
+            errors[key] = "Bilinmeyen ayar"
+            continue
+        if not has_specific_permission(chat_id, uid, f['perm']):
+            errors[key] = "Yetkin yok"
+            continue
+        new, err = _validate_field(f, value, s)
+        if err:
+            errors[key] = err
+            continue
+        if f['type'] == 'rich':
+            kind, rich = new
+            if rich is None:
+                s['rules'] = ''
+                s.pop('rules_rich', None)
+            else:
+                store_rich(s, kind, rich)
+            changed.append(f['label'])
+            continue
+        if key == 'fsub_enabled' and new and not s.get('fsub_channel'):
+            errors[key] = "Önce /kanalzorunlu @kanal ile kanal ayarla"
+            continue
+        if s.get(key, _default_channel_settings().get(key)) != new:
+            s[key] = new
+            changed.append(f['label'])
+            if key == 'auto_accept' and new:
+                s['auto_reject'] = False
+    if changed:
+        if s.get('banned_words') and 'Yasaklı kelimeler' in changed:
+            s['word_ban_enabled'] = True
+        save_channel_settings(chat_id, channel)
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO settings_dirty (chat_id, at) VALUES (?, ?)", (chat_id, time.time()))
+            conn.commit()
+    return changed, errors
+
+async def web_sync_job(context):
+    """Web panelden kaydedilen ayarlar: botun önbelleği yenilenir (5 sn içinde etkili olur)."""
+    global _web_sync_last
+    with get_db() as conn:
+        rows = conn.execute("SELECT chat_id, at FROM settings_dirty WHERE at > ?", (_web_sync_last,)).fetchall()
+        conn.execute("DELETE FROM settings_dirty WHERE at < ?", (time.time() - 3600,))
+        conn.commit()
+    for r in rows:
+        _invalidate_settings(r['chat_id'])
+        _web_sync_last = max(_web_sync_last, r['at'])
+
+def _web_log(token: str, chat_id: str, user: dict, changed: list):
+    channel = get_channel_settings(chat_id)
+    log_id = channel.get('log_chat_id') if channel else None
+    if log_id and changed:
+        who = mention_html(user['id'], user.get('first_name') or str(user['id']))
+        _tg_api(token, 'sendMessage', {'chat_id': log_id, 'parse_mode': 'HTML',
+                                       'text': f"🖥 Web panelden değiştirildi: {html.escape(', '.join(changed))[:3000]} | {who}"})
+
+def _web_brand(token: str) -> str:
+    bid = int(token.split(':')[0])
+    with get_db() as conn:
+        r = conn.execute("SELECT brand, name FROM clones WHERE bot_id = ?", (bid,)).fetchone()
+    return (r['brand'] or r['name'] or 'ULUS') if r and TOKEN and bid != int(TOKEN.split(':')[0]) else 'ULUS'
+
+def web_api(path: str, body: dict):
+    """Dönüş: (HTTP durum, JSON sözlüğü)."""
+    auth = verify_init_data(body.get('initData') or '')
+    if not auth:
+        return 401, {'error': "Oturum doğrulanamadı. Paneli Telegram içinden aç."}
+    user, token = auth
+    uid = user['id']
+    if path == 'chats':
+        chats = []
+        for c in _web_bot_chats(token):
+            if has_permission(c['chat_id'], uid, 50):
+                chats.append({'id': c['chat_id'], 'title': c['title'] or c['chat_id']})
+        return 200, {'user': user.get('first_name') or '', 'brand': _web_brand(token), 'chats': chats}
+    chat_id = str(body.get('chat') or '')
+    if not re.fullmatch(r'-\d{5,20}', chat_id) or not get_channel_settings(chat_id):
+        return 404, {'error': "Grup bulunamadı"}
+    if not _web_chat_allowed(token, chat_id, uid):
+        return 403, {'error': "Bu grupta yönetici değilsin (ya da bot Telegram'a ulaşamadı)."}
+    if path == 'settings':
+        return 200, web_settings_payload(chat_id, uid)
+    if path == 'save':
+        changed, errors = web_save(chat_id, uid, body.get('values') or {})
+        if changed:
+            _web_log(token, chat_id, user, changed)
+        return 200, {'changed': changed, 'errors': errors, 'settings': web_settings_payload(chat_id, uid)}
+    return 404, {'error': "Bilinmeyen işlem"}
+
+def webapp(environ, start_response):
+    """WSGI uygulaması: / → panel sayfası, POST …/api/<işlem> → JSON."""
+    path = environ.get('PATH_INFO') or '/'
+    method = environ.get('REQUEST_METHOD', 'GET')
+
+    def reply(status: int, body, ctype: str = 'application/json; charset=utf-8'):
+        data = body if isinstance(body, bytes) else (json.dumps(body, ensure_ascii=False).encode()
+                                                      if not isinstance(body, str) else body.encode())
+        reason = {200: 'OK', 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found',
+                  405: 'Method Not Allowed', 413: 'Payload Too Large', 500: 'Internal Server Error'}.get(status, 'OK')
+        start_response(f"{status} {reason}", [('Content-Type', ctype), ('Content-Length', str(len(data))),
+                                              ('Cache-Control', 'no-store'), ('X-Content-Type-Options', 'nosniff')])
+        return [data]
+    try:
+        if '/api/' in path:
+            if method != 'POST':
+                return reply(405, {'error': "POST gerekli"})
+            try:
+                size = int(environ.get('CONTENT_LENGTH') or 0)
+            except ValueError:
+                size = 0
+            if size > WEB_MAX_BODY:
+                return reply(413, {'error': "İstek çok büyük"})
+            try:
+                body = json.loads(environ['wsgi.input'].read(size).decode() or '{}')
+            except (ValueError, UnicodeDecodeError):
+                return reply(400, {'error': "Geçersiz istek"})
+            if not isinstance(body, dict):
+                return reply(400, {'error': "Geçersiz istek"})
+            status, data = web_api(path.rsplit('/api/', 1)[1].strip('/'), body)
+            return reply(status, data)
+        if path.rstrip('/').endswith('/health'):
+            return reply(200, "ok", 'text/plain; charset=utf-8')
+        if method == 'GET':
+            return reply(200, WEB_PAGE, 'text/html; charset=utf-8')
+        return reply(405, {'error': "Desteklenmeyen istek"})
+    except Exception as e:
+        logger.exception(f"Web panel hatası: {e}")
+        return reply(500, {'error': "Sunucu hatası"})
+
+# ── Bot tarafı: paneli açan butonlar ──
+def webpanel_markup(chat_id: str | None = None) -> InlineKeyboardMarkup | None:
+    if not WEBAPP_URL:
+        return None
+    url = WEBAPP_URL + (("&" if "?" in WEBAPP_URL else "?") + f"chat={chat_id}" if chat_id else "")
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🖥 Web paneli aç", web_app=WebAppInfo(url))]])
+
+async def cmd_webpanel(update: Update, context):
+    """/webpanel — ayarları Telegram içinde açılan web sayfasından yönet (Mini App)."""
+    msg = update.effective_message
+    if not WEBAPP_URL:
+        await msg.reply_text("Web panel bu botta açılmamış (.env içinde WEBAPP_URL boş).")
+        return
+    if update.effective_chat.type != 'private':
+        await msg.reply_text("🖥 Web panel bota özelden açılır:", reply_markup=InlineKeyboardMarkup(
+            [[InlineKeyboardButton("🖥 Özelden aç", url=f"https://t.me/{context.bot.username}?start=webpanel")]]))
+        return
+    await msg.reply_text("🖥 <b>Web panel</b>\nTüm ayarlar tek sayfada: korumalar, karşılama, listeler, etiket ve "
+                         "topluluk koruması. Değişiklikler birkaç saniye içinde bota yansır.",
+                         parse_mode=ParseMode.HTML, reply_markup=webpanel_markup(context.user_data.get('selected_channel')))
+
+# Panel sayfası (tek dosya: HTML + JS; Telegram'ın tema renklerini kullanır)
+WEB_PAGE = r'''<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Panel</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root {
+  --bg: var(--tg-theme-secondary-bg-color, #f1f1f4);
+  --card: var(--tg-theme-section-bg-color, var(--tg-theme-bg-color, #ffffff));
+  --text: var(--tg-theme-text-color, #111111);
+  --hint: var(--tg-theme-hint-color, #8a8a8e);
+  --accent: var(--tg-theme-button-color, #2a78d6);
+  --accent-text: var(--tg-theme-button-text-color, #ffffff);
+  --head: var(--tg-theme-section-header-text-color, var(--tg-theme-hint-color, #6d6d72));
+  --danger: var(--tg-theme-destructive-text-color, #d93c3c);
+  --line: color-mix(in srgb, var(--hint) 22%, transparent);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--text);
+  font: 15px/1.4 -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
+main { max-width: 640px; margin: 0 auto; padding: 12px 16px 96px; }
+header { padding: 8px 2px 12px; }
+h1 { font-size: 20px; margin: 0 0 2px; }
+.sub { color: var(--hint); font-size: 13px; }
+.picker { width: 100%; margin-top: 10px; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--card); color: var(--text); font-size: 15px; }
+details.sec { background: var(--card); border-radius: 14px; margin: 12px 0; overflow: hidden; }
+details.sec > summary { list-style: none; cursor: pointer; padding: 13px 14px; font-weight: 600; display: flex;
+  align-items: center; justify-content: space-between; }
+details.sec > summary::-webkit-details-marker { display: none; }
+details.sec > summary::after { content: "›"; color: var(--hint); font-size: 20px; transition: transform .15s; }
+details.sec[open] > summary::after { transform: rotate(90deg); }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 14px;
+  border-top: 1px solid var(--line); }
+.row.col { flex-direction: column; align-items: stretch; }
+.lbl { flex: 1; min-width: 0; }
+.hint { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
+.ro { opacity: .55; }
+select, textarea { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 8px 10px; }
+select { max-width: 52%; }
+textarea { width: 100%; min-height: 110px; resize: vertical; margin-top: 8px; font-size: 14px; }
+.sw { position: relative; width: 50px; height: 30px; flex: none; }
+.sw input { opacity: 0; width: 0; height: 0; position: absolute; }
+.sw span { position: absolute; inset: 0; border-radius: 30px; background: var(--line); transition: background .15s; }
+.sw span::before { content: ""; position: absolute; width: 26px; height: 26px; left: 2px; top: 2px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .15s; }
+.sw input:checked + span { background: var(--accent); }
+.sw input:checked + span::before { transform: translateX(20px); }
+.sw input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.media { display: flex; gap: 8px; align-items: center; margin-top: 6px; font-size: 13px; color: var(--hint); }
+.err { color: var(--danger); font-size: 12.5px; margin-top: 4px; }
+.changed { box-shadow: inset 3px 0 0 var(--accent); }
+.save { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 608px; margin: 0 auto; padding: 14px;
+  border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-text); font-size: 16px;
+  font-weight: 600; display: none; }
+.toast { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); background: var(--text); color: var(--card);
+  padding: 9px 14px; border-radius: 10px; font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none;
+  max-width: 90vw; }
+.toast.on { opacity: .92; }
+.empty { text-align: center; color: var(--hint); padding: 40px 10px; }
+.help { color: var(--hint); font-size: 12.5px; padding: 0 14px 12px; }
+code { font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="title">⚙️ Panel</h1>
+    <div class="sub" id="sub">Yükleniyor…</div>
+    <select class="picker" id="picker" hidden aria-label="Grup seç"></select>
+  </header>
+  <div id="content"></div>
+</main>
+<button class="save" id="saveBtn" type="button">Kaydet</button>
+<div class="toast" id="toast" role="status"></div>
+<script>
+"use strict";
+const tg = window.Telegram && window.Telegram.WebApp;
+const initData = tg ? tg.initData : "";
+const base = location.pathname.replace(/\/+$/, "") + "/";
+const $ = (id) => document.getElementById(id);
+let state = { chat: null, fields: {}, changes: {} };
+
+if (tg) { tg.ready(); tg.expand(); }
+
+function toast(text) {
+  const t = $("toast"); t.textContent = text; t.classList.add("on");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), 2600);
+}
+
+async function api(path, extra) {
+  const r = await fetch(base + "api/" + path, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.assign({ initData: initData }, extra || {})) });
+  let data = {};
+  try { data = await r.json(); } catch (e) { data = { error: "Sunucuya ulaşılamadı" }; }
+  if (!r.ok) throw new Error(data.error || ("Hata " + r.status));
+  return data;
+}
+
+function el(tag, attrs, children) {
+  const e = document.createElement(tag);
+  for (const k in (attrs || {})) {
+    if (k === "text") e.textContent = attrs[k];
+    else if (k === "cls") e.className = attrs[k];
+    else e.setAttribute(k, attrs[k]);
+  }
+  (children || []).forEach((c) => c && e.appendChild(c));
+  return e;
+}
+
+function setDirty() {
+  const n = Object.keys(state.changes).length;
+  const label = n ? "Kaydet (" + n + ")" : "Kaydet";
+  if (tg && tg.MainButton) {
+    tg.MainButton.setText(label);
+    n ? tg.MainButton.show() : tg.MainButton.hide();
+  } else {
+    $("saveBtn").textContent = label;
+    $("saveBtn").style.display = n ? "block" : "none";
+  }
+}
+
+function track(f, row, value) {
+  state.changes[f.key] = value;
+  row.classList.add("changed");
+  setDirty();
+}
+
+function fieldRow(f) {
+  const lbl = el("div", { cls: "lbl" }, [el("div", { text: f.label }), f.hint ? el("div", { cls: "hint", text: f.hint }) : null]);
+  if (f.type === "bool") {
+    const row = el("label", { cls: "row" + (f.editable ? "" : " ro") });
+    const input = el("input", { type: "checkbox", role: "switch", "aria-label": f.label });
+    input.checked = !!f.value; input.disabled = !f.editable;
+    input.addEventListener("change", () => { track(f, row, input.checked); if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged(); });
+    row.append(lbl, el("span", { cls: "sw" }, [input, el("span")]));
+    return row;
+  }
+  if (f.type === "select") {
+    const row = el("div", { cls: "row" + (f.editable ? "" : " ro") });
+    const sel = el("select", { "aria-label": f.label });
+    f.options.forEach((o) => { const op = el("option", { value: String(o[0]), text: o[1] }); if (String(o[0]) === String(f.value)) op.selected = true; sel.appendChild(op); });
+    sel.disabled = !f.editable;
+    sel.addEventListener("change", () => track(f, row, sel.value));
+    row.append(lbl, sel);
+    return row;
+  }
+  const row = el("div", { cls: "row col" + (f.editable ? "" : " ro") });
+  const ta = el("textarea", { "aria-label": f.label, spellcheck: "false" });
+  ta.disabled = !f.editable;
+  row.appendChild(lbl);
+  if (f.type === "list") {
+    ta.value = f.value || "";
+    ta.addEventListener("input", () => track(f, row, ta.value));
+    row.appendChild(ta);
+    return row;
+  }
+  // rich: metin + butonlar + %%% ; medya bot üzerinden değiştirilir
+  const v = f.value || {};
+  ta.value = v.text || "";
+  let removeMedia = false;
+  const send = () => track(f, row, { text: ta.value, remove_media: removeMedia });
+  ta.addEventListener("input", send);
+  row.appendChild(ta);
+  if (v.media) {
+    const cb = el("input", { type: "checkbox" }); cb.disabled = !f.editable;
+    cb.addEventListener("change", () => { removeMedia = cb.checked; send(); });
+    row.appendChild(el("label", { cls: "media" }, [cb, el("span", { text: "🖼 " + v.media + " ekli — kaldırmak için işaretle" })]));
+  }
+  return row;
+}
+
+const RICH_HELP = "Butonlar: her satıra  Etiket - https://link  (yan yana: &&) · Kurallar - rules · Bilgi - popup:metin · " +
+  "Değişkenler: {kullanıcı} {ad} {grup} {uye_sayisi} · Rastgele mesaj: araya tek başına %%% satırı · " +
+  "Kalın/italik için <b> <i> etiketleri. Medyayı bota /setwelcome ile ekle.";
+
+function render(data) {
+  state.fields = {}; state.changes = {}; setDirty();
+  $("title").textContent = "⚙️ " + data.title;
+  const c = $("content"); c.innerHTML = "";
+  data.sections.forEach((sec, i) => {
+    const d = el("details", { cls: "sec" }); if (i === 0) d.open = true;
+    d.appendChild(el("summary", { text: sec.title }));
+    sec.fields.forEach((f) => { state.fields[f.key] = f; d.appendChild(fieldRow(f)); });
+    if (sec.id === "welcome") d.appendChild(el("div", { cls: "help", text: RICH_HELP }));
+    if (sec.id === "tag" && data.fsub_channel) d.appendChild(el("div", { cls: "help", text: "Zorunlu kanal: " + data.fsub_channel }));
+    c.appendChild(d);
+  });
+}
+
+async function loadChat(chat) {
+  state.chat = chat;
+  $("content").innerHTML = "";
+  $("content").appendChild(el("div", { cls: "empty", text: "Yükleniyor…" }));
+  try { render(await api("settings", { chat: chat })); }
+  catch (e) { $("content").innerHTML = ""; $("content").appendChild(el("div", { cls: "empty", text: e.message })); }
+}
+
+async function save() {
+  if (!Object.keys(state.changes).length) return;
+  if (tg && tg.MainButton) tg.MainButton.showProgress();
+  try {
+    const res = await api("save", { chat: state.chat, values: state.changes });
+    const errs = Object.entries(res.errors || {});
+    render(res.settings);
+    if (errs.length) toast("⚠️ " + errs.map(([k, v]) => ((state.fields[k] || {}).label || k) + ": " + v).join(" · "));
+    else toast(res.changed.length ? "✅ Kaydedildi" : "Değişiklik yok");
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred(errs.length ? "warning" : "success");
+  } catch (e) { toast("❌ " + e.message); }
+  finally { if (tg && tg.MainButton) tg.MainButton.hideProgress(); }
+}
+
+async function start() {
+  if (!initData) { $("sub").textContent = "Bu sayfa Telegram içinden açılmalı (botta /webpanel)."; return; }
+  if (tg && tg.MainButton) tg.MainButton.onClick(save); else $("saveBtn").addEventListener("click", save);
+  try {
+    const d = await api("chats");
+    document.title = d.brand + " Panel";
+    $("sub").textContent = d.brand + " · " + (d.chats.length ? "Yönettiğin gruplar" : "Yönettiğin grup yok");
+    if (!d.chats.length) { $("content").appendChild(el("div", { cls: "empty", text: "Botun yönetici olduğu ve senin yetkili olduğun bir grup bulunamadı." })); return; }
+    const p = $("picker"); p.hidden = d.chats.length < 2;
+    d.chats.forEach((c) => p.appendChild(el("option", { value: c.id, text: c.title })));
+    const want = new URLSearchParams(location.search).get("chat") || (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || "";
+    const first = d.chats.some((c) => c.id === want) ? want : d.chats[0].id;
+    p.value = first;
+    p.addEventListener("change", () => {
+      if (Object.keys(state.changes).length && !confirm("Kaydedilmemiş değişiklikler silinsin mi?")) { p.value = state.chat; return; }
+      loadChat(p.value);
+    });
+    loadChat(first);
+  } catch (e) { $("sub").textContent = e.message; }
+}
+start();
+</script>
+</body>
+</html>
+'''
+
 # ── Notlar (/save, /not, #isim) ──
 _NOTE_NAME = re.compile(r'^[\w\-]{1,32}$')
 
@@ -12471,6 +13132,7 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler(['kanalzorunlu', 'fsub', 'forcesub'], cmd_kanalzorunlu))
     app.add_handler(CallbackQueryHandler(fsub_callback, pattern=r'^fs\|'))
     app.add_handler(CommandHandler('afk', cmd_afk))
+    app.add_handler(CommandHandler('webpanel', cmd_webpanel))
     app.add_handler(CommandHandler('sicil', cmd_sicil))
     app.add_handler(CommandHandler(['oylama', 'votemute'], cmd_oylama))
     app.add_handler(CallbackQueryHandler(vote_callback, pattern=r'^vm\|'))
@@ -12626,6 +13288,7 @@ def main():
     job_queue.run_repeating(auto_delete_job, interval=20, first=20)
     job_queue.run_repeating(scheduled_msgs_job, interval=60, first=45)
     job_queue.run_repeating(giveaway_job, interval=60, first=50)
+    job_queue.run_repeating(web_sync_job, interval=5, first=5)
     job_queue.run_repeating(spam_memory_cleanup, interval=3600, first=3600)
     job_queue.run_repeating(weekly_log_cleanup, interval=86400, first=3600)
     job_queue.run_daily(backup_job, time=dtime(4, 0, tzinfo=TZ_TR))

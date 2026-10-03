@@ -55,7 +55,7 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
    - Yeni açılmış ve sahte hesaplar katılamaz.
 2. **Grafikli istatistik** — `/stats`: son 7 ve 30 günün aktivitesi, en aktif saatler, katılan/ayrılan; resim olarak grafik (matplotlib).
 
-## Faz 5 — Telegram Mini App paneli
+## Faz 5 — Telegram Mini App paneli ✅ (tamamlandı)
 - Ayarlar Telegram içinde açılan web sayfasından yönetilir: sekmeler, açma/kapama anahtarları, önizleme.
 - PythonAnywhere web uygulaması üzerinde çalışır; giriş Telegram doğrulamasıyla.
 
