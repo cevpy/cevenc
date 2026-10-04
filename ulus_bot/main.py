@@ -527,13 +527,16 @@ _RU_FORMS = [('день', 'дня', 'дней'), ('час', 'часа', 'час�
              ('раз', 'раза', 'раз'), ('неделя', 'недели', 'недель'), ('месяц', 'месяца', 'месяцев'), ('год', 'года', 'лет'),
              ('кнопка', 'кнопки', 'кнопок'), ('вариант', 'варианта', 'вариантов'), ('группа', 'группы', 'групп'),
              ('канал', 'канала', 'каналов'), ('действие', 'действия', 'действий'), ('голос', 'голоса', 'голосов'),
-             ('победитель', 'победителя', 'победителей'), ('клик', 'клика', 'кликов'), ('ссылка', 'ссылки', 'ссылок')]
+             ('победитель', 'победителя', 'победителей'), ('клик', 'клика', 'кликов'), ('ссылка', 'ссылки', 'ссылок'),
+             ('бан', 'бана', 'банов'), ('мут', 'мута', 'мутов'), ('кик', 'кика', 'киков')]
 _UK_FORMS = [('день', 'дні', 'днів'), ('година', 'години', 'годин'), ('хвилина', 'хвилини', 'хвилин'),
              ('секунда', 'секунди', 'секунд'), ('повідомлення', 'повідомлення', 'повідомлень'),
              ('учасник', 'учасники', 'учасників'), ('людина', 'людини', 'людей'),
              ('попередження', 'попередження', 'попереджень'), ('раз', 'рази', 'разів'), ('тиждень', 'тижні', 'тижнів'),
              ('місяць', 'місяці', 'місяців'), ('рік', 'роки', 'років'), ('кнопка', 'кнопки', 'кнопок'),
-             ('група', 'групи', 'груп'), ('канал', 'канали', 'каналів'), ('дія', 'дії', 'дій')]
+             ('група', 'групи', 'груп'), ('канал', 'канали', 'каналів'), ('дія', 'дії', 'дій'), ('голос', 'голоси', 'голосів'),
+             ('переможець', 'переможці', 'переможців'), ('клік', 'кліки', 'кліків'), ('посилання', 'посилання', 'посилань'),
+             ('варіант', 'варіанти', 'варіантів'), ('бан', 'бани', 'банів'), ('мут', 'мути', 'мутів'), ('кік', 'кіки', 'кіків')]
 
 def _slavic_fixer(table):
     by_word = {f: forms for forms in table for f in forms}
@@ -20874,7 +20877,7 @@ b5116fff1	أنت مشارك بالفعل، حظًا موفقًا! 🍀
 b05652dd1	✅ <b>انتهى السحب</b>
 4cc381328	🎉 انتهى السحب! لم يستوفِ أي مشارك الشروط.
 8e2d564a7	🎉 <b>انتهى السحب!</b>⟨0⟩
-5aa86da43	🏆 الفائز⟨0⟩: ⟨1⟩
+5aa86da43	🏆 الفائزون: ⟨1⟩
 e9ade43fd	👥 المشاركون: ⟨0⟩
 7438ab083	🏆 انتهى السحب: ⟨0⟩ | ⟨1⟩
 1e5f2647b	لا فائز
@@ -21366,6 +21369,2082 @@ b57672cb0	لا تدير أي مجموعة
 03396c6dd	لم يُعثر على مجموعة يكون البوت فيها مشرفًا وأنت من طاقمها.
 274139b9d	تجاهل التغييرات غير المحفوظة؟
 67b14047c	الأزرار: زر في كل سطر  النص - https://الرابط  (جنبًا إلى جنب: &&) · القوانين - rules · معلومة - popup:نص · المتغيرات: {user} {first} {group} {count} · رسالة عشوائية: سطر %%% بينها · استخدم الوسوم <b> <i> للعريض/المائل. أضف الوسائط عبر البوت بـ /setwelcome.
+'''
+
+I18N_AZ = r'''
+a9826a4de	⟨0⟩ Security Bot
+89c80575f	⚡ Əsas bot: @⟨0⟩
+d86fae223	✅ Dil təyin edildi: ⟨0⟩
+972caaca5	🌍 <b>Dil</b>
+fea7d950e	✅ Qrupun dili: ⟨0⟩
+1b6f202bc	🌍 <b>Qrupun dili</b>
+9ab6017a5	Hazırda: ⟨0⟩
+9d13d74f6	Botun bu qrupdakı dilini seç:
+448e35ffe	İcazən yoxdur!
+17665e8c1	🌍 Qrupun dili: ⟨0⟩ | ⟨1⟩
+4c9e57207	👑 Təsisçi
+bfa3235c4	🔱 Həmtəsisçi
+ef61a4d09	⭐ Baş admin
+8d0d91abe	⚠️ Xəbərdarlıq
+9a83dd2de	🗑 Mesajları silmək
+d7d2f6eb2	🔇 Susdurmaq
+4acd35f89	👢 Qrupdan çıxarmaq
+41605b650	🔨 Ban / banı açmaq
+1a7979b5e	↩️ Xəbərdarlığı geri almaq
+5b4929b15	📌 Sancmaq
+6880a0676	🧹 Toplu silmə / yavaş rejim
+1b5d5b3d1	📩 Qoşulma sorğuları / etirazlar
+6a285730c	📜 Qaydalar / xoş gəldin / qeydlər
+eab57b3ab	🚨 Təcili kilid (açmaq)
+932bdd7e5	⚙️ Qoruma ayarları
+6628cf302	👑 Rütbə vermək / almaq
+178f46a47	🧩 Filtrlər (avtomatik cavab)
+5d856e480	🏷 Kütləvi etiketləmə (/tag)
+8c664bc3f	🔗 Dəvət linki
+5fc826495	🚫 Məhdudlaşdırma / ban
+52e1acc4f	🎙 Səsli söhbətlər
+c264fb5af	💬 Mövzuları idarə etmək
+5e74fa6f0	📖 Hekayə paylaşmaq
+1e9853465	✏️ Hekayəni redaktə etmək
+f56347abf	🗑 Hekayəni silmək
+fc5b6f247	ℹ️ Qrup məlumatı
+16f35c22f	⭐ Admin əlavə etmək
+5a2dcf161	Botun bunun üçün icazəsi yoxdur. Botu lazımi hüquqlarla admin et.
+da1585078	Bot özündə olmayan hüququ başqasına verə bilməz.
+5f334b209	Bu şəxs qrupda admindir; bu əməliyyat adminlərə tətbiq oluna bilməz.
+a34bdfc67	İstifadəçi qrupda tapılmadı.
+247a273bd	Mesaj tapılmadı (silinmiş ola bilər).
+342d7a053	Bu mesajı silmək olmur (48 saatdan köhnə ola bilər).
+59b207012	Telegram hazırda çox sorğu qəbul edir, bir az sonra yenidən cəhd et.
+29072692d	Çat tapılmadı. Bot həmin çatdadırmı?
+9a9bee4a1	Bu yalnız superqruplarda işləyir.
+e99fefa09	Bota giriş yoxdur (bot bloklanıb və ya çatdan çıxarılıb).
+f6a39420d	Telegram-a qoşulmaq olmadı, bir az sonra yenidən cəhd et.
+fce0709e2	❌ Əməliyyat alınmadı, yenidən cəhd et.
+c1a2c3bf9	Bunu özünə edə bilməzsən.
+58503ae82	Bu əməliyyat bu hesaba tətbiq edilə bilməz.
+c93d8e442	⛔ ⟨0⟩ sənin rütbəndə və ya daha yuxarıdadır; ona qarşı əməliyyat edə bilməzsən.
+7c6c0a917	Bu şəxs
+980a088c1	⛔ İcazən yoxdur! (⟨0⟩ və ya yuxarı)
+f78cc4201	⛔ Bu əmr üçün qrupda həqiqi admin olmalısan.
+1a089160e	⛔ Bot bu qrupda admin deyil və ya icazələri çatmır.
+ec502d773	⟨0⟩ saat
+1d683512c	⟨0⟩ dəqiqə
+e0250a8c0	⟨0⟩ saniyə
+4f52d88ec	Salam {user}, {group} qrupuna xoş gəldin!
+41006f31c	🙏 Təşəkkürlər! Bot əlavə edildi: ⟨0⟩
+e89ec2f7d	Növ: ⟨0⟩
+484b4f591	Əmrlər üçün /help yaz.
+fbb8f4be4	Bot əlavə edildi: ⟨0⟩ (⟨1⟩) | sahibi: ⟨2⟩
+417b3cc01	✅ Bot əlavə edildi və qeydiyyata alındı! Əmrlər: /help, ayarlar: /settings.
+189f689b9	🌍 Dil: /setlang
+cde2bd7c8	xəbərdarlıq
+929d8360f	xəbərdarlığın götürülməsi
+3c0ddc51a	susdurma
+9c030a691	susdurmanın götürülməsi
+91787bcf5	qrupdan çıxarılma
+d34c44d0e	daimi ban
+b131626a5	banın götürülməsi
+6838cf1a3	silmə
+b707492ec	müvəqqəti ban
+6f1a328f6	hüquqların alınması
+4f0282227	şikayət
+12c391a8f	düymə
+b581541a3	qara siyahı
+b01a6a6e8	səsvermə
+e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> xəbərdarlıq
+ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Xəbərdarlıq: ⟨3⟩/⟨4⟩ | ⟨5⟩
+9e23d2151	müvəqqəti ban (⟨0⟩)
+953cd28f3	qrupdan çıxarıldı
+090d91568	📨 Etiraz üçün bota şəxsi mesajla /appeal yaza bilər.
+ddd70b55a	⟨0⟩ ⟨1⟩ ⟨2⟩ xəbərdarlığa çatdı → <b>⟨3⟩</b> (⟨4⟩)⟨5⟩
+f05514a4b	🚫 ⟨0⟩ ⟨1⟩ | Səbəb: ⟨2⟩ | ⟨3⟩
+33762701b	🗑 ⟨0⟩ → ⟨1⟩ istifadəçisinin mesajı silindi | ⟨2⟩
+e83ba4992	🔇 ⟨0⟩ ⟨1⟩ → ⟨2⟩ susduruldu
+4689a9495	👢 ⟨0⟩ ⟨1⟩ → qrupdan çıxarıldı
+24b70b24b	🚫 ⟨0⟩ ⟨1⟩ → banlandı
+a1ce809b5	⚠️ Silindi + xəbərdarlıq
+4d4d20ba3	🔇 Silindi + 1 saat susduruldu
+184e9ea25	✅ Nəzərə alınmadı
+d193c645a	⚠️ Xəbərdarlıq et
+bb7ad37ac	🔇 1 saat sustur
+e7e0e2df9	✅ Nəzərə alma
+3397853de	Şikayət qrupdakı mesaja cavab verməklə göndərilir: /report [səbəb]
+b61b50bf7	Mesaja cavab verib /report yaz.
+9cf259e34	Adminlərdən şikayət etmək olmaz.
+c5bbdb405	Çox tez-tez şikayət edirsən, bir az gözlə.
+bd7e0099e	Bu mesaj artıq şikayət edilib.
+896d1ca10	🚩 <b>Yeni şikayət</b> #⟨0⟩
+cec4cf481	Qrup: <b>⟨0⟩</b>
+c3a6b7566	Şikayətçi: ⟨0⟩
+5083aeebb	Şikayət edilən: ⟨0⟩ (<code>⟨1⟩</code>)
+9b4b6cd06	<a href="⟨0⟩">Mesaja keç</a>
+679ec2d36	✅ ⟨0⟩, şikayətin adminlərə göndərildi.
+008e3c181	⚠️ ⟨0⟩, şikayət qəbul edildi, amma hazırda heç bir adminə çatmaq olmur.
+ad6b780a2	Şikayət tapılmadı.
+04f22133c	Bu şikayətə artıq baxılıb: ⟨0⟩
+94cea35e5	↩️ Xəbərdarlığı geri al
+2446ce8e3	🔊 Susdurmanı aç
+d3d996724	↩️ Xəbərdarlıq geri alındı (⟨0⟩/⟨1⟩)
+2ffab4aa4	🔇 1 saat susduruldu
+969014784	🔊 Susdurma açıldı
+c1ef156c4	✅ Ban açıldı
+7181ac4be	Yanlış əməliyyat.
+3461c44ea	Bunun üçün qrupda admin olmalısan.
+74042fc88	Bot bu qrupda admin deyil və ya icazələri çatmır.
+aec9fe5ec	Adminlərə tətbiq edilə bilməz.
+14fea3d87	👋 Salam ⟨0⟩!
+b6ba013b6	Qrupda yazmaq üçün aşağıdakı suala cavab ver.
+30a234e49	⏰ Vaxt: ⟨0⟩. Səhv cavab və ya vaxtın bitməsi səni qrupdan çıxarır.
+5941a96e3	⏰ Kapça vaxtı bitdi → ID:⟨0⟩ çıxarıldı | ⟨1⟩
+47de968f7	Xəta.
+371e8fa90	Bu kapça sənin deyil!
+4b056df52	Kapçanın vaxtı bitib.
+16a67ec53	✅ Düzdür!
+13e7c138f	✅ ⟨0⟩ təsdiqləndi!
+d8c5044b0	✅ Kapçadan keçdi: ⟨0⟩ | ⟨1⟩
+d4d19c221	❌ Səhv cavab!
+be0ff1965	❌ ⟨0⟩ səhv cavab verdi və çıxarıldı.
+921ae23b1	❌ Kapçadan keçmədi → ⟨0⟩ çıxarıldı | ⟨1⟩
+a1d75b185	🗑 ⟨0⟩ — kanal adından (⟨1⟩) göndərilən mesaj silindi | ⟨2⟩
+c537f5f16	🆕 ⟨0⟩, yeni üzvlər ilk ⟨1⟩ dəqiqədə link/media/yönləndirmə göndərə bilməz. (~⟨2⟩ dəq qalıb)
+df471627f	bloklanmış stiker paketi
+d3bfcdff9	bloklanmış media
+c82923d6d	təhlükəli fayl (⟨0⟩)
+c83f1da6c	uyğunsuz məzmun
+5fb084a5f	Sİ: ⟨0⟩
+51da96b93	uyğunsuz məzmun (⟨0⟩)
+c5baa0aed	Uyğunsuz media (⟨0⟩)
+acae614af	avtomatik: ardıcıl uyğunsuz media (hücum şübhəsi)
+f77a6df47	🚨 <b>Media hücumu</b> aşkarlandı, qrupda media göndərmə kilidləndi.
+d6fc51018	imzasız paylaşım
+93f2e53e1	🔞 <b>Kanalda uyğunsuz media silindi</b>
+a99d18293	Göndərən: ⟨0⟩
+d6c8546a4	Kanal: <code>⟨0⟩</code>
+cb902699f	Kanalda ardıcıl uyğunsuz media (kanalı bağlatmaq cəhdi şübhəsi)
+ade12807b	🔒 <b>Media kilidi</b>: şəkil, video, stiker, GIF və fayllar ⟨0⟩ müddətinə bağlandı.
+d21e8724d	Səbəb: ⟨0⟩
+0ca7ff868	🔓 Media kilidi açıldı, əvvəlki icazələr bərpa olundu.
+874318f86	🔓 Media kilidi açıldı | ⟨0⟩
+4bf6387ff	Bu əmri qrupda bloklamaq istədiyin mediaya cavab verərək işlət.
+b38691ea2	Bloklamaq istədiyin şəkil/video/GIF/stiker/fayla cavab ver.
+19a0caff5	Paketini bloklamaq üçün stikerə cavab ver.
+a6fdf7132	stiker paketi <code>⟨0⟩</code>
+478778014	(bütün qruplarda)
+350c5b7db	🚫 ⟨0⟩ bloklandı. Yenidən göndərilsə silinəcək.
+3506ca524	Bu artıq bloklanıb.
+4d19611fc	🚫 Media bloklandı (⟨0⟩) | ⟨1⟩
+63de95c9c	Əvvəlcə /select ilə qrup seç!
+0d2990bb6	🔓 Media kilidi açıldı.
+5efbe835d	Media kilidi artıq bağlıdır.
+bc8817800	🔒 Media kilidləndi.
+57dd35ab6	Kilidlənmədi (reyd kilidi aktiv ola bilər və ya botun icazəsi yoxdur).
+6fc9219df	⟨0⟩ g ⟨1⟩ s
+184dd1447	⟨0⟩ s ⟨1⟩ dəq
+65f0ede73	⟨0⟩ dəq
+c55e9eeb2	✏️ ⟨0⟩, ⟨1⟩ dəqiqədən köhnə mesajlar redaktə edilə bilməz; redaktə etdiyin mesaj silindi.
+e4ec4ef08	<i>qeyd yoxdur (mesaj qoruma açılmazdan əvvəl göndərilib)</i>
+4f135e257	<a href="⟨0⟩">Mesajın yeri</a>
+a81c7ed8d	✏️ <b>Gec redaktə edilən mesaj silindi</b>
+ff6af8a83	İstifadəçi: ⟨0⟩ (<code>⟨1⟩</code>)
+6c94268e3	Göndərildi: ⟨0⟩ · ⟨1⟩ sonra redaktə edildi
+eba784f45	<b>Əvvəl:</b>
+817e491aa	<b>Sonra:</b>
+ba4e72261	Yönləndirmə
+330690bdd	yönləndirmə (#⟨0⟩)
+a00507082	media flood (⟨0⟩/⟨1⟩ san)
+a77f997a9	flood (⟨0⟩ mesaj/⟨1⟩ san)
+74c953a60	🔗 Link silindi → ⟨0⟩ | ⟨1⟩
+427c1fec3	link göndərmək
+794910b1f	Qadağan söz
+8fb66aa89	qadağan söz
+4e5efb06d	təkrarlanan spam
+c91e153a9	Anti-yönləndirmə indi: ⟨0⟩
+6d6d358e6	İstifadə: /antiforward on|off
+117ba2454	AÇIQ
+6a2055cc2	Anti-yönləndirmə ⟨0⟩.
+596cfaf0b	Anti-yönləndirmə ⟨0⟩ | ⟨1⟩
+d2102fa46	Anti-media indi: ⟨0⟩
+332b15c14	İstifadə: /antimedia on|off
+3227848c2	Anti-media flood ⟨0⟩.
+48d9c6287	Anti-media flood ⟨0⟩ | ⟨1⟩
+8cc0eba99	Anti-flood indi: ⟨0⟩
+d1a5f38ec	Limit: ⟨0⟩ mesaj / ⟨1⟩ saniyə
+3599fb42c	İstifadə: /antispam on|off
+64adfe1a4	Limiti dəyiş: /antispam on 10 5 (10 mesaj/5 saniyə)
+1a836ee8e	Anti-flood ⟨0⟩. (Limit: ⟨1⟩ mesaj/⟨2⟩ san)
+27867ef23	Anti-spam ⟨0⟩ | ⟨1⟩
+5a6f48edd	Anti-link indi: ⟨0⟩
+d947593b7	İstifadə: /antilink on|off
+5ddc225c5	Link bloku ⟨0⟩. (Adminlər istisnadır)
+298cef31c	Anti-link ⟨0⟩ | ⟨1⟩
+dc5c98faf	Kapça indi: ⟨0⟩
+0742b23d4	İstifadə: /captcha on|off
+348974ec8	Kapça ⟨0⟩.
+070cf47b7	Kapça ⟨0⟩ | ⟨1⟩
+f8303f57c	✅ ⟨0⟩ artıq heyətdə deyil.
+eb3b60248	🗑 ⟨0⟩ istifadəçisinin rütbəsi alındı | ⟨1⟩
+36a946671	İstifadəçi tapılmadı!
+92274adac	📂 ⟨0⟩ indi qovluq idarəçisidir!
+b7a687056	📂 ⟨0⟩ qovluq idarəçisi təyin edildi | ⟨1⟩
+3b49b9b50	Səbəb göstərilməyib
+42ca54745	🚫 ⟨0⟩ ⟨1⟩ aldı! Səbəb: ⟨2⟩
+023576cd7	İstifadəçi göstər! Mesajına cavab ver və ya ID/username yaz.
+bad97a937	✅ ⟨0⟩ banı açıldı!
+b83344e83	✅ ⟨0⟩ banı açıldı | ⟨1⟩
+dee699309	👢 ⟨0⟩ qrupdan çıxarıldı!
+16d07ca95	👢 ⟨0⟩ qrupdan çıxarıldı | ⟨1⟩
+299422191	24 saat (admin limiti)
+b2fbfc457	🔇 ⟨0⟩ ⟨1⟩ susduruldu!
+9247b48e0	🔇 ⟨0⟩ ⟨1⟩ susduruldu | ⟨2⟩
+b13185722	⟨0⟩ ⟨1⟩: susdurma açıldı!
+dd3fea678	⟨0⟩ ⟨1⟩: susdurma açıldı | ⟨2⟩
+08ccab800	əllə susdurmanı açmaq
+f990c822c	Susdurma açılmadı: ⟨0⟩
+fa5f86984	⟨0⟩ ⟨1⟩: xəbərdarlıq geri alındı (⟨2⟩/⟨3⟩).
+e222d2c43	↩️ ⟨0⟩: xəbərdarlıq geri alındı (⟨1⟩) | ⟨2⟩
+b26226e44	📊 ⟨0⟩ xəbərdarlıqları: ⟨1⟩/⟨2⟩
+fcbd59f04	Sancmaq üçün mesaja cavab verib /pin yaz!
+821dc813a	📌 Mesaj sancıldı!
+f07ba3194	📌 Mesaj sancıldı | ⟨0⟩
+84ce06e7a	✅ Sancma götürüldü!
+7a8e925ad	📍 Sancma götürüldü | ⟨0⟩
+a166505b1	İstifadə: /slowmode <saniyə> (0 = bağlı)
+5efa94a44	Nümunə: /slowmode 30
+d9e0a5f25	⏩ Yavaş rejim bağlandı.
+c9f3d97aa	🐢 Yavaş rejim: ⟨0⟩ saniyə.
+90fc9c4e8	🐢 Yavaş rejim ⟨0⟩ san | ⟨1⟩
+04ee47e62	Düzgün saniyə sayı yaz!
+ec7dc1340	Əvvəlcə /select ilə qrup seç!
+ef6a75200	Bu əmri təmizləmək istədiyin qrupun içində işlət.
+8ab6d8456	İstifadə: /purge <say> və ya /purge all
+ad1696ee9	Son ⟨0⟩ mesaj
+09bed8e26	🧹 Mesajlar silinir, gözlə...
+1f937217d	🧹 Təmizləndi: ⟨0⟩.
+f6a3aa1c3	🧹 Təmizləndi: ⟨0⟩ | ⟨1⟩
+ca1480b4e	📋 Ban siyahısı boşdur.
+3df0209e0	🚫 <b>Ban siyahısı</b> (son 20):
+a2ef54f04	📋 Susdurulanlar siyahısı boşdur.
+f3ad3e028	🔇 <b>Susdurulanlar siyahısı</b> (son 20):
+4d02c60e6	⟨0⟩ dəq qalıb
+e9fa5b6c6	vaxtı bitib
+50bd44457	İstifadə: /antispam on|off
+aaf3e3fa7	Spam qoruması ⟨0⟩!
+032f12948	⚙️ Spam qoruması ⟨0⟩ | ⟨1⟩
+db5c288ba	İstifadə: /wordban <söz>
+5ce049d2e	Yanlış regex: ⟨0⟩
+382054e7a	'⟨0⟩' qadağan sözlər siyahısına əlavə edildi!
+a061e639e	'⟨0⟩' artıq qadağandır!
+c690df9b8	Qadağan söz sistemi açıldı!
+a04bd920f	Qadağan söz sistemi bağlandı!
+908cb2d50	İstifadə: /setautoaccept on|off
+ad89cff79	Avtomatik qəbul ⟨0⟩!
+8a77c7461	İstifadə: /setautoreject on|off
+de72bc915	Avtomatik rədd ⟨0⟩!
+f4661e0bb	İstifadə: /setautorejectbot on|off
+4f2789f4b	Bot/saxta hesab rəddi ⟨0⟩!
+19f41bbbf	Hələ dəvət statistikası yoxdur!
+8618c4bd5	📈 Dəvət statistikası:
+4dff67686	⟨0⟩: ⟨1⟩ üzv
+fae5737f3	🚨 REYD AŞKARLANDI!
+7b14ac650	⟨0⟩ üzv / ⟨1⟩ saniyə
+cf9fdec29	Qrup ⟨0⟩ dəqiqəlik kilidləndi. Açmaq üçün: /unlockdown
+1124ad26d	🔒 Qrup ⟨0⟩ dəqiqəlik kilidləndi: ⟨1⟩
+93ff62fcf	Qrup artıq kilidlidir.
+0182255e2	🚨 Təcili kilid: ⟨0⟩
+121e5db73	🔒 Qrup ⟨0⟩ dəqiqəlik kilidləndi. Həmtəsisçi və yuxarısı /unlockdown ilə aça bilər.
+2aadb84f8	Kilidlənmədi (botun icazələrini yoxla).
+aff77f945	✅ Reyd kilidi avtomatik açıldı | ⟨0⟩
+8fcabef94	🔒 Hazırda KİLİDLİ
+94a774e51	🔓 Açıq
+376d9283f	🚨 Anti-reyd: ⟨0⟩
+8827355aa	İstifadə: /antiraid on|off
+f0e5d75da	Limiti dəyiş: /antiraid on 15 20 (15 üzv/20 san)
+ecbb4a7da	🚨 Anti-reyd ⟨0⟩.
+4f3192d13	Limit: ⟨0⟩ üzv / ⟨1⟩ saniyə
+bdf82e0b3	🚨 Anti-reyd ⟨0⟩ | ⟨1⟩
+cc103ac23	Qrup kilidli deyil.
+374c81aa3	✅ Reyd kilidi açıldı, qrupun əvvəlki icazələri qayıtdı.
+2551f6fe1	✅ Reyd kilidi əllə açıldı | ⟨0⟩
+4918e916d	Xəta: kilid açılmadı (botun icazələrini yoxla).
+bce49f901	Profil alınmadı!
+9131de73e	İstifadəçi tapılmadı!
+bf84ddcb3	Susdurulub (⟨0⟩ s ⟨1⟩ dəq qalıb)
+08c52b8c6	Susdurulub (⟨0⟩ dəq qalıb)
+c5a6c0399	👤 <b>İstifadəçi profili</b>
+8359545a8	Ad: ⟨0⟩
+0fd8daf31	ID: <code>⟨0⟩</code>
+16d1a3d6f	Status: ⟨0⟩
+c90e09fec	Xəbərdarlıq: ⟨0⟩/⟨1⟩
+c6a441715	(Son: ⟨0⟩)
+f7b55484b	Son əməliyyatlar:
+1ebb0f458	Moderasiya əməliyyatı yoxdur.
+ea0db6b35	Qadağan sözlər: ⟨0⟩
+67b2688cb	Qadağan söz yoxdur.
+ab2a94371	Əlavə etmək: /wordban <söz>
+bc50a233e	Sil: ⟨0⟩
+ea1ef9198	Hamısını sil
+9e6ecd595	Bağla
+d4ff2fcbb	Qadağan sözlər: ⟨0⟩
+1e892c51e	Cəmi: ⟨0⟩ söz
+d6c5bc3c9	Silmək üçün aşağıdakı düymələrdən istifadə et:
+3e285778b	AÇIQ
+86fc112e5	BAĞLI
+3b9e05b52	Söz siyahısı bağlandı.
+a9b768614	Bütün qadağan sözlər silindi.
+baa6a8908	Bütün qadağan sözlər silindi | ⟨0⟩
+f3b918935	Qadağan söz silindi: ⟨0⟩ | ⟨1⟩
+09e3ab40d	Bütün sözlər silindi.
+4b153db82	Qadağan sözlər: AÇIQ
+dbddb7434	Mesaj göndərmək
+399307b2e	Media göndərmək
+17dec3f5f	Link göndərmək
+a6d462ad9	Fayl göndərmək
+b80944077	Yadda saxla
+b0bd84b1e	Ləğv et
+eec2005a5	Əvvəlcə /select ilə kanal seç!
+056d48fa9	Gecə rejimi əllə açıldı.
+aad062b54	Gecə rejimi əllə bağlandı.
+511a5144a	Gecə rejimi saatları təyin edildi:
+cb1460461	Başlanğıc: ⟨0⟩:⟨1⟩
+771bcaf96	Bitmə: ⟨0⟩:⟨1⟩
+7989dd84a	Məhdudiyyətləri təyin etmək: /nightmod
+79514002a	Format xətası. İstifadə: /nightmod 23:00 07:00
+204b48fc8	Ayarla (şəxsi)
+42031a2a7	Gecə rejimi ilk dəfə istifadə olunur! Ayarlamaq üçün bota şəxsi mesaj yaz:
+89f29d42a	Aktiv
+3de48344f	Passiv
+de1f5c130	Gecə rejimi: ⟨0⟩ (⟨1⟩)
+b1d3baa6d	Saatlar: ⟨0⟩:⟨1⟩ - ⟨2⟩:⟨3⟩ (UTC+3)
+b5356dbcd	Məhdudlaşdırılacaq icazələri seç və Yadda saxla düyməsinə bas:
+bc2943e26	🌙 Gecə rejimi başladı. Məhdudiyyətlər səhər ⟨0⟩:⟨1⟩-dək qüvvədədir.
+86a8a2d6d	Gecə rejimi aktivləşdi | ⟨0⟩
+2a8fea2da	☀️ Gecə rejimi bitdi. Normal icazələr bərpa olundu.
+19d0c7302	Gecə rejimi bitdi | ⟨0⟩
+5f5e93020	Gecə rejimi ayarı ləğv edildi.
+9ca4e6abd	Media
+c0ceeb976	Səsli/video mesajlar
+02c5387be	Heç bir məhdudiyyət seçilməyib
+8c6724096	Gecə rejimi yadda saxlanıldı!
+4c2f064b0	Məhdudiyyətlər: ⟨0⟩
+ec5110d51	Saatları təyin etmək: /nightmod 23:00 07:00
+015f290e6	Gecə rejimi ayarlandı | ⟨0⟩
+a6ff502b6	⟨0⟩ Müvəqqəti ban bitdi, amma ban açılmadı: <code>⟨1⟩</code>
+09caa25fa	⟨0⟩ Müvəqqəti ban bitdi → ⟨1⟩ banı açıldı
+a70e468cd	Linkli, gizli (daxili) linkli və link düyməli mesajlar silinir.
+a0c63db58	🔤 Qadağan söz
+09f922f95	Siyahıdakı sözlər türk hərfləri, böyük/kiçik hərf və leetspeak ilə də tutulur.
+58c8ebdab	🔁 Təkrarlanan spam
+61bbb7e24	60 san ərzində son 10 mesajın çoxu eynidirsə, bu spamdır.
+a8ee9b9f5	Qısa müddətdə limitdən çox mesaj.
+283d462ac	↪️ Yönləndirmə
+93442a52b	Başqa söhbətlərdən yönləndirilmiş mesajlar.
+4592320db	🖼 Media flood
+b65eef3f3	Qısa müddətdə limitdən çox şəkil/video/stiker.
+32d0d473e	🔞 Uyğunsuz media
+cf1a8e3ca	Porno/çılpaqlıq (Sİ quraşdırılıbsa), bloklanmış media və stiker paketləri, təhlükəli fayllar (.apk, .exe…).
+a79d71fbf	Xəbərdarlıq
+229c67bd8	Susdur
+0855009c4	Qrupdan çıxar
+bd3c8d60c	Müvəqqəti ban
+7c65bba4a	⟨0⟩ mesaj
+5df501398	⟨0⟩ san
+cf6293e00	⟨0⟩ media
+637c7d4eb	⟨0⟩ üzv
+2a687b503	⟨0⟩ nəfər
+2dd4cbf18	⟨0⟩ əməliyyat/saat
+d507ef055	Mesajlar
+cc9e030d6	Səsli/video mesajlar
+1949df42c	Link önizləmələri
+01674713d	Fayl/musiqi
+0a4ef3c95	✏️ Yeni xoş gəldin mesajını yaz və ya şəkil/video/GIF göndər (açıqlaması mesaj olur).
+a5e32e95a	Düymələr: hər sətirdə bir  Mətn - https://link  (yan-yana: && ilə)
+1ee44f2e2	Dəyişənlər: {user} {first} {username} {group} {count} · Təsadüfi: mesajları %%% sətri ilə ayır
+989ac76ce	Xoş gəldin, {user}!
+f4b119f84	✏️ Vida mesajını yaz (media və düymələr də ola bilər). Dəyişənlər: {first} {user} {group}
+3fffcf251	👋 {name} bizi tərk etdi.
+e32be930c	📜 Qrup qaydalarını yaz. Format (qalın, link) və düymələr saxlanılır.
+8a546a91a	1) Hörmətli ol  2) Reklam yoxdur
+369899a51	📢 Məcburi kanalı yaz: @channel, t.me/channel və ya -100… ID. Bot orada admin olmalıdır.
+ffb95707b	@channel
+0bf3f943d	⏰ Əvvəl intervalı, sonra mesajı yaz. Məs: 6h Qaydaları oxumağı unutmayın!
+b7be418c7	İnterval: 30m, 6h, 1d · Media üçün şəklin açıqlamasına yaz.
+dafcc65fa	6h Mesaj
+c1e570e92	🔤 Qadağan ediləcək sözləri yaz (hər sətirdə bir). Regex üçün əvvəlinə re: qoy
+2038b8200	sözlər
+8031790fb	🔗 İcazə veriləcək domenləri yaz (boşluqla ayır). Məs: youtube.com t.me/kanalim
+dd20fa7d1	📝 Qeydi belə yaz: ad məzmun
+750db2552	rules Qrup qaydaları...
+2f50f0128	🧾 Log kanalı/qrupunun ID-sini yaz (məs. -1001234567890). Bot orada mesaj yaza bilməlidir.
+0a89e21a0	🛟 Etibarlı şəxsin istifadəçi ID-sini yaz (bota /id yazaraq öyrənə bilər).
+678669669	Bağlı
+3425aebce	🛡 <b>Qoruma</b> — ⟨0⟩
+a9aa38570	Qorumanı açıb-bağlamaq, cəzasını və limitlərini ayarlamaq üçün üzərinə toxun.
+dfc009e83	⟨0⟩ <b>qoruması</b> — ⟨1⟩
+196e11b00	Cəza: <b>⟨0⟩</b>
+3b58939e6	(limit ⟨0⟩ → ⟨1⟩)
+e882e3937	Artan susdurma: 10 dəq → 30 dəq → 5 saat
+10d361785	Qoruma ⟨0⟩
+a92c81c26	🔗 İcazəli linklər ›
+05bd7ca2c	🔤 Söz siyahısı ›
+7bb491e04	🚪 <b>Qoşulma</b> — ⟨0⟩
+a956dd268	• <b>Kapça</b>: yeni üzv riyazi sualı həll edənə qədər qrupda yaza bilmir.
+29aad6032	• <b>Şəxsi yoxlama</b>: bot qoşulma sorğusu göndərənlərə şəxsi mesajda sual verir; düz cavab verənlər avtomatik qəbul edilir. Qrupda «Yeni üzvləri təsdiqlə» açıq olmalı, botun dəvət icazəsi olmalıdır.
+d33b884be	Kapça (qrupda)
+6fe48b7bb	Şəxsi yoxlama
+34c8b8ee3	Avtomatik qəbul
+747e46068	Avtomatik rədd
+eb973fe6c	Botları / istifadəçi adı olmayanları rədd et
+371ffa7fa	İstifadəçi adı olmayan yeni üzvləri susdur
+22be1b04d	🚨 Anti-reyd ›
+df3d708d0	🆕 Yeni üzv məhdudiyyəti ›
+119163a69	🚨 <b>Anti-reyd</b> — ⟨0⟩
+3d6f3a6ef	Təyin olunan müddətdə limitdən çox üzv qoşularsa, qrup ⟨0⟩ dəqiqəlik kilidlənir, sonra əvvəlki icazələr bərpa olunur.
+12e3f2f5a	🔒 Kilidli
+78047dc1b	Anti-reyd
+5ebba95e7	🔓 İndi aç
+80ea856ce	🆕 <b>Yeni üzv məhdudiyyəti</b> — ⟨0⟩
+983dcd824	Yeni üzvlər təyin olunan müddətdə link, media və yönləndirmə göndərə bilmir (mesajı silinir və xəbərdarlıq göstərilir).
+b55881f2f	⚠️ <b>Xəbərdarlıqlar</b> — ⟨0⟩
+979ac1fa7	«Xəbərdarlıq» cəzalı qorumalar və /warn xəbərdarlıq verir; limit dolanda seçilmiş cəza tətbiq olunur.
+cd70c61ed	İndi: <b>⟨0⟩</b> xəbərdarlıq → <b>⟨1⟩</b>
+e72447e76	Xəbərdarlıq limiti
+a380d0c65	Cəza müddəti
+c601b3f5f	Qoruma susdurması
+6a05e68f4	🌙 <b>Gecə rejimi</b> — ⟨0⟩
+9ca9fb409	Status: <b>⟨0⟩</b>⟨1⟩
+d772b08c3	Saatlar: <b>⟨0⟩:⟨1⟩ – ⟨2⟩:⟨3⟩</b> (UTC+3)
+145d44a73	Seçilmiş icazələr bu saatlarda bağlanır, sonra geri açılır.
+4a4847e71	(indi aktiv)
+ed1a5ae4e	Gecə rejimi
+58910c4c5	Başlanğıc ⟨0⟩:⟨1⟩
+8e87dff1c	Bitmə ⟨0⟩:⟨1⟩
+586001e9d	🔗 <b>İcazəli linklər</b> — ⟨0⟩
+53a0c084e	Bu domenlər link qorumasından azaddır (alt domenlər daxil). Cəmi: ⟨0⟩
+0aa28d421	Silmək üçün toxun.
+c619b874d	➕ Əlavə et
+20540dbc7	<b>Bütün qadağan sözlər silinsin?</b>
+b12c1611e	🔤 <b>Qadağan sözlər</b> — ⟨0⟩
+cbdf733da	Filtr: <b>⟨0⟩</b> · Cəmi: ⟨1⟩
+acb2cf3c1	Söz filtri
+9de026dc8	🧹 Hamısını sil
+866ffe59a	📝 <b>Qeydlər</b> — ⟨0⟩
+8488244a4	Qrupda <code>#ad</code> yazanda qeyd göstərilir. Cəmi: ⟨0⟩
+6e5864d9f	➕ Qeyd əlavə et
+64d1a5476	🧩 <b>Filtrlər</b> — ⟨0⟩
+75e34f897	Qrupda tətikləyici yazılanda bot cavab verir. Cəmi: ⟨0⟩
+c8063c80c	Əlavə etmək üçün qrupda: <code>/filter</code> · Silmək üçün toxun.
+7cb292fe4	🧾 <b>Log kanalı</b> — ⟨0⟩
+399fb6ff5	Bütün moderasiya qeydləri bura göndərilir.
+6a7bdfba4	Hazırda: <code>⟨0⟩</code>
+e76134e13	Yalnız qrup sahibi dəyişə bilər.
+d92dcb23a	✏️ Log kanalını təyin et
+c62c45415	🗑 Sil
+512ba4fe4	🚨 Reyd
+07210c024	⚙️ <b>⟨0⟩ — Qrup ayarları</b>
+9006cb8f1	🛡 Aktiv qorumalar: ⟨0⟩
+16ccea6ec	🚪 Kapça: ⟨0⟩ · Şəxsi yoxlama: ⟨1⟩
+cc096b5a7	⚠️ Xəbərdarlıqlar: ⟨0⟩ → ⟨1⟩
+06292addb	🌙 Gecə rejimi: ⟨0⟩
+e5044a295	🛡 Qoruma
+82a6a709d	🌙 Gecə rejimi
+2eed1225e	🔗 Linklər
+d38c4e47a	🔤 Sözlər
+6828b98dc	🧩 Filtrlər
+7956a13a3	⏰ Planlı mesaj
+81bddc593	🏷 Etiketləmə
+5961a42e8	✏️ Redaktə və şikayətlər
+1ff65156a	🧾 Log kanalı
+f1a57e125	🌐 Qrup şəbəkəsi
+f5c96387f	🛟 Bərpa
+5244ca690	🌍 Dil: ⟨0⟩
+1bd24917c	✖️ Bağla
+e38a49a6f	Kanal qoruma ayarları
+f81ca3a77	Bu ayarı yalnız qrupun təsisçisi dəyişə bilər.
+4081e665c	Yanlış ayar
+ca037fcc4	❌ Bağlandı
+a006b158d	⚙️ ⟨0⟩ cəzası → ⟨1⟩ | ⟨2⟩
+0ebfd3ac6	Cəza: ⟨0⟩
+286a11648	Limit cəzası: ⟨0⟩
+c32110889	Siyahı dəyişdi, yeniləndi
+cf6b53ca2	🗑 ⟨0⟩ silindi: ⟨1⟩ | ⟨2⟩
+64e48562d	İcazəli link
+ed6b18d70	🗑 ⟨0⟩ silindi
+36a8cc3d4	🧹 Bütün qadağan sözlər silindi | ⟨0⟩
+5db717ed8	Bütün sözlər silindi
+0f2ad553f	Filtr silindi
+3247c21b8	🌙 Gecə rejimi ⟨0⟩
+ba4dc20d1	bağlandı
+d3d694451	Yadda saxlanıldı
+95bf688eb	Log kanalı silindi
+e413c4b9e	Qaydalar silindi
+0f514bbde	✅ Reyd kilidi paneldən açıldı | ⟨0⟩
+8e6a20f22	🔓 Açıldı
+f5014f259	Açılmadı (botun icazələri?)
+7f0e2a142	Qrup tapılmadı.
+f41c17d41	Bu paneldən istifadə üçün qrupda admin olmalısan.
+8213d6575	<i>Ləğv etmək üçün: cancel</i>
+1465f36fd	Cavabını açılan mesaja cavab kimi yaz.
+3035a6b30	⏰ Vaxt bitdi, paneldən yenidən cəhd et.
+18363eae4	Ləğv edildi.
+3a22b8f74	❌ Qaydalar boş ola bilməz.
+fa98ef9b6	Xoş gəldin mesajı
+a9e0c5b00	✏️ ⟨0⟩ yeniləndi | ⟨1⟩
+074e8897f	✅ ⟨0⟩ yeniləndi (⟨1⟩). Paneldə 👁 Önizləmə ilə yoxlaya bilərsən.
+4f4799ddf	✅ Məcburi kanal açıqdır: <b>⟨0⟩</b>
+9dc44c973	❌ Mesajı intervaldan sonra yaz. Məs: <code>6h Qaydaları oxuyun!</code>
+564247ab5	✅ Planlı mesaj #⟨0⟩: hər ⟨1⟩.
+390237a11	✅ ⟨0⟩ söz əlavə edildi, söz filtri açıqdır.
+28ebadbf6	❌ Yanlış regex: ⟨0⟩
+8d642d759	✅ ⟨0⟩ domen əlavə edildi.
+f6b268d0d	❌ Format: <code>ad məzmun</code> (ad: hərf, rəqəm, - və ya _)
+1b6abf7f2	✅ Qeyd yadda saxlanıldı: <code>#⟨0⟩</code>
+d872c76cd	Log kanalını yalnız qrup sahibi dəyişə bilər.
+1731f9a98	❌ Yanlış ID. Nümunə: <code>-1001234567890</code>
+e84190fc5	✅ ULUS log kanalı qoşuldu: ⟨0⟩
+9d4e14027	❌ Bu söhbətə mesaj göndərə bilmirəm. ⟨0⟩
+d8947ff95	✅ Log kanalı təyin edildi.
+7f9f8fabc	Naməlum əməliyyat.
+c3ecef83d	san
+e3a725f35	Yalnız üzvlər
+fb155ed20	Üzvlər + adminlər
+5e998efe4	Üzvlər + adminlər + baş adminlər
+431e199fa	Təsisçidən başqa hamı
+8b3606b03	🤖 Sİ yoxlaması⟨0⟩
+2abda5f05	(quraşdırılmayıb)
+af96fe25f	📦 Təhlükəli fayllar (.apk .exe …)
+c977dbc41	🔒 Hücum zamanı avtomatik media kilidi
+1c409b726	Kilid müddəti
+e4b73af2e	🚫 Bloklanmış media siyahısı ›
+a5265e3d7	🔓 Media kilidini aç
+c1a903ce0	🔒 Medianı indi kilidlə
+678507459	açıq
+c293fc85c	bağlı
+8dd94c76e	quraşdırılmayıb (serverdə: <code>pip install nudenet</code>)
+043b96df1	🔒 Media kilidi ⟨0⟩-dək aktivdir
+059a31b37	Sİ yoxlaması: ⟨0⟩
+c77da8b2d	Bloklamaq üçün mediaya <code>/blockmedia</code> ilə cavab ver · stiker paketi: <code>/blockpack</code>⟨0⟩
+a54dfcd87	🚫 <b>Bloklanmış media</b> — ⟨0⟩
+b1fe46387	Eyni media yenidən göndəriləndə silinir. Cəmi: ⟨0⟩
+2d00f3347	Silmək üçün toxun. Əlavə etmək: mediaya <code>/blockmedia</code> ilə cavab ver
+0c575feaa	✏️ <b>Redaktə və 🚩 şikayətlər</b> — ⟨0⟩
+fe3d0969d	• <b>Gec redaktə qoruması</b>: göndəriləndən ⟨0⟩ dəqiqədən sonra redaktə edilən mesaj silinir; köhnə və yeni versiya qrupun təsisçisinə və botu əlavə edənə şəxsi mesajla göndərilir (onlar botu şəxsidə başlatmış olmalıdır).
+48166d583	• <b>Şikayətlər</b>: üzvlər mesaja <code>/report</code> və ya <code>@admin</code> ilə cavab verir; adminlər düyməli bildiriş alır.
+9a9d43302	👥 Tətbiq olunur: <b>⟨0⟩</b> (dəyişmək üçün düyməyə toxun; yalnız təsisçi)
+60543a144	Gec redaktə qoruması
+2719eae25	👥 Tətbiq olunur: ⟨0⟩
+8173539b7	Müddət
+a95a8ac50	Təsisçiyə/əlavə edənə bildir
+337b927c6	Şikayət sistemi
+283ea618d	🌍 <b>Dil</b> — ⟨0⟩
+ecfd0b504	Botun bu qrupdakı mesajları, düymələri və xəbərdarlıqları seçilmiş dildə olacaq. Sənin yazdığın xoş gəldin, qaydalar və qeydlər dəyişmir.
+b04edf4df	👮 <b>Admin auditi</b> — ⟨0⟩
+46926b2fa	• <b>Gündəlik xülasə</b>: hər axşam təsisçi və botu əlavə edən kim neçə ban, susdurma, xəbərdarlıq və silmə etdiyini alır.
+9e35dc551	• <b>Əməliyyat limiti</b>: təsisçi olmayan heyət üzvü 1 saatda ⟨0⟩-dən çox ban/çıxarma/susdurma etsə, səlahiyyətləri dondurulur və sənə düyməli bildiriş gəlir (banları bir toxunuşla geri alına bilər).
+dbc65734d	• <b>Silinən mesaj jurnalı</b>: /del və /purge ilə silinən mesajlar log kanalına kopyalanır. (Telegram tətbiqdə əllə silinən mesajlar barədə botlara məlumat vermir.)
+fef769989	Dərhal xülasə: <code>/audit 7</code> · Mesaj tarixçəsi: mesaja <code>/edits</code> ilə cavab ver
+5d565355a	Dondurulmuş heyət: ⟨0⟩
+fbe3b7863	Bu ayarları yalnız təsisçi dəyişə bilər.
+011f51955	Gündəlik admin xülasəsi
+f8f216c2d	Admin əməliyyat limiti
+c1017ac8a	Limit
+75d76fc04	Silinən mesajları log kanalına kopyala
+b91937b6d	🌐 <b>Qrup şəbəkəsi</b> — ⟨0⟩
+e26434728	Bu qrup ⟨0⟩ şəbəkəsindədir (⟨1⟩ qrup):
+4515b950e	Ban sinxronizasiyası açıq olduqca bir qrupda banlanan şəbəkənin bütün qruplarında banlanır (çıxarma yox); ban açılanda hər yerdə açılır.
+2a41a6019	Ban sinxronizasiyası
+7b9394ab7	📋 Söz və link siyahılarını şəbəkəyə kopyala
+35c1578b6	⚙️ Qoruma ayarlarını şəbəkəyə kopyala
+a0ec7c7bd	➖ Bu qrupu şəbəkədən çıxar
+db918b20f	Bu qrup şəbəkədə deyil. İdarə etdiyin qrupları şəbəkənə əlavə etsən, banlar hamısına yayılır və ayarları bir toxunuşla kopyalaya bilərsən. (Təsisçi / həmtəsisçi lazımdır.)
+e44c5b572	➕ Bu qrupu şəbəkəmə əlavə et
+fe6b211f8	⟨0⟩ (⟨1⟩ admin)
+1c979a8ff	hələ yoxdur
+9f41d74fa	🛟 <b>Admin bərpası</b> — ⟨0⟩
+62477adfc	Admin siyahısı hər 6 saatdan bir yadda saxlanılır. Kimsə qısa müddətdə 3+ adminin səlahiyyətini alarsa, adminlər və etibarlı şəxslər bərpa düyməli xəbərdarlıq alır. Etibarlı şəxslər bota şəxsi mesajla <code>/recover</code> göndərərək adminləri bərpa edə bilər.
+092c6482f	Son snapshot: ⟨0⟩
+ba8991412	Etibarlı şəxslər (⟨0⟩/3) — silmək üçün toxun:
+5729ee3a9	➕ Etibarlı şəxs əlavə et
+72e9b014a	Avtomatik bərpa et
+cdfef870d	📸 İndi saxla
+521787de8	♻️ Bərpa et ›
+c578b31d8	Snapshot tapılmadı.
+b5e5e7de1	Yanlış dil
+a85ca0330	Bunu yalnız qrupun təsisçisi dəyişə bilər.
+43ce9c01e	✏️ Redaktə qoruması əhatəsi: ⟨0⟩ | ⟨1⟩
+446ff86ee	Tətbiq olunur: ⟨0⟩
+59e922883	🔒 Media kilidləndi
+dd43607b8	Kilidlənmədi (reyd kilidi və ya botun icazələri)
+650f54e0c	🔓 Media kilidi açıldı
+a6220f5d4	Kilid artıq açıqdır
+1d4e3c6c4	Blok götürüldü
+de91565ff	Şəbəkəyə əlavə etmək üçün bu qrupun təsisçisi olmalısan.
+6b85bac2e	🌐 Qrup ⟨0⟩ şəbəkəsinə əlavə edildi
+6c4e9120a	Şəbəkəyə əlavə edildi
+b605b46d7	Bu qrup heç bir şəbəkədə deyil
+4f36e2321	Şəbəkədən çıxarıldı
+bd4ac87bb	Bunu yalnız şəbəkə sahibi edə bilər.
+f9a34a2ad	Ban sinxronizasiyası ⟨0⟩
+78a09a0ea	🌐 Ayarlar şəbəkədəki ⟨0⟩ qrupa köçürüldü | ⟨1⟩
+eacfa093c	⟨0⟩ qrupa köçürüldü
+c39c747b1	Bərpa ayarlarını yalnız təsisçi dəyişə bilər.
+95e917987	Silindi
+87f3326f9	📸 Yadda saxlanıldı
+49c866e1e	Yadda saxlamaq olmadı (bot admindirmi?)
+b13ed05bb	♻️ ⟨0⟩ admin bərpa edildi⟨1⟩
+8670a3a46	, ⟨0⟩ alınmadı
+c3b595125	Etibarlı şəxsləri yalnız təsisçi əlavə edə bilər.
+32cb829ea	❌ Şəxs tapılmadı. Onun istifadəçi ID-sini yaz (bota /id göndərərək öyrənə bilər).
+89f663ce6	Ən çox 3 etibarlı şəxs əlavə etmək olar.
+dfe9ba864	✅ ⟨0⟩ etibarlı şəxs kimi əlavə edildi. O, botu şəxsi olaraq başlatmış olmalıdır.
+a4167566b	Əvvəlcə /select ilə qrup seç!
+2ba2862f6	qrup
+3fca554f2	insanlar
+ffd1ee882	📝 qaralama
+4bf27d98f	⏰ planlaşdırılıb
+4c10fb3fc	📤 göndərilir
+2467aa607	✅ tamamlandı
+578b9744b	❌ ləğv edildi
+71db82dfe	Vaxtı belə yaz: -time 20:00
+c3cd977ee	Şablon adını belə yaz: /broadcast -save update "mesaj"
+530791023	hədəf yoxdur
+9a2c72e2d	🔕 Elanları söndür
+9f242a754	🗳 Hələ səs yoxdur
+37e3719ed	🗳 ⟨0⟩ səs: ⟨1⟩
+186e99c6e	✅ <b>#⟨0⟩ elanı tamamlandı</b>
+53acfe01d	⏹ <b>#⟨0⟩ elanı dayandırıldı</b>
+8fa7a67a9	📊 ⟨0⟩/⟨1⟩ işləndi
+6b12880d0	✅ Çatdırıldı: <b>⟨0⟩</b>
+ddb6da67b	🚫 Bloklayıb / botu heç başlatmayıb: ⟨0⟩ (növbəti elanlarda ötürüləcək)
+814224bfc	⚠️ Göndərmək olmadı (bot çıxarılıb / icazə yoxdur): ⟨0⟩
+d4d2773cb	📌 Sancaqlandı: ⟨0⟩
+53ffa3f09	👆 Düymə klikləri /broadcasts bölməsində göstərilir
+0d709ac7c	🗳 Sorğu nəticələri /broadcasts bölməsində göstərilir
+dd370224e	Dayandırmaq üçün: /stopbroadcast
+be085c333	📢 <b>Elan</b>
+0b7be0b19	<code>/broadcast "mesaj"</code> — qruplar + kanallar
+1e622cf6b	<code>/broadcast -users "mesaj"</code> — botdan şəxsi istifadə edənlər
+25a35b0aa	<code>/broadcast -users -channels "mesaj"</code> — insanlar + kanallar (birləşdirmək olar)
+0b87fef23	<code>/broadcast all "mesaj"</code> — hamıya
+bc83a4f15	Seçimlər: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (son 7 gün; <code>-active 30</code>) · <code>-test</code> (yalnız sən) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+1aca894ba	🎯 Önizləmədə konkret qrup/kanalları seçə bilərsən.
+9fa263da2	🗳 Sorğu: <code>/broadcast -poll -users "Sual?
+735ec279d	Variant 1
+98805337f	Variant 2"</code> — bütün səslər bir sorğuda toplanır
+aaa59ea0d	💾 Şablon: <code>/broadcast -save ad "mesaj"</code> → <code>/broadcast -users #ad</code> · /templates
+a3caa1df0	💡 Bir mesaja (şəkil, video, düyməli və ya premium emojili) <code>/broadcast -users</code> ilə cavab versən, həmin mesaj olduğu kimi göndərilir. Mətndə düymə sətirləri də yaza bilərsən: <code>Kanal - https://t.me/channel</code> (kliklər sayılır)
+fb071e726	/broadcasts — tarixçə, kliklər, sorğu nəticələri · /stopbroadcast — göndərməni dayandır
+344eb221b	⚠️ Telegram premium emojiləri adi emojilərə çevirdi (botlar premium emojiləri yazaraq göndərə bilmir). Həll: mesajı özün yaz, ona /broadcast ilə cavab ver — kopyalanan mesaj onları saxlayır.
+f87763b78	👆 <b>#⟨0⟩ elanının önizləməsi</b>
+3790c85e6	🎯 Hədəflər: ⟨0⟩
+d46292455	🔥 Yalnız son ⟨0⟩ gündə aktiv olanlar
+019c9cc1b	✅ Seçilmiş qrup/kanallar: ⟨0⟩
+14d962307	👤 İnsanlar: botdan şəxsi istifadə edənlər; Telegram qruplarda görünən, amma botu heç başlatmamış insanlara mesaj yazmağa icazə vermir (bir dəfə cəhd edilir, sonra ötürülür).
+f7bcd6c82	⏱ Təxmini vaxt: ~⟨0⟩ san
+aaca2bf64	⏰ Göndərilmə vaxtı: ⟨0⟩
+4046d6be5	📌 Qrup və kanallarda sancaqlanacaq
+c3eded236	🔕 Səssiz
+cffb2a880	👆 Düymə klikləri sayılacaq
+251fac5c6	🗳 Sorğu yönləndiriləcək; səslər bu sorğuda toplanır
+ba70fe09b	⏰ Planlaşdır
+8241e1495	✅ Göndər
+86f2e67ab	❌ Ləğv et
+d53523fb6	Göndəriləcək heç kim yoxdur.
+2882de09f	🎯 Qrup/kanalları seç
+78f17fac4	❌ Bağla
+e6b5975cd	◀️ Əvvəlki
+b84641c59	Növbəti ▶️
+9a4dab900	🔄 Seçimi təmizlə
+6044624ae	✅ Hazırdır
+786000738	🎯 <b>#⟨0⟩ elanı: qrup/kanalları seç</b> (səhifə ⟨1⟩/⟨2⟩)
+8273973d4	Seçilib: <b>⟨0⟩</b> — heç biri seçilməsə, hamısına gedir.
+0b988bbef	Bu əmrdən yalnız botun sahibi istifadə edə bilər!
+4b64d112c	Şablon üçün mesaj yaz və ya bir mesaja cavab ver.
+9cc026c97	💾 Şablon yadda saxlanıldı: #⟨0⟩
+12933b18c	İstifadə etmək üçün: /broadcast -users #⟨0⟩
+dcba9eba6	#⟨0⟩ adlı şablon yoxdur. Siyahıya /templates ilə bax.
+c3b81b13d	Sorğunu belə yaz:
+185c6d7a9	/broadcast -poll -users "Sual?
+27ced0bf8	Variant 2"
+9de509dc5	Sorğu yaradılmadı: ⟨0⟩
+e8c8a3987	🧪 Test sorğusu yalnız sənə göndərildi.
+f6c39b561	Testi göndərmək olmadı: ⟨0⟩
+3ccbd9c93	🧪 Test elanı yalnız sənə göndərildi.
+305ee0f9a	(şəxsi olaraq)
+cb34b252b	Önizləməni göndərmək olmadı: ⟨0⟩
+68aa08ebf	🔕 Elanlar söndürüldü. Yenidən açmaq üçün: /subscribe
+6fc68153b	İcazəsiz və ya etibarsız.
+5027629e8	Bu elan artıq işlənib.
+1b315a09e	⏰ #⟨0⟩ elanı planlaşdırıldı: ⟨1⟩
+08d8e26cc	Onu /broadcasts ilə görə bilərsən.
+d236ce6c8	📤 #⟨0⟩ elanı göndərilir…
+e15ad036b	Ləğv edildi
+8c0a53753	❌ #⟨0⟩ elanı ləğv edildi.
+32ff8287a	Planlaşdırılmayıb.
+95d0599f3	⏹ Dayandırılır…
+a96302489	Hazırda göndərilmir.
+7afa989da	📢 Hələ elan yoxdur.
+b0b0b34ae	📢 <b>Son elanlar</b>
+a2148c2a7	🗳 sorğu
+771c7f3fb	👆 ⟨0⟩ klik⟨1⟩
+8139aea8f	(⟨0⟩ nəfər)
+71fc8c6a3	❌ #⟨0⟩ ləğv et
+6b91bce73	⏹ #⟨0⟩ dayandır
+55b4c1882	💾 Saxlanılmış şablon yoxdur.
+4dc8bf919	Saxlamaq üçün: <code>/broadcast -save ad "mesaj"</code> və ya bir mesaja <code>/broadcast -save ad</code> ilə cavab ver
+a5f43a44d	💾 <b>Elan şablonları</b>
+bd5b7fec5	📋 kopyalanmış mesaj
+8ebf8c6d8	İstifadə: <code>/broadcast -users #ad</code>
+d9ecd93d0	⏹ Elan dayandırılır…
+e6989213d	Hazırda heç bir elan göndərilmir.
+1d2937461	🔔 Elanlar açıldı.
+b75b13003	➕ <b>Məni əlavə etdilər: ⟨0⟩</b>
+862253052	· ⟨0⟩ üzv
+7171ced0d	👤 Əlavə edən: ⟨0⟩⟨1⟩
+b0c699f59	🔐 Admin
+7505ec5cf	⚠️ Hələ admin deyiləm (24 saat sonra xatırlatma göndəriləcək)
+93e256834	➖ <b>Məni çıxardılar:</b> ⟨0⟩
+f6cedb404	👤 Çıxaran: ⟨0⟩ · <code>⟨1⟩</code>
+545d22c19	⚠️ <b>⟨0⟩</b> çatında hələ də admin deyiləm, buna görə qoruma işləmir.
+e7c66ff8b	Qrup ayarları → Administratorlar → Admin əlavə et → @⟨0⟩ (mesajları silmək və istifadəçiləri məhdudlaşdırmaq kifayətdir) və ya aşağıdakı düyməni istifadə et.
+519fdb65c	⚡ Məni admin et
+977c42cf0	📈 <b>⟨0⟩ həftəlik hesabat</b> (⟨1⟩ – ⟨2⟩)
+075c08a00	👥 Qruplar: <b>⟨0⟩</b> · 📢 Kanallar: <b>⟨1⟩</b>
+626db2ea3	➕ Əlavə edildi: <b>⟨0⟩</b> · ➖ Çıxarıldı: <b>⟨1⟩</b>
+3b300252b	👤 Şəxsi istifadəçilər: <b>⟨0⟩</b> (bu həftə +⟨1⟩)
+8ebb70df7	💬 Mesajlar: <b>⟨0⟩</b>⟨1⟩ · aktiv insanlar: <b>⟨2⟩</b>
+179fe6c75	🚪 Qruplara qoşulan: <b>⟨0⟩</b> · çıxan: <b>⟨1⟩</b>
+171919cd0	🆕 <b>Yeni çatlar</b>
+8298e9706	… və daha ⟨0⟩
+7ba765796	🏆 <b>Ən aktiv qruplar</b>
+03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ mesaj
+57d75c0ab	🛠 Bot qısa texniki xidmətdədir; tezliklə qayıdacaq. Qorumalar işləməyə davam edir.
+fc94758f1	🛠 Texniki xidmət rejimi <b>açıqdır</b>⟨0⟩
+588994912	— bitmə vaxtı: ⟨0⟩
+35ea18ef8	✅ Texniki xidmət rejimi söndürülüb
+e1a334ce2	(müddətsiz)
+e7103f4b6	<code>/maintenance 30</code> — 30 dəqiqə · <code>/maintenance on</code> — müddətsiz · <code>/maintenance off</code>
+c05840eb1	Qruplara qısa qeyd göndərmək üçün sonuna <code>-duyur</code> əlavə et.
+fe8a047fd	Texniki xidmət zamanı əmrlər və düymələr hamı üçün (səndən başqa) söndürülür; spam, link, flood və captcha kimi qorumalar işləməyə davam edir.
+9fd9dff45	✅ Texniki xidmət rejimi söndürüldü.
+280c2df8e	Texniki xidmət rejimi artıq söndürülüb.
+a476c76e4	✅ Texniki xidmət bitdi, bot tam işləyir.
+5a2d5c21d	🛠 Texniki xidmət rejimi açıqdır, avtomatik söndürülmə vaxtı: ⟨0⟩.
+321af0468	🛠 Texniki xidmət rejimi açıqdır (müddətsiz). Söndürmək üçün: /maintenance off
+81851cbcd	İstifadə: /maintenance 30 · /maintenance on · /maintenance off
+0d8f36bae	Əmrlər və düymələr hamı üçün (səndən başqa) söndürülüb; qorumalar işləyir.
+0e64031cc	/invite qrupda istifadə olunur: sənə şəxsi dəvət linki verir və gətirdiyin insanları sayır.
+882848490	Bu qrupda dəvət yarışması söndürülüb.
+b5811c1fa	Dəvət linki yarada bilmədim: mənə "istifadəçiləri dəvət etmək" icazəsi lazımdır.
+c2dee7686	Dəvət linki yarada bilmədim, bir az sonra yenidən cəhd et.
+24b1d9ce7	🔗 ⟨0⟩, sənin dəvət linkin:
+1dafe45ec	👥 Gətirdiyin: <b>⟨0⟩</b> nəfər⟨1⟩
+6f74b2ba9	🏆 Reytinq: /invites
+060348723	(⟨0⟩ nəfər çıxıb)
+cb5bdaa5f	/invites qrupda istifadə olunur.
+1db2cf152	🏆 Hələ heç kim dəvətlə qoşulmayıb. Linkini /invite ilə al!
+4ba6e3c96	🏆 <b>Dəvət reytinqi</b>⟨0⟩
+b71ab530b	⟨0⟩ ⟨1⟩ — <b>⟨2⟩</b> nəfər
+e309c956d	Öz linkin üçün: /invite⟨0⟩
+ff021375b	· həftəlik: /invites 7
+db6ff4fd5	🚫 Blokla
+ead127c24	📨 Mesajın botun admininə göndərildi. Cavabı burada görəcəksən.
+b3be121db	✅ Cavab çatdırıldı.
+6a71974f7	❌ Çatdırmaq olmadı: istifadəçi botu bloklayıb.
+29d8bcae2	❌ Çatdırmaq olmadı: ⟨0⟩
+a299e6f40	İcazə yoxdur!
+67149866b	username yoxdur
+e9d283a8a	ID: ⟨0⟩
+546855b2f	Ümumi mesaj: ⟨0⟩
+4caedc905	🚫 Bloklandı: onun mesajları artıq yönləndirilməyəcək.
+aa1be6bef	✅ Blokdan çıxarıldı.
+05fe7a9ae	✅ Blokdan çıxar
+347667dc7	💬 Bota şəxsi yazdığın mesajlar botun admininə yönləndirilir; cavab da bura gəlir.
+fb6c079d1	💬 Dəstək xətti: <b>⟨0⟩</b>
+29ab6a683	Son 7 gün: ⟨0⟩ mesaj, ⟨1⟩ nəfər
+d3a86e2ed	İstifadəçilərin bota şəxsi yazdığı mesajlar sənə yönləndirilir; həmin mesaja <b>cavab</b> versən, cavabın istifadəçiyə gedir (kimliyin gizli qalır). Kimisə bloklamaq üçün altındakı 🚫 düyməsindən istifadə et.
+2e8d13df7	/support off — söndür
+b9d5c0506	/support on — aç
+69750b260	👢 qrupdan çıxarma
+ba949e0b3	🔇 susdurma
+499389526	⚠️ xəbərdarlıq
+2146683b0	🗑 silmə
+29c555d38	✅ banın götürülməsi
+2adb56b78	🔊 səsin açılması
+be630c265	↩️ xəbərdarlığın götürülməsi
+4a1bf66db	qrupdan çıxarıldı
+324073880	🔻 Onun Telegram admin hüquqları da alındı.
+cf9b454c2	⚠️ Onun Telegram admin hüquqlarını almaq olmadı (onu bot təyin etməmiş ola bilər); lazım olsa, qrup ayarlarında əl ilə al. (⟨0⟩)
+b55e087a5	🚨 <b>Admin əməliyyat limiti aşıldı</b> — ⟨0⟩
+427b5c6c1	⟨0⟩ son bir saatda <b>⟨1⟩</b> ban/kick/susdurma etdi (limit ⟨2⟩). Hüquqları dayandırıldı⟨3⟩.⟨4⟩
+95dbff4c7	(rütbə: ⟨0⟩)
+1f08073ce	♻️ Hüquqlarını bərpa et
+007e62b21	↩️ Son 2 saatdakı banlarını geri al
+62523d9c0	✅ Oldu, dayandırılmış qalsın
+edef2b326	Bunu yalnız qrupun təsisçisi edə bilər.
+c2ee2c9d8	↩️ ⟨0⟩ nəfərin banı götürüldü
+91b30283d	↩️ ⟨0⟩ tərəfindən verilən son banlar geri alındı (⟨1⟩) | ⟨2⟩
+9ed54f7b6	Dayandırılmayıb (artıq həll olunub).
+65e104036	(Telegram hüquqlarını bərpa etmək olmadı: ⟨0⟩)
+fdec34132	♻️ Hüquqlar bərpa edildi⟨0⟩
+e44b14d39	♻️ ⟨0⟩ üçün hüquqlar bərpa edildi | ⟨1⟩
+caddb66f3	✅ Hüquqlar alınmış qalır
+a9968a219	⛔ ⟨0⟩: hüquqlar dayandırıldı
+5d7617657	👮 <b>Gündəlik admin xülasəsi</b> — ⟨0⟩
+053473339	<i>Telegram tətbiqdə əl ilə silinən mesajlar barədə botlara məlumat vermir; silmələr yalnız /del və /purge ilə edilənləri sayır.</i>
+46faeb5b0	Əvvəlcə /select ilə qrup seç!
+c1c404194	Bu əmr təsisçi və həmtəsisçilər üçündür.
+3960d6a99	Bu müddətdə heyət əməliyyatı yoxdur.
+42c00ba90	👮 <b>Admin auditi</b> — ⟨0⟩ (son ⟨1⟩ gün)
+5cb08e285	Gün sayı: <code>/audit 7</code>
+3de0d27b9	📩 Audit xülasəsi şəxsi olaraq göndərildi.
+57a762312	Sənə şəxsi yaza bilmədim: əvvəlcə bota /start göndər.
+6accc9fd5	… və daha ⟨0⟩ mesaj
+37de34f22	🗑 <b>Silinmiş mesajlar</b>⟨0⟩ | Silən: ⟨1⟩
+9a1505c99	/del qrupda, silinəcək mesaja cavab olaraq istifadə olunur.
+d223e7b03	Silinəcək mesaja /del ilə cavab ver.
+9fada83b0	🗑 <b>Mesaj silindi</b> | Müəllif: ⟨0⟩ | Silən: ⟨1⟩
+a1c331d8e	/edits qrupda, bir mesaja cavab olaraq istifadə olunur.
+5f93a0deb	Tarixçəsini görmək istədiyin mesaja /edits ilə cavab ver.
+250e055ba	Bu mesaj üçün redaktə tarixçəsi yoxdur (son ⟨0⟩ gün saxlanılır).
+36da7c07e	📝 <b>Redaktə tarixçəsi</b> — ⟨0⟩ · ⟨1⟩ redaktə
+27ec83d6a	orijinal
+afea26f62	redaktə #⟨0⟩
+39562283b	🌐 Qlobal banlı istifadəçi qoşuldu və banlandı: ⟨0⟩
+b42c13323	🤖 Şübhəli hesab məhdudlaşdırıldı: ⟨0⟩ → ⟨1⟩
+3c4fe05e5	👋 ⟨0⟩ qoşuldu → ⟨1⟩
+aa9673f91	BU GÜN
+fe5b02de1	BU HƏFTƏ
+a65b592d7	BÜTÜN DÖVR
+fa5c481c7	İstifadəçi → Mesajlar
+11a5c6c19	├ Ümumi aktiv istifadəçi: ⟨0⟩
+d8524730d	└ Ümumi mesaj: ⟨0⟩
+cd18a00ba	Sən ⟨0⟩ : ⟨1⟩
+8b57b7048	Bu qrup qeydiyyatda deyil! Şəxsi çatda istifadə edirsənsə, əvvəlcə /select ilə qrup seç.
+d2fc8f52c	Qrupunda ayın ən aktiv 15 nəfəri:
+10710d7e5	📊 Bu reytinq bu ay üçündür.
+0bffc9609	Qrupunda bütün dövrlərin ən aktiv 15 nəfəri:
+5552d868e	📊 Bütün dövrlərin reytinqi.
+9d75c68d7	Hələ mesaj statistikası yoxdur!
+54dbc7053	Qrupunda günün ən aktiv 15 nəfəri:
+86767b480	📊 Bu reytinq son bir gün üçündür.
+25670a03f	Qrupunda həftənin ən aktiv 15 nəfəri:
+17af6b262	📊 Bu reytinq son bir həftə üçündür.
+43d197ca4	📅 Gündəlik
+f70fa8d28	📅 Həftəlik
+1b9326b3c	📅 Aylıq
+c9c0e3bcd	📊 Bütün dövr
+d4d0010bd	📋 Ətraflı
+f939c661d	🌐 Qlobal
+674ed30af	👥 Bu qrup üçün reytinq növünü seç.
+0f3a59f6a	Bu menyunu ⟨0⟩ açıb.
+bbf0e9940	👥 Qrupunda ən aktiv ⟨0⟩ nəfər:
+62e79a0f9	Bot admin olandan bəri qrupunun aktivliyi:
+f55378a92	👥 Aktiv istifadəçilər:
+503794387	💬 Ümumi mesaj:
+ef5bd5de0	📊 Ümumi aktivlik:
+c6c4664dd	Konkret istifadəçi üçün /info @user istifadə et və ya onun mesajına cavab ver.
+7e811e0d2	👱 Ad: ⟨0⟩
+9b0e7b293	🌐 Username: ⟨0⟩
+14ed29970	👥 Olduğun qrupların sayı: ⟨0⟩
+ba33e26dc	💬 Qruplarındakı ümumi mesajlar:
+8cb7f31a3	├📆 Gündəlik: ⟨0⟩
+5ee653a06	🔍 Qruplarındakı cəmi:
+0df3dab20	├🃏 Stikerlər: ⟨0⟩
+e93a634c3	📊 ⟨0⟩ statistikası:
+ae2b984ac	💬 Mesaj sayı:
+3e08d6dfd	┌📆 Gündəlik: ⟨0⟩
+037b7c646	├📆 Həftəlik: ⟨0⟩
+9f577c2b5	├📆 Aylıq: ⟨0⟩
+cf3b5cf8f	└Cəmi: ⟨0⟩
+e1ed2556f	📊 Aktivlik təfərrüatları:
+0327b318b	┌🃏 Stikerlər: ⟨0⟩
+5ca7902a2	├🀄️ GIF: ⟨0⟩
+b667cf812	├🙃 Emoji: ⟨0⟩
+68fa09ce3	├📷 Şəkillər: ⟨0⟩
+886e342ec	├🎥 Videolar: ⟨0⟩
+a11d703a7	├💾 Fayllar: ⟨0⟩
+0afb08ea1	├🎙 Səsli mesajlar: ⟨0⟩
+5199486f9	└📼 Musiqi: ⟨0⟩
+7d244b585	🏆 Ümumi yer: #⟨0⟩
+9394cb52f	Bütün adminləri bərpa et
+846fa3804	Spamçıdan başqa hamısını bərpa et
+ea0ec5a8c	Şübhəli: ⟨0⟩
+40ab78429	🚨 <b>KANAL QORUMA REJİMİ AKTİVDİR</b>
+65bfd4f34	⟨0⟩Kanal: <code>⟨1⟩</code>
+d5d022cd9	Təsisçi və botu əlavə edən admindən başqa bütün admin hüquqları alındı.
+11b7596d5	⟨0⟩ admin bərpa edildi
+19c35e8f0	🌐 Şəbəkə banı götürüldü: ⟨0⟩ (şəbəkənin bütün qruplarında)
+c2e7013a3	🌐 Şəbəkə banı: ⟨0⟩ şəbəkədəki daha ⟨1⟩ qrupa tətbiq edildi
+9fe755831	qeyd tapılmadı
+d121e65b8	bot məlumatı alınmadı: ⟨0⟩
+463126054	♻️ Admin bərpası: ⟨0⟩ admin bərpa edildi⟨1⟩
+90d9a6b20	, alınmadı: ⟨0⟩
+caa60fdc5	🚨 <b>Kütləvi vəzifədən salma</b>
+8ba5e6709	Qrup/kanal: <b>⟨0⟩</b>
+5d095f637	⟨0⟩ (<code>⟨1⟩</code>) 10 dəqiqə ərzində ⟨2⟩ adminin hüquqlarını aldı.
+8d21e12ea	Son düzgün surət: ⟨0⟩
+9ba30f2ce	♻️ Adminləri bərpa et
+a96545d83	♻️ Avtomatik bərpa edildi: ⟨0⟩ admin⟨1⟩
+a556aedb4	(alınmadı: ⟨0⟩)
+ee38d1474	Yararlı admin surəti yoxdur.
+d94586a2d	Bərpa edə biləcəyin qrup/kanal yoxdur. Qrup sahibi səni paneldə 'etibarlı şəxs' kimi əlavə etməlidir.
+a186abeb7	Hansı qrupun/kanalın adminlərini bərpa etmək istəyirsən?
+358350243	Bu qrup üçün hələ admin surəti yoxdur (surətlər hər 6 saatdan bir götürülür).
+e0f04d2e3	⟨0⟩ · ⟨1⟩ admin
+629844d31	<b>⟨0⟩</b> — bərpa ediləcək surəti seç:
+b5ad3a8e7	İcazə yoxdur və ya surət yoxdur.
+0644770db	♻️ ⟨0⟩ surətindəki adminlər bərpa ediləcək:
+700b3ac82	Təsdiq edirsən?
+1ca35b0e1	✅ Bəli, bərpa et
+e6a5e85cd	❌ Ləğv et
+805c38798	Bərpa edilir...
+cf63ea900	♻️ ⟨0⟩ admin bərpa edildi.⟨1⟩
+b8058c528	❌ Alınmadı: ⟨0⟩
+e82edc1de	(Bot özündə olmayan hüquqları verə bilməz və başqasının təyin etdiyi adminləri dəyişə bilməz.)
+f13124b3b	Admin siyahısı bərpa edildi (⟨0⟩ admin).
+400c018e5	media flood
+60ff56604	⟨0⟩ mesaj / ⟨1⟩ san
+97268aded	30 dəq ərzində 2+ admin spam etdi
+d739884a3	⚠️ <b>Admin spamı aşkarlandı!</b>
+3302869c8	Admin: ⟨0⟩ (<code>⟨1⟩</code>)
+3cbc92eef	Əməliyyat: ⟨0⟩
+3d7963ca4	Kanal qoruma rejimi: Aktiv deyil
+72f491ffe	Ban + hüquqlar alındı
+35cf8f7fb	Hüquqlar alındı
+b6331605b	🤖 Bot əlavə edilməsi bloklandı
+ad9ead387	Bot: ⟨0⟩
+a7c242666	Əlavə edən: ⟨0⟩
+9b75f55a2	⚠️ İcazəsiz admin təyinatı aşkarlandı!
+e97409070	Təyin edən: ⟨0⟩ (<code>⟨1⟩</code>)
+c065dbd5f	Təyin olunan: ⟨0⟩ (<code>⟨1⟩</code>)
+17a403bbb	Kütləvi ban aşkarlandı: ⟨0⟩ (⟨1⟩) ⟨2⟩ ban / ⟨3⟩ san
+e21052fad	Başlıq: '⟨0⟩' → '⟨1⟩'
+eb38d7d1c	Təsvir dəyişdirildi
+b2209389a	Kanal klon qoruması işə düşdü!
+85a87d615	Dəyişikliklər geri qaytarıldı:
+b79ccad39	📋 <b>Həftəlik kanal jurnalı hesabatı</b>
+546658b9b	Ban + hüquqları al
+2c124f337	Yalnız hüquqları al
+a5505fdbd	⟨0⟩ Admin spam qoruması
+183b4aa2e	Spam əməliyyatı: ⟨0⟩
+5d5673266	⟨0⟩ Admin media flood
+652974e14	Media əməliyyatı: ⟨0⟩
+9123863e2	⟨0⟩ Link qoruması
+3d1465b74	⟨0⟩ Klon qoruması
+a03517abc	⟨0⟩ Bot əlavə etmə qoruması
+b27f8f968	⟨0⟩ Kütləvi ban qoruması
+006229c38	👥 Təhlükəsiz adminlər
+ec411a6b8	💾 Kanal başlığını/təsvirini yadda saxla
+a8d6a7aa4	🔙 Bağla
+e0a90af5c	Kanal tapılmadı!
+9abd1a97e	Bu əmr kanal ayarları üçündür. Qrup ayarları üçün /settings istifadə et.
+d63cd9886	Yadda saxlanıldı: ⟨0⟩
+c3d254196	Təhlükəsiz adminlər siyahısı:
+ff4ef369c	(Link paylaşmağa icazəlidir)
+5243a71a1	Kanal paylaşımları
+f6489e475	kanal admini
+29bb8c58f	Sorğular təsdiqlənir, gözlə...
+218960722	Gözləyən qoşulma sorğusu tapılmadı.
+1b385aeaa	✅ ⟨0⟩ sorğu təsdiqləndi.
+fb8bc6b23	(⟨0⟩ sorğunu təsdiqləmək olmadı; vaxtı keçmiş və ya geri götürülmüş ola bilər)
+05d63d7c6	Sorğu təsdiqi: ⟨0⟩ təsdiqləndi | ⟨1⟩
+9ea0064d2	Bu botdan istifadə etməyin bloklanıb.
+db8a1871b	İstifadə: /membertag @user <teq> və ya cavab + /membertag <teq>
+584a09e9f	İstifadəçi və teq tələb olunur!
+84aa89869	Teq ən çox 32 simvol ola bilər!
+fcd61489e	⛔ Səninlə eyni və ya daha yüksək rütbəli şəxsə teq verə bilməzsən.
+5f53e65d3	⟨0⟩ admin deyil! Teqlər yalnız adminlərə verilə bilər.
+f4fc9906d	🏷 Teq verildi: ⟨0⟩ → ⟨1⟩
+be06d3d2f	Həmtəsisçiləri yalnız təsisçi təyin edə bilər.
+0ef49a704	İstifadəçi tapılmadı! ID, @username və ya cavabdan istifadə et.
+4de20141f	İstifadə: /⟨0⟩ @user [teq]
+e1b55fb8a	Teq: ⟨0⟩
+b60f7c81a	⟨0⟩ təyin edildi: ⟨1⟩⟨2⟩
+9adcfd5da	İstifadə: /block <id> [səbəb]
+dd3f79560	Yanlış ID!
+b53956227	✅ ⟨0⟩ bloklandı.
+68a3942e7	İstifadə: /unblock <id>
+7f14d47f5	✅ ⟨0⟩ blokdan çıxarıldı.
+a07c6c04c	Cari xəbərdarlıq limiti: ⟨0⟩
+eeceb0ee6	İstifadə: /setwarnlimit <2-20>
+68cb7aa9e	Limit 2 ilə 20 arasında olmalıdır!
+7fdd7a44f	Xəbərdarlıq limiti təyin edildi: ⟨0⟩.
+32cb8952a	Spam istisna siyahısı boşdur.
+804f32102	/whitelist @user ilə əlavə et.
+7ec4b51e6	Spam istisna siyahısı:
+c0c03c505	⟨0⟩ istisna siyahısından çıxarıldı.
+e6695a6db	⟨0⟩ spam istisna siyahısına əlavə edildi.
+9e5f1a353	Qapalı qrup
+688f939e9	Söz filtri
+cbabb7d8b	Yoxdur
+28b8f5479	👥 Üzvlər: ⟨0⟩
+ceb987630	👮 Adminlər: ⟨0⟩
+af72a68a6	📈 Statistika
+28086b0d5	├ Ümumi mesaj: ⟨0⟩
+01c7b8d8a	├ Aktiv istifadəçilər: ⟨0⟩
+12279a365	├ Ümumi ban: ⟨0⟩
+74d4fdeab	├ Ümumi xəbərdarlıq: ⟨0⟩
+69516a922	└ Xəbərdarlıq limiti: ⟨0⟩
+c77739311	Aktiv qoruma: ⟨0⟩
+58b3e5e14	Gerb! 🪙
+561c75012	Yazı! 🪙
+1a786e9bf	⟨0⟩ Zər: ⟨1⟩
+e7e394f96	🤖 ⟨0⟩ — Bot sahibi əmrləri
+f4e511a55	/panel — Botunun qrupları və statistikası
+94da61b33	/broadcast — Qruplara, kanallara və insanlara elan (istifadəni görmək üçün /broadcast yaz)
+5d08c9107	/broadcasts — Elan tarixçəsi, kliklər, sorğu nəticələri
+cbbbbd1fd	/templates — Elan şablonları
+70215bc5f	/growth — Həftəlik artım hesabatı (hər bazar ertəsi avtomatik gəlir)
+7a7fa1e0f	/support — Dəstək xətti (şəxsi mesajlar sənə yönləndirilir)
+0d05bfd3b	/gban <id|@user> [səbəb] — Botunun bütün qruplarında ban
+1db86c395	/ungban <id|@user> — Banı götür
+2eb535697	/gbanlist — Ban siyahısı
+eeedac8d1	/select — Qrup seç
+98b86d999	🤖 Bot sahibi əmrləri
+6e9bfe3b7	/clones — Klon botları idarə et (dayandır/başlat/sil)
+e48ef6b31	/clone — Öz klon botun
+3f50c5d54	/panel — İdarəetmə paneli (qruplar/kanallar, botu çıxar, 🧹 təmizlik)
+5e0335772	/perf — Performans: yavaş əməliyyatlar, yaddaş, növbə
+6d08e2352	/maintenance — Texniki xidmət rejimi (əmrlər söndürülür, qorumalar işləyir)
+f160302c5	/block <id> [səbəb] — Blokla
+b1c36dc93	/unblock <id> — Blokdan çıxar
+647651cb8	/gban <id|@user> [səbəb] — Bütün qruplarda ban
+86ee8d200	/ungban <id|@user> — Qlobal banı götür
+d094b4c43	/gbanlist — Qlobal ban siyahısı
+d729d3ba2	/backup — Verilənlər bazasının ehtiyat nüsxəsini al
+0e556fad9	/gblockmedia — Cavab verilən medianı bütün qruplarda blokla
+8af5e8c17	/recover — Admin bərpası
+f0032f0c7	/select — Kanal seç
+97a1889ae	/channelsettings — Kanal ayarları
+def1847f5	⟨0⟩/start — Başlat
+f467f5a12	/menu — Menyunu göstər
+579f051c8	/settings — Seçilmiş qrupun düyməli ayarlar paneli
+0ecfed5c8	/help — Kömək
+d1d491df3	/select — Qrup/kanal qoş
+a64b799ed	/appeal <izahat> — Bana etiraz göndər
+3aaf39bd7	/recover — Admin bərpası (etibarlı şəxslər üçün)
+e8a9f2564	💬 Bota yazdığın mesajlar botun admininə yönləndirilir; cavab bura gəlir.
+90b35c202	/clone — Öz adınla klon bot yarat
+53ff31717	👤 İstifadəçi əmrləri
+a6ac25fa6	📊 Statistika və profil
+7c1cddd9b	/profile — Profilinə bax
+4794e486d	/daily — Gündəlik mesaj reytinqi
+9304026c3	/weekly — Həftəlik reytinq
+0f2144ac5	/monthly — Aylıq reytinq
+dab273f01	/alltime — Bütün dövrlərin reytinqi
+ffca95898	/top — Düyməli reytinq menyusu
+f6859df4f	/info @user — İstifadəçi statistikası
+f739f3e69	/chatinfo — Qrup haqqında məlumat
+96d41dfbc	/rules — Qrup qaydalarına bax
+cf6de9a2b	/afk [səbəb] — AFK ol (səni etiketləyənlərə bildirilir; yazanda götürülür)
+427ccde79	/votemute — Cavab verdiyin şəxs üçün susdurma səsverməsi başlat
+f2f9f9eaf	/notag — /tag siyahısından çıx (yenidən qoşulmaq üçün təkrar yaz)
+6de9402ed	/invite — Şəxsi dəvət linkin (gətirdiyin insanlar sayılır) · /invites — reytinq
+82789607f	📝 Qeydlər
+f9f2a17b9	/notes — Saxlanılmış qeydlər
+46ba4fefd	#qeyd — Qeydi gətir (nümunə: #rules)
+a37fbde9a	/get <ad> — Qeydi gətir
+5ff3c9cb2	🎰 Əyləncə
+b0d9549b8	/coin — Pul at
+3ab74dacf	/dice — Zər at
+304dfe62b	ℹ️ Digər
+b4031dc89	/help — Bu menyu
+6467c9dbe	/id — ID-ni göstər
+0af5bde71	/appeal <izahat> — Bana etiraz (bota şəxsi)
+aff60c67d	/report [səbəb] və ya @admin — Cavab verilən mesajı heyətə şikayət et
+15575b067	👮 Heyət əmrləri — rütbən: ⟨0⟩
+d955391ce	Rütbə sırası: 👑 Təsisçi > 🔱 Həmtəsisçi > ⭐ Baş admin > 🛡 Admin
+cb1ecf135	🛡 Admin və yuxarı
+ba31c6e75	/warn @user [səbəb] — Xəbərdarlıq et
+9db2b48b7	/mute @user [vaxt] — Susdur (Adminlər: ən çox 24 saat)
+0d7e990d0	/unmute @user — Susdurmanı götür
+258592394	/kick @user — Qrupdan çıxar
+40e58c981	/warns · /banlist · /mutelist — Siyahılar
+07722765d	/giveaway · /endgiveaway — Çəkiliş
+faabdc38a	/filter — Avtomatik cavab (məs. salam → Salam, xoş gəldin; media və düymələr olar)
+0e48d2662	/filters · /stop <söz> · /stopall — Filtr siyahısı / sil
+a295c1d2b	/tag <mesaj> · /stoptag — Üzvləri hissə-hissə etiketlə / dayandır
+43f5db5d3	/record @user — Botun bütün qruplarında cəza tarixçəsi və köhnə adlar (şəxsi göndərilir)
+4268b44a9	/giveaway 1d 3 Hədiyyə | channel=@channel messages=20 days=7 — Şərtli və müddətli çəkiliş
+f9892b61b	/myrank — Rütbən və icazələrin
+10ead6ab1	⭐ Baş admin və yuxarı
+667e625bc	/ban @user [vaxt] [səbəb] · /unban — Ban
+387e5f34e	/unwarn @user — 1 xəbərdarlığı götür
+48c85c764	/purge <say/all> · /slowmode <san> — Təmizləmə, yavaş rejim
+2454c2b92	/pin · /unpin — Sancaqlama
+d0ffce66f	/lockdown [dəq] · /lockmedia [dəq] — Təcili kilid
+f6b07290c	/approveall — Qoşulma sorğularını təsdiqlə
+f252c350e	/setrules · /setwelcome · /setgoodbye · /save · /clear — Qaydalar, xoş gəldin, vida, qeydlər
+7bf273598	(media, düymələr, formatlama və təsadüfi mesajlar dəstəklənir; kömək üçün /setwelcome yaz)
+8c7cbbe68	/welcome · /goodbye · /resetwelcome — Önizləmə / standarta qaytar
+df2e5eccc	/schedule 6h <mesaj> · /schedules — Planlaşdırılmış (təkrarlanan) mesajlar
+de546f6e8	🔱 Həmtəsisçi və yuxarı
+d18538a2d	/settings — Düyməli ayarlar paneli (bütün qoruma ayarları)
+00043ba1c	/setup — Sürətli quraşdırma (hazır şablon + xoş gəldin + qorumalar)
+bfe1425f8	/forcesub @channel — Yazmaq üçün istifadəçilər kanala qoşulmalıdır (söndür: /forcesub off)
+886d570db	/unlockdown · /unlockmedia — Kilidləri götür
+5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
+443a00692	/setwarnlimit · /setwarnaction · /captchatime
+3d2493394	/blockmedia · /blockpack — Media/paketləri blokla
+20abda0cf	/admin (/addadmin) · /senioradmin @user [teq] — Rütbə ver
+3c7389596	/remove @user — Rütbəni götür
+a83e94dc8	/perms — Şəxsi icazələr paneli (bota şəxsi)
+13accc070	/membertag @user <teq> — Admin teqi
+775ec46f0	/reload — Admin siyahısını Telegram-dan yenilə (əl ilə/başqa bot tərəfindən verilən hüquqlar)
+9a654a567	👑 Yalnız təsisçi
+f0d85c250	/cofounder @user — Həmtəsisçi et
+aed09d232	/setlog — Jurnal kanalı · Qrup şəbəkəsi · Ehtiyat admin bərpası
+81fcecc0c	📊 Məlumat
+99e6db648	/stats · /chatinfo · /leaderboard · /staff
+a475e9c96	Vaxt formatı: 30m, 2h, 7d
+5a0e84cda	⚙️ Ayarlar paneli
+f910032f2	🌍 Dil: /setlang⟨0⟩
+96fccfef2	🛡 Qruplarım
+5e167ed13	📊 Statistika
+4ab530c07	❓ Kömək
+a2c4fcfa1	🔗 Qrup seç
+d7f837819	Menyudan seç və ya əmr yaz…
+2ac5318f5	➕ Qrupa əlavə et
+7357057be	📢 Kanala əlavə et
+2dadb70db	Menyu aşağıdadır 👇
+71aa20a4d	Əvvəlcə qrup seç: 🛡 Qruplarım və ya 🔗 Qrup seç düyməsindən istifadə et.
+3224664d6	Bot bu çatda admin deyil. Botu orada admin et və yenidən seç.
+78ad7212f	Bu çatda icazən yoxdur.
+2216a64f4	✅ Seçildi: <b>⟨0⟩</b>
+e107177fc	Kömək menyusu
+9e88862d9	Qrup qaydaları
+07efa78b4	Saxlanılmış qeydlər
+cf90a04f1	Profilin və xəbərdarlıqların
+b79df54d5	Aktivlik reytinqi
+a0d54db08	İstifadəçi statistikası
+c3da965fe	Qrup məlumatı
+aa6b818af	ID-ni göstər
+c23bc7fa5	Zər at
+cbd34c9f1	Pul at
+1a6e6af53	Cavab verilən mesajı heyətə şikayət et
+c51b37c71	Teq siyahısından çıx
+d1076c2fa	Qrupun dili
+03811f00b	Susdurma səsverməsi (mesaja cavab ver)
+ef4e5e596	Şəxsi dəvət linkin
+1db922722	Dəvət reytinqi
+53d58e1ac	Düyməli ayarlar paneli
+0c4051b76	Admin siyahısını yenilə
+c55aa4167	Xəbərdarlıq et
+cec03bba0	1 xəbərdarlığı götür
+263cc2188	Xəbərdarlıqlara bax
+76f0023be	Susdurmanı götür
+9d1a81717	Banı götür
+6118dce5a	Qrupdan çıxar
+2d7017ef2	Mesajı sancaqla
+d7722a3e3	Sancağı götür
+a263e4e53	Yavaş rejim
+9da046535	Ban siyahısı
+6d6c46eda	Susdurulanlar siyahısı
+a84a2a1e7	Qeyd saxla
+385c7d8ec	Qeydi sil
+a60cb06d0	Sürətli quraşdırma
+d2dd24bcc	Avtomatik cavab əlavə et
+364057e43	Filtr siyahısı
+5d24c4032	Filtri sil
+e46d6d528	Xoş gəldin mesajı (media/düymələr)
+2c1419a05	Vida mesajı
+27f1ba342	Qaydaları yaz
+3d5b58779	Planlaşdırılmış mesaj əlavə et
+943458e1e	Planlaşdırılmış mesajlar
+2331d765c	Üzvləri etiketlə
+b0d7d4f3d	Etiketləməni dayandır
+e912877cd	Məcburi kanal
+29cc4c872	İstifadəçi tarixçəsi
+8871a3c02	Çəkiliş başlat
+dfae805ce	Çəkilişi bitir
+1945bd345	Təcili: qrupu kilidlə
+c0559b5cc	Qrupun kilidini aç
+422c89bec	Rütbən və icazələrin
+fa7d4e18f	Heyət siyahısı
+84be9db5d	Qrup statistikası
+3a085165d	Cavab verilən medianı blokla
+414c8153f	Stiker paketini blokla
+c3e7837f2	Media göndərməni kilidlə
+956c0ce19	Media kilidini götür
+4e382259e	Başlat və menyu
+1c4ce1da4	Menyunu göstər
+7e27a3b5a	Qrup/kanal seç
+dc6cac394	Seçilmiş qrupun ayarları
+e78fa8e35	Bana etiraz göndər
+eaba0a794	Kömək
+cbad220d3	Admin bərpası (etibarlı şəxslər)
+fcea72bad	Seçilmiş qrup üçün sürətli quraşdırma
+495825a5e	Veb panel (bütün ayarlar bir səhifədə)
+9674953cf	Bot elanlarını söndür
+99ab93b21	Dil
+333895635	Adminə yaz (dəstək xətti)
+0d0187ac4	Botunun qrupları və statistikası
+8938961a5	Qruplara, kanallara, insanlara elanlar
+be4f2dea9	Elan tarixçəsi
+0c8b2de83	Elan şablonları
+ecced9e02	Həftəlik artım hesabatı
+52b5b2176	Dəstək xəttini aç/söndür
+32791cc9a	Botunun qruplarında ban
+a7b61f397	Klon botları idarə et
+205162f9b	Performans statistikası
+5d22ead7d	İdarəetmə paneli
+84c0cbd02	Qlobal ban
+68cd0b7eb	Qlobal banı götür
+a38b6848f	Qlobal ban siyahısı
+45a767875	İstifadəçini/çatı blokla
+4902bf286	Blokdan çıxar
+cfc719f1d	Verilənlər bazasının ehtiyat nüsxəsi
+efdd2ee59	Texniki xidmət rejimi
+bf65fdcd0	Bütün qruplarda medianı blokla
+385efb5c0	⚡ Əsas bot: @⟨0⟩
+8f13119d3	⟨0⟩ — qrup və kanal qoruma botu: spam, linklər, flood, reydlər və captcha.
+63edd3296	🛡 ⟨0⟩ Security Bot
+7ebe2ab6b	Qrupunu və kanalını spam, linklər, flood, reydlər və saxta hesablardan qoruyur. Bütün ayarlar düyməli paneldən edilir.
+287dec170	Başlamaq üçün: /start⟨0⟩
+81daf5632	<b>⟨0⟩</b> qoşulma sorğun qəbul edildi. Təsdiqlənmək üçün suala cavab ver:
+784db6bac	⏰ Vaxt: ⟨0⟩
+90d0b5f0a	🔐 Şəxsi yoxlama göndərildi: ⟨0⟩ | ⟨1⟩
+49349d70e	Bu yoxlamanın vaxtı keçib.
+6af257079	Sorğu artıq etibarlı deyil (artıq baxılmış ola bilər).
+d7eff8c3b	✅ Təsdiqləndi! <b>⟨0⟩</b> qrupuna qəbul olundun.
+69af7d417	✅ Şəxsi yoxlamadan keçdi və qəbul edildi: ⟨0⟩ | ⟨1⟩
+99c1bac07	❌ Yanlış cavab. <b>⟨0⟩</b> qoşulma sorğun rədd edildi; yeni sorğu göndərə bilərsən.
+86e28712b	❌ Şəxsi yoxlamadan keçmədi, rədd edildi: ⟨0⟩ | ⟨1⟩
+9dbf30953	⏰ Vaxt bitdi, qoşulma sorğun rədd edildi. Yeni sorğu göndərə bilərsən.
+2ec5e8129	⏰ Şəxsi yoxlamanın vaxtı bitdi → ID:⟨0⟩ rədd edildi | ⟨1⟩
+12ae98fff	⚠️ Kanalda flood aşkarlandı! 10 saniyədə ⟨0⟩ paylaşım
+f271bb123	🌐 Qlobal banlı istifadəçinin qoşulma sorğusu rədd edildi: ⟨0⟩
+7b944f9a5	❌ Bot/saxta hesab rədd edildi: ⟨0⟩ → ⟨1⟩
+d5d491f80	✅ Avtomatik qəbul edildi: ⟨0⟩ → ⟨1⟩
+5f7e623cd	❌ Avtomatik rədd edildi: ⟨0⟩ → ⟨1⟩
+f8cddb848	📩 Yeni sorğu: ⟨0⟩ → ⟨1⟩
+a984efcca	Bu şəxsə qarşı əməliyyat edə bilməzsən.
+30a92b565	⛔ Rütbə idarəsi üçün ⟨0⟩ və ya daha yüksək olmalısan.
+f57eaa44e	⛔ Səninlə eyni və ya daha yüksək rütbəli şəxsi redaktə edə bilməzsən.
+c8857eea2	⛔ ⟨0⟩ rütbəsini yalnız daha yüksək rütbə verə bilər.
+fd71ebc88	İstifadəçi tapılmadı.
+fa5ded262	❌ Bot admin təyin edə bilmir!
+889786c65	❌ İstifadəçi qrupda tapılmadı!
+3c0a7e1f2	⚙️ İcazələr
+e9e94dc59	Bu şəxsin rütbəsi yoxdur. Əvvəlcə /admin və ya /senioradmin ilə rütbə ver.
+627b90668	⚠️ ⟨0⟩ (botda yoxdur)
+ae8f6f509	📡 Telegram icazələri
+033d23563	🤖 Bot icazələri
+3d3a3d682	→ 📡 Telegram icazələri
+8bff101a7	→ 🤖 Bot icazələri
+daddb4f0e	❌ Rütbəni götür
+12ec1558f	✅ Bağla
+8f4a3cad6	👤 <b>İcazələrin redaktəsi:</b> ⟨0⟩
+2a138f61a	Rütbə: <b>⟨0⟩</b>
+9d0d28c34	✅ açıq · ❌ bağlı · 🔒 rütbə kifayət etmir
+bc2ec6c27	<i>Dəyişikliklər dərhal tətbiq olunur. Rütbə düymələri rütbəni dəyişir.</i>
+4dd50d885	Yanlış düymə.
+2f00bbdcd	Bu icazə onun rütbəsindən yuxarıdır.
+da5fcba10	Yanlış rütbə.
+8ba8423be	Artıq ⟨0⟩.
+aac33021a	⟨0⟩ təyin edildi: ⟨1⟩ | ⟨2⟩
+d37ea2c16	Rütbə: ⟨0⟩
+222dfbc00	Rütbə götürüldü.
+f97fd51ad	✅ ⟨0⟩ üçün rütbə götürüldü.
+570da29a3	İcazən yoxdur.
+c119667e9	✅ İcazə paneli bağlandı. Dəyişikliklər yadda saxlanıldı.
+cf9f2e455	⟨0⟩ bu qrupda heyət üzvü deyil.
+d4df62038	🔒 Bu icazə sənin rütbəndən yuxarıdır və ya botda yoxdur.
+ca3e89467	Redaktə edə biləcəyin heyət üzvü yoxdur. Rütbə vermək üçün qrupda /admin @şəxs yaz.
+9befd0808	👑 <b>İcazələrin idarəsi</b>
+6fcfd3b55	Redaktə ediləcək şəxsi seç:
+770d8a43d	Gecə rejimi ayarları
+0d3da9061	Məhdudlaşdırılacaq icazələri seç, sonra Yadda saxla düyməsini bas:
+3014d10c7	Saatları dəyişmək üçün: /nightmod 23:00 07:00
+8b386c8fe	Gecə rejimi ayarlarında xəta.
+441634b34	🛡 ⟨0⟩ aktivdir! Ayarlar üçün /settings, əmrlər üçün /help.
+f9f826fff	🛡 <b>⟨0⟩ Security Bot</b>
+a299d1e4f	Qrup və kanalların üçün spam, link, flood, reyd və captcha qoruması.
+b40285a71	1️⃣ Aşağıdakı düymə ilə botu lazımi icazələrlə qrupuna əlavə et.
+15b8ba9ba	2️⃣ Aşağıdakı menyudan qrupunu seç və hər şeyi ⚙️ Ayarlar ilə idarə et.
+eae59de08	💬 Dəstək
+81e22b47b	Yanlış icazə linki.
+5af6c10c1	Qrup qeydiyyata alındı! İndi onu şəxsi çatda 🛡 Qruplarım ilə seçə bilərsən.
+425ac7c01	Qrup ID: ⟨0⟩
+60a03153e	Qeydiyyat alınmadı: əvvəlcə botu bu qrupda admin et.
+08cdd8869	Bu qrup qeydiyyatdadır (ID: ⟨0⟩)
+7b80705e1	İdarəetmə panelinə keçmək üçün şəxsi çatda /select yaz.
+c6668e444	Sənə aid qeydiyyatda olan qrup/kanal tapılmadı.
+489f886fe	Aşağıdakı 🔗 Qrup seç / 📢 Kanal seç düyməsi ilə çatını seç: bot orada admindirsə, avtomatik tanınır. Bot hələ əlavə edilməyibsə, əvvəlcə Qrupa əlavə et düyməsindən istifadə et.
+529f5b296	İdarə ediləcək kanalı/qrupu seç:
+3b561f5ba	✅ Seçildi: ⟨0⟩
+e537ee79f	İndi şəxsi çatda əmrlərdən istifadə edə bilərsən.
+5da9ca5b4	Sənin ID: <code>⟨0⟩</code>
+758b4fa2f	Cavab verilən şəxsin ID-si: <code>⟨0⟩</code>
+a52056450	Nümunə:
+8db290527	Kanal tapılmadı!
+d7db3c4cf	Cari jurnal: ⟨0⟩
+354f04cc0	İstifadə: /setlog -1001234567890
+9cc790504	✅ Jurnal kanalı yeniləndi: ⟨0⟩
+f40d6696a	QRUP HEYƏTİ
+511c4973a	Cəmi: ⟨0⟩ heyət üzvü
+284837aa3	İstifadə: /gban <id|@user> [səbəb] (və ya mesaja cavab ver)
+e2d4f8ab8	Bu şəxsi banlamaq olmaz.
+01c3bd4a0	bütün botlarda
+cb8da44a3	⟨0⟩ qruplarında
+49aed1394	🌐 ⟨0⟩ ⟨1⟩ banlanır...
+73497703d	🌐 ⟨0⟩ ⟨1⟩ banlandı.
+a960dfa59	✅ ⟨0⟩ çat | ❌ ⟨1⟩ (icazə yoxdur/üzv deyil)
+ffc42c25d	İstifadə: /ungban <id|@user>
+ad983fea1	✅ ⟨0⟩: ⟨1⟩ban götürüldü.
+63de87994	Ban siyahısı boşdur.
+d65a4bee5	Qlobal ban siyahısı
+c58c96fc0	⟨0⟩ ban siyahısı
+6d34fa6d2	🌐 <b>⟨0⟩</b> (son 50):
+15db0d20b	Cari: ⟨0⟩ (⟨1⟩)
+08771c47b	İstifadə:
+9ebd56f1c	✅ Xəbərdarlıq limitinə çatanda tətbiq olunan cəza: ⟨0⟩⟨1⟩
+bd06580b1	Yeni üzv məhdudiyyəti: ⟨0⟩
+d8eaa4a1a	İstifadə: /newbie <dəqiqə> və ya /newbie off
+4986c7002	0-1440 arası dəqiqə daxil et və ya off yaz.
+7e4bdbce0	✅ Yeni üzv məhdudiyyəti söndürüldü.
+d5a3095ed	✅ Yeni üzvlər ilk ⟨0⟩ dəq ərzində link/media/yönləndirmə göndərə bilməz.
+d4c80a6a7	🔗 Link istisna siyahısı:
+f3425da9b	/allowlink add youtube.com
+71399725d	/allowlink del youtube.com
+99d71c223	(t.me/mychannel kimi yollar da əlavə edilə bilər)
+4bcfe1994	✅ ⟨0⟩ link istisna siyahısına əlavə edildi.
+e6dffb4e9	✅ ⟨0⟩ siyahıdan çıxarıldı.
+c22e23f31	İstifadə: /captchatime 2m (30s ilə 60min arası)
+b4b2c0b74	✅ Captcha vaxtı: ⟨0⟩
+42cf26778	Etiraz etmək üçün mənə şəxsi yaz: /appeal <izahat>
+ef023696b	İstifadə: /appeal <banın niyə götürülməlidir?>
+294f98c41	Qeydə alınmış banın yoxdur.
+78158a307	Etirazın hansı qrup üçündür?
+0072d91b7	Bu qrup üçün 24 saatda bir dəfə etiraz edə bilərsən.
+0799f76c1	✅ Banı götür
+1358a154b	❌ Rədd et
+6d20aaa15	📨 <b>Bana etiraz</b> #⟨0⟩
+1040c08fa	Qrup: <code>⟨0⟩</code>
+fae78e9bb	Ban səbəbi: ⟨0⟩
+76700df28	✅ Etirazın adminlərə göndərildi. Nəticə barədə burada xəbər veriləcək.
+53667435f	Vaxt bitdi, yenidən /appeal yaz.
+6486efe3d	Göndərilir...
+6c9744f83	Etiraz tapılmadı.
+e2457d551	Bu etiraza artıq baxılıb: ⟨0⟩
+07b34dcdd	✅ Etirazın qəbul edildi, banın götürüldü. Qrupa yenidən qoşula bilərsən.
+ed103ceb6	❌ Etirazın rədd edildi.
+f7480a2b3	<b>Nəticə:</b> ⟨0⟩ — ⟨1⟩
+b497d1353	✅ Qəbul edildi
+6c25e020d	❌ Rədd edildi
+97239bc70	📨 Etiraz #⟨0⟩ ⟨1⟩ | ⟨2⟩
+7a80eefec	🖼 media yoxdur
+573052e01	🔘 ⟨0⟩ düymə
+b81be0f7f	🎲 ⟨0⟩ variant
+d542cb1c4	💎 dəqiq surət
+03cb45a36	Şəkil
+638bbfe15	Fayl
+867b291d2	Musiqi
+e8bff35ea	Səsli mesaj
+2e9d0e77a	Stiker
+966648de4	Video mesaj
+f4a9f3249	Bu düymə artıq etibarlı deyil.
+30dc00c2e	Bu link artıq etibarlı deyil.
+c9910a305	Bu qeyd artıq mövcud deyil.
+0e89955b2	👋 {name} bizi tərk etdi. Sağ ol!
+e41edf275	📜 <b>⟨0⟩ qaydaları</b>
+3f1696378	<b>Formatlama:</b> mesaj Telegram-da necə yazırsansa, eləcə saxlanılır (qalın, kursiv, linklər, spoylerlər, sitatlar).
+06c164645	<b>Media:</b> şəkil/video/GIF/stikerə cavab ver və əmri yaz.
+6a1a1a0ad	<b>Düymələr</b> (hər sətir bir cərgədir, yan-yana üçün <code>&amp;&amp;</code>):
+a1c3d2c0b	<code>Kanalımız - https://t.me/channel &amp;&amp; Dəstək - @support</code>
+3424e60cc	<code>Qaydaları oxu - rules</code> · <code>Məlumat - popup:Mətn</code> · <code>Qeyd - #ad</code>
+dd3608634	Rəng: sətrin sonunda <code>#green</code> <code>#red</code> <code>#blue</code> · Rose üslubu: <code>[Kanal](buttonurl://t.me/channel)</code>
+90f26740a	<b>Dəyişənlər:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
+23adc295f	<b>Təsadüfi:</b> bir neçə mesajı yalnız <code>%%%</code> olan sətirlə ayır.
+7d75ab43e	Bu mesajı kanallarda istifadə etmək olmaz.
+93a792a44	Xoş gəldin
+06ba336bf	Vida
+ff0fe91d4	Qaydalar
+86eca05aa	✏️ <b>⟨0⟩ mesajı</b>
+0d20c41d6	İstifadə: <code>/⟨0⟩ mətn</code> və ya mesaja/mediaya cavab ver: <code>/⟨1⟩</code>
+ee9b02bb7	💎 Premium emojilər saxlanılır: mesaj olduğu kimi kopyalanır. Mənbə mesajı silmə (silinərsə, adi emojilərlə göndərilir).
+d54d1a799	✅ ⟨0⟩ mesajı yadda saxlanıldı (⟨1⟩).⟨2⟩
+32bc1141c	Önizləmə:
+a4fd88326	✏️ ⟨0⟩ mesajı yeniləndi | ⟨1⟩
+f2ecba035	Bu qrupda hələ qaydalar təyin edilməyib.
+f6d49a8a4	Onları /setrules ilə əlavə edə bilərsən.
+3dadf54ab	⟨0⟩ mesajı: ⟨1⟩ · ⟨2⟩
+42b967a7b	Dəyişmək üçün: /set⟨0⟩
+6d2d95e97	👋 Xoş gəldin
+46af570c5	🚪 Vida
+6413cb724	✅ Xoş gəldin mesajı standarta qaytarıldı.
+14324da2a	İnterval formatı: <code>30m</code>, <code>6h</code>, <code>1d</code>
+a44cbb972	İnterval ən az 10 dəqiqə, ən çox 7 gün olmalıdır.
+7e69525ad	Bir qrupda ən çox ⟨0⟩ planlaşdırılmış mesaj ola bilər.
+ee86ab412	⏰ <b>Planlaşdırılmış mesaj</b>
+8dada6c44	İstifadə: <code>/schedule 6h Qaydaları oxumağı unutma!</code>
+82c791f2c	və ya mesaja/mediaya cavab ver: <code>/schedule 6h</code>
+7939ca797	Siyahı və silmə: /schedules
+62c97be15	✅ Planlaşdırılmış mesaj #⟨0⟩: hər ⟨1⟩ göndəriləcək (birincisi ⟨2⟩ sonra). Siyahı: /schedules
+bd18601d1	⏰ Planlaşdırılmış mesaj əlavə edildi (hər ⟨0⟩) | ⟨1⟩
+e2d35adb1	⟨0⟩ <b>#⟨1⟩</b> hər ⟨2⟩ · növbəti ⟨3⟩
+76c241937	🧹 Əvvəlkini sil
+b35d597c9	📌 Əvvəlkini saxla
+225f856c3	⏰ <b>Planlaşdırılmış mesajlar</b>
+207dc0f12	Əlavə etmək üçün: <code>/schedule 6h mesaj</code> (media/düymələr dəstəklənir)
+351e8911a	Hələ yoxdur.
+242c0f02c	Tapılmadı
+ec93a493c	⏸ Dayandırıldı
+e388dd558	▶️ Başladıldı
+d08a36466	➕ Yeni planlaşdırılmış mesaj
+25cda8fe6	🚪 <b>Vida mesajı</b> — ⟨0⟩
+b61184fea	Status: <b>⟨0⟩</b> · ⟨1⟩
+0eec2952d	Yalnız öz istəyi ilə çıxanlara göndərilir (çıxarılan/banlananlara yox). Avtomatik silmə vaxtı xoş gəldin ilə eynidir.
+b0037f2fb	👋 <b>Xoş gəldin</b> — ⟨0⟩
+611ef08d1	Xoş gəldin: <b>⟨0⟩</b> · ⟨1⟩
+a4530174c	📜 Qaydalar: ⟨0⟩ · 🚪 Vida: ⟨1⟩ · ⏰ Planlaşdırılmış mesajlar: ⟨2⟩
+d0b1d849f	Media, düymələr və dəyişənlər üçün ✏️ Redaktə et düyməsini bas (və ya köməyi görmək üçün qrupda /setwelcome yaz).
+2b7ced272	Açıq
+68b8326a2	yoxdur
+2bae1a721	✏️ Redaktə et
+894e0e55f	👁 Önizləmə
+099ae3d9c	🖼 Medianı sil
+8bb5bb494	↩️ Standarta qaytar
+adcf7aa93	🧹 Köhnəni sil
+1eaf255d1	👥 Çoxları üçün bir mesaj
+7ef1d92b8	⏱ Avtomatik silmə
+e0454a0ce	📩 Şəxsi göndər
+060b7f669	📜 Qaydaları yaz
+ee89e73e1	👁 Qaydalar
+b6669596d	🚪 Vida mesajı ›
+0c2dc5967	⏰ Planlaşdırılmış mesajlar ›
+9a8a538db	Qara siyahı: ⟨0⟩
+0eed14a22	Qayda yoxdur
+a6aea5676	👁 Önizləmə göndərildi
+eb9f11f93	↩️ Standarta qaytarıldı
+14af210b4	🖼 Media silindi
+f615cd8f5	⏹ Etiketləmə dayandırıldı
+ce76be77d	✅ Etiketləmə bitdi
+98452c88d	⟨0⟩: ⟨1⟩/⟨2⟩ nəfər etiketləndi.
+7f535520c	/tag qrupda istifadə olunur.
+59b9ad51d	⏳ Bu qrupda etiketləmə artıq gedir. Dayandırmaq üçün: /stoptag
+46a8f403f	⏳ Qrup spama dönməsin deyə etiketləmələr arasında fasilə var. ⟨0⟩ dəq sonra yenidən cəhd et.
+02343ede4	Etiketləmək üçün heç kim tapılmadı. (Bot qrupda yazan və ya qoşulan üzvləri tanıyır.)
+29099e290	🏷 Etiketləmə başladı: <b>⟨0⟩</b> nəfər, hər mesajda ⟨1⟩ · təxminən ⟨3⟩ dəq
+5a101718d	Dayandırmaq üçün: /stoptag
+f64e607e0	⏹ Dayandır
+87e8dab7e	🏷 /tag başladı (⟨0⟩ nəfər) | ⟨1⟩
+93e9f8e23	Hazırda heç bir etiketləmə getmir.
+de3fd2d6f	⏹ Etiketləmə dayandırılır…
+6e637aa42	⏹ Dayandırılır
+a0fd2c146	Etiketləmə artıq bitib.
+60c103470	Bunu etiketlənmək istəmədiyin qrupda yaz.
+170599775	🔔 Yenidən /tag siyahısındasan.
+3812eb431	🔕 Bu qrupda artıq /tag ilə etiketlənməyəcəksən. Geri qaytarmaq üçün yenidən /notag yaz.
+21946f144	⚠️ Məcburi kanal yoxlanıla bilmir: bot kanalda admindirmi? (/forcesub ilə yenidən təyin et)
+8e87bf498	Kanala qoşul
+cbb50c7c3	✅ Qoşuldum
+0ca6d0da1	📢 ⟨0⟩, bu qrupda yazmaq üçün əvvəlcə <b>⟨1⟩</b> kanalına qoşulmalısan.
+c0ec4b2f3	Bu düymə sənin deyil.
+aaed7d345	✅ Təşəkkürlər, indi yaza bilərsən!
+bd2685273	Hələ kanala qoşulmamısan. Əvvəlcə 📢 düyməsi ilə qoşul, sonra yenidən bas.
+1886b3d17	Kanalı <code>@username</code>, <code>t.me/channel</code> və ya <code>-100…</code> ID kimi yaz.
+f02d79616	Kanal tapılmadı və ya bot kanalda deyil. ⟨0⟩
+87bee0af3	Bu kanal deyil.
+4171be67d	Əvvəlcə botu kanala <b>admin</b> kimi əlavə et (üzvləri görmək üçün lazımdır).
+9d38f82c5	Açıq — <b>⟨0⟩</b>
+4adcca7b1	📢 <b>Məcburi kanal</b>: ⟨0⟩
+a3407edfd	Təyin et: <code>/forcesub @channel</code>
+95acb52af	Söndür: <code>/forcesub off</code>
+045928d81	Bot kanalda admin olmalıdır. Adminlər və bot sahibi istisnadır.
+fe929a5d7	📢 Məcburi kanal söndürüldü.
+53a5e40c2	Kanala qoşulmayanların mesajları silinir və qoşulma düyməsi göstərilir.
+cef984319	📢 Məcburi kanal: ⟨0⟩ | ⟨1⟩
+d48d5b5ae	qısa müddət
+05260e946	⟨0⟩ gün
+b04fc7f5d	indicə
+21aaa5a62	⟨0⟩ dəq
+7448bebe4	⟨0⟩ saat
+5ba98ca40	⟨0⟩ gün
+ad5b41977	💤 ⟨0⟩ indi AFK-dır⟨1⟩
+44c5de771	👋 ⟨0⟩ qayıtdı (⟨1⟩ AFK idi).
+e117178d7	💤 ⟨0⟩ hazırda AFK-dır (⟨1⟩)⟨2⟩
+44140939f	📢 <b>Məcburi kanal</b> — ⟨0⟩
+e5b1aac1e	Status: <b>⟨0⟩</b>
+0716f7bc2	Kanal: ⟨0⟩
+0d5b480e5	Kanala qoşulmayan üzvlərin mesajları silinir və '📢 Kanala qoşul / ✅ Qoşuldum' düymələri olan bildiriş çıxır. Adminlər istisnadır. Bot kanalda admin olmalıdır.
+7d73e8088	təyin edilməyib
+6ba5f155e	✏️ Kanalı təyin et
+c9606c43c	🏷 <b>Etiketləmə ayarları</b> — ⟨0⟩
+203ce8b22	<code>/tag mesaj</code> üzvləri hissə-hissə etiketləyir. <code>/stoptag</code> dayandırır, üzvlər <code>/notag</code> ilə siyahıdan çıxa bilər.
+b86bf2507	Hər mesajda: <b>⟨0⟩ nəfər</b> · Üslub: <b>⟨1⟩</b> · Kimlər: <b>⟨2⟩</b>
+d2abd1ed8	Ad
+1da63df5e	son 7 gündə aktiv olanlar
+4b30ca4e3	hamı
+4e45e032a	İnsanlar
+4dd25e398	⟨0⟩Adla
+c39394400	⟨0⟩Emoji ilə
+b48e5cb08	Yalnız son 7 gündə aktiv olanlar
+ca39fe0f8	botun digər ⟨0⟩ qrupunda banlanıb
+9872ca74d	CAS spam siyahısındadır
+9396a2730	🚩 ⟨0⟩ qara siyahıdadır (⟨1⟩) → <b>banlandı</b>.
+545b1c5c1	🚩 ⟨0⟩ qara siyahıdadır (⟨1⟩) → <b>susduruldu</b>. Adminlər onu azad edə bilər.
+07441d924	🚩 Diqqət: ⟨0⟩ ⟨1⟩.
+45358021b	✏️ Ad dəyişikliyi: ⟨0⟩ (ID <code>⟨1⟩</code>)
+281b2747a	Köhnə: ⟨0⟩
+059547382	Yeni: ⟨0⟩
+a2c2bec19	📋 <b>Tarixçə</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
+0786218b9	🏷 Köhnə adlar: ⟨0⟩
+14c5bccb9	🚩 Ortaq qara siyahı: ⟨0⟩
+38fd7e621	<b>⟨0⟩ qrupda banlanıb</b>
+15ab6d34d	təmiz
+04a2454bb	🌐 CAS: ⟨0⟩
+66b71c0f8	⚠️ siyahıdadır
+5a25bd323	📊 Son ⟨0⟩ gün: ⚠️ ⟨1⟩ xəbərdarlıq · 🔇 ⟨2⟩ susdurma · 👢 ⟨3⟩ çıxarılma · 🚫 ⟨4⟩ ban
+5f914853f	Qeydə alınmış cəza yoxdur.
+05d9f273c	İstifadə: /record @user, /record ID və ya mesaja cavab olaraq /record
+f3ac03616	📩 Tarixçə şəxsi olaraq göndərildi.
+5d8b9aade	📩 Tarixçəni şəxsi göndərməyim üçün əvvəlcə mənə şəxsi çatda /start göndər.
+2e3efd222	🤖 Bota keç
+859b5bb09	🔇 Susdur (⟨0⟩/⟨1⟩)
+4d8231ce2	❌ Ləğv et (admin)
+39229bf11	/votemute qrupda, mesaja cavab olaraq istifadə olunur.
+6a2b8f19c	Bu qrupda səsvermə ilə susdurma söndürülüb.
+61afc3c7f	Susdurulmasını istədiyin şəxsin mesajına /votemute ilə cavab ver.
+89cfeb825	Bu şəxs üçün səsvermə başlatmaq olmaz.
+77053150c	Yeni üzvlər səsvermə başlada bilməz (qrupda ən azı 1 gün olmalısan).
+ebb86ddce	Bu yaxınlarda səsvermə başlatmısan, bir az gözlə.
+2848c7501	Bu şəxs üçün artıq səsvermə gedir.
+97509d3a2	🗳 ⟨0⟩ üçün <b>susdurma səsverməsi</b> (⟨1⟩)
+49efb6ab2	Başladan: ⟨0⟩ · ⟨1⟩ səs lazımdır · ⟨2⟩ dəq ərzində
+dc6640321	Bu səsvermənin vaxtı bitib.
+608b293ec	Səsvermə ləğv edildi
+0fdae78cf	❌ Səsverməni ⟨0⟩ ləğv etdi.
+a0e2f43f9	Özünə səs verə bilməzsən.
+ffff3ff40	Yeni üzvlər səs verə bilməz (qrupda ən azı 1 gün olmalısan).
+fe7fa73cc	Artıq səs vermisən.
+e0e085981	✅ Səsin sayıldı
+73e49db75	Susdurmaq olmadı (bot icazələri?)
+aa6350471	🔇 Susduruldu
+75f1001f2	🔇 ⟨0⟩ ⟨1⟩ səslə ⟨2⟩ müddətinə susduruldu.
+8555c063c	🗳 Səsvermə: ⟨0⟩ ⟨1⟩ səslə ⟨2⟩ müddətinə susduruldu | ⟨3⟩
+18fb9aaaa	🧑‍⚖️ <b>İcma qoruması</b> — ⟨0⟩
+f1deffa09	🚩 <b>Ortaq qara siyahı:</b> botun başqa qrupunda banlanan biri bura qoşulanda seçilmiş əməliyyat tətbiq olunur.
+43a185211	🌐 <b>CAS:</b> dünya spam siyahısındakı hesablar da tutulur.
+6e4660beb	✏️ <b>Ad izləmə:</b> ad/username dəyişiklikləri jurnal kanalına yazılır (tarixçə: /record).
+adabf49fe	🗳 <b>Səsvermə ilə susdurma:</b> üzvlər /votemute ilə mesaj üzərində səs verərək kimisə müvəqqəti susdura bilər (yeni üzvlər səs verə bilməz, heyətə tətbiq olunmur).
+b800b8e5f	🚩 Ortaq qara siyahı
+97bceca81	✏️ Ad izləmə
+c5772d4e7	🗳 Səsvermə
+f12c4aec5	Lazım olan səslər
+662158acd	Susdurma
+5c4935039	🎁 <b>Çəkiliş</b>⟨0⟩
+0dad0ba32	🏆 Qaliblərin sayı: <b>⟨0⟩</b>
+7c606f70b	⏰ Bitir: <b>⟨0⟩</b>
+92b031d27	📢 ⟨0⟩ kanalının üzvü olmaq
+1a822445f	💬 qrupda ən azı ⟨0⟩ mesaj (son ⟨1⟩ gün)
+d9e82561c	📅 qrupda ən azı ⟨0⟩ gün olmaq
+d0610eddb	🛡 profil şəkli və ya username olan real hesab
+208622235	📋 <b>Şərtlər</b>
+99c8d7297	👥 İştirakçılar: <b>⟨0⟩</b>
+cadb40104	🎁 Qoşul (⟨0⟩)
+eb533cc4f	Bu qrupda çəkiliş gedir. Bitirmək üçün: /endgiveaway
+10870143e	Müddət 1 dəqiqə ilə 30 gün arasında olmalıdır.
+9c50f1ba5	❌ Kanal şərti: ⟨0⟩
+ec58b461d	✅ Çəkiliş başladı.⟨0⟩
+9d6e7b1e0	Şərtli nümunə: /giveaway 1d 3 Hədiyyə | channel=@channel messages=20 days=7
+8a942b576	Bitirmək üçün: /endgiveaway [qaliblərin sayı]
+05fd915f2	🎉 ⟨0⟩ çəkiliş başlatdı: ⟨1⟩ | ⟨2⟩
+30f5e7aae	Botlar qoşula bilməz.
+f03d1a2cb	Əvvəlcə qrupa qoşulmalısan.
+b5417cc27	Qrup üzvlüyün yoxlanıla bilmədi.
+004bfc204	Profil şəkli və ya username olmayan hesablar qoşula bilməz (saxta hesab qoruması).
+39a47e334	Əvvəlcə bunun üzvü olmalısan: ⟨0⟩.
+99797f0e4	Qrupda ən azı ⟨0⟩ mesajın olmalıdır (indi ⟨1⟩).
+f21f9c94c	Qrupda ən azı ⟨0⟩ gün olmalısan.
+ff2167b09	Bu çəkiliş bitib.
+b5116fff1	Artıq qoşulmusan, uğurlar! 🍀
+5c88f09bc	🎉 Çəkilişə qoşuldun, uğurlar!
+b05652dd1	✅ <b>Çəkiliş bitdi</b>
+4cc381328	🎉 Çəkiliş bitdi! Heç bir iştirakçı şərtlərə uyğun gəlmədi.
+8e2d564a7	🎉 <b>Çəkiliş bitdi!</b>⟨0⟩
+5aa86da43	🏆 Qalib(lər): ⟨1⟩
+e9ade43fd	👥 İştirakçılar: ⟨0⟩
+7438ab083	🏆 Çəkiliş bitdi: ⟨0⟩ | ⟨1⟩
+1e5f2647b	qalib yoxdur
+12a0187af	Aktiv çəkiliş yoxdur.
+9de1a5b57	✅ Çəkiliş bitirildi.
+ff647517b	Gündəlik mesajlar — son 30 gün
+34673a626	Saatlara görə mesajlar (Türkiyə vaxtı, 30 gün)
+fa46923fb	Qoşulanlar / çıxanlar — son 30 gün
+0edbd3fce	Qoşulanlar (⟨0⟩)
+03822ea5b	Çıxanlar (⟨0⟩)
+5b09123ba	Ən aktiv üzvlər — son 7 gün
+8faf5f37f	Hələ məlumat yoxdur
+c68b2a090	💬 Mesajlar: 7 gün <b>⟨0⟩</b> · 30 gün <b>⟨1⟩</b> · aktiv üzvlər (7 gün): <b>⟨2⟩</b>
+efd6992e0	👥 30 gündə qoşulan <b>⟨0⟩</b> · çıxan <b>⟨1⟩</b>
+980151f9d	🛡 Cəmi: 🚫 ⟨0⟩ ban · 🔇 ⟨1⟩ susdurma · 👢 ⟨2⟩ çıxarılma · 🔁 ⟨3⟩ spam · 🙋 ⟨4⟩ sorğu
+8b3ad8463	⟨0⟩ — statistika
+afd536817	Cəza
+74a1b4f70	🌊 Flood: mesaj limiti
+7d5fdce06	🌊 Flood: vaxt aralığı
+6eec7f346	🖼 Media flood: media limiti
+188dc2ac4	🖼 Media flood: vaxt aralığı
+4cb84b51a	🔇 Susdurma müddəti
+3b723e30f	🕊 Spamdan azad şəxslər
+62af570a8	Hər sətirdə bir istifadəçi ID. Spam, flood və link qoruması bu şəxslərə tətbiq olunmur.
+97559aa34	🛡 Qorumalar
+eaecb6e7c	🔤 Söz və link siyahıları
+50e7fc41b	Qadağan olunmuş sözlər
+5d70efcb4	Hər sətirdə bir söz. Regex üçün əvvəlinə re: yaz
+a59a817c8	İcazə verilən domenlər
+98ae8882f	Hər sətirdə bir domen (məs. youtube.com).
+17dfd3589	🚪 Qoşulma
+47bc3cee8	Captcha vaxtı
+31a22d269	📩 Qoşulma sorğuları üçün şəxsi yoxlama
+51640d5b4	Reyd: üzv limiti
+33500eff3	Reyd: vaxt aralığı
+bcd337aa1	🐣 Yeni üzv məhdudiyyəti
+b7e0a1cb1	Username-i olmayan istifadəçiləri susdur
+3fe9d6820	✅ Qoşulma sorğularını avtomatik qəbul et
+876437b88	❌ Qoşulma sorğularını avtomatik rədd et
+94dd4d1bd	🤖 Botları / username-i olmayanları rədd et
+b582c2d59	🖼 Uyğunsuz media
+ca770c605	🤖 18+ məzmun üçün AI yoxlaması
+737b0637b	Şəkillər, stikerlər və GIF-lər yoxlanılır (serverdə nudenet quraşdırılmalıdır).
+1903d3d63	📦 Təhlükəli faylları sil
+9c0ff36ee	.apk .exe .bat .scr kimi fayllar
+c79ee4fbb	Qısa müddətdə çoxlu uyğunsuz media gələrsə, qrupun mediası müvəqqəti kilidlənir.
+b43510a81	✏️ Redaktələr və şikayətlər
+e97c80f7b	✏️ Gecikmiş redaktə qoruması
+7f9f3195d	Göndərildikdən xeyli sonra redaktə edilən mesaj silinir; köhnə və yeni versiyalar təsisçiyə göndərilir.
+5e74ca845	👥 Kimlərə aiddir
+ddd26077d	Seçilməyən rütbələr istisnadır. Bunu yalnız təsisçi dəyişə bilər.
+66613016d	Redaktə vaxt limiti
+e0d3940a6	📨 Təsisçiyə / əlavə edənə bildir
+9b1e938f3	🚩 Şikayət sistemi (/report, @admin)
+44d53d26e	⚠️ Xəbərdarlıqlar
+70d607de5	Xəbərdarlıq limiti
+a8dd080ee	Limitə çatanda
+453982208	Müvəqqəti cəza müddəti
+bfbfead91	👋 Xoş gəldin
+e8a88eb95	🧹 Yeni biri qoşulanda köhnəni sil
+5c2fbdfa8	👥 Kütləvi qoşulmalar üçün bir mesaj
+90de79bd5	🚪 Vida mesajı
+0f39f1096	📜 Qaydalar
+f9c17c1f0	🏷 Etiketləmə və kanal
+4f7b4fd4f	/tag: hər mesajda
+4aa6ce6cc	/tag üslubu
+6b93199e3	Adla
+aa42b8748	Emoji ilə
+1d365363e	📢 Məcburi kanal
+7b7afd285	Kanalı /forcesub @channel ilə təyin et.
+87bb0ff1a	🔗 Dəvət yarışması
+1c0fda956	Üzvlər /invite ilə öz linkini, /invites ilə reytinqi alır.
+c8d05f85f	🧑‍⚖️ İcma qoruması
+33af72703	Botun başqa qrupunda banlanan biri qoşulanda.
+25347c8be	Qara siyahı əməliyyatı
+f7e588100	🌐 CAS spam siyahısı
+4a02f552b	✏️ Ad dəyişikliyinin izlənməsi
+32a52c44c	🗳 Səsvermə ilə susdurma
+9b96d57aa	Səsvermə ilə susdurma müddəti
+d51893a35	🌍 Dil
+8d6c8a4a5	Botun bu qrupdakı dili
+45ac69c17	Botun mesajları, düymələri və xəbərdarlıqları bu dildə olacaq. Sənin yazdığın məzmun dəyişmir.
+a53ce8e7e	👮 Admin auditi
+d06ffe7b8	📋 Gündəlik admin xülasəsi
+79c2f9928	Hər axşam: kim neçə ban, susdurma, xəbərdarlıq və silmə edib (təsisçiyə və botu əlavə edənə).
+c1b823489	🚨 Admin əməliyyat limiti
+b05a27d38	Təsisçi olmayan heyət üzvü 1 saatda limitdən çox ban/kick/susdurma edərsə, hüquqları dayandırılır.
+2a6b6f7f9	Saatlıq limit
+99f28dbae	🗑 Silinən mesajları jurnal kanalına kopyala
+704d44996	/del və /purge ilə silinənlər. Telegram əl ilə silinmələr barədə botlara məlumat vermir.
+bf952a57c	🛟 Admin bərpası
+c4395cbb9	Etibarlı şəxslər (ən çox 3)
+94f3d0e2c	Hər sətirdə bir istifadəçi ID. Adminlər kütləvi vəzifədən salınarsa, bu şəxslər bota /recover göndərə bilər.
+44ada5469	♻️ Kütləvi vəzifədən salmadan sonra avtomatik bərpa et
+fe85b70c6	#green
+485f81ade	#red
+9cfcbc726	Yanlış seçim
+4094a1250	Çox uzundur: ⟨0⟩…
+3994c99a9	Yanlış ID: ⟨0⟩ (yalnız rəqəmlər)
+5055a2323	Ən çox ⟨0⟩ nəfər
+abe802098	Yanlışdır
+43936b588	Mesaj boş ola bilməz
+45313b745	Naməlum sahə
+98d2db628	Hər 30 dəqiqədən bir
+15ff62ef8	Hər saat
+3ff28dc87	Hər 2 saatdan bir
+b7b8f6424	Hər 3 saatdan bir
+b5416f932	Hər 6 saatdan bir
+d74bcca07	Hər 12 saatdan bir
+e07f13000	Gündə bir dəfə
+f1868872f	Hər 3 gündən bir
+b09892476	Həftədə bir dəfə
+fe3e896af	📦 Stiker paketi: ⟨0⟩
+cce0f0bc2	İcazən yoxdur
+b91959e41	Vaxt formatı HH:MM olmalıdır
+6ed0b041b	🌙 Gecə rejimi yadda saxlanıldı
+04f474277	Qeyd adı: hərflər, rəqəmlər, - və ya _ (ən çox 32)
+064f4b29e	Qeydin məzmunu boş ola bilməz
+a918fc143	📝 #⟨0⟩ yadda saxlanıldı
+8af22b61d	🗑 Qeyd silindi
+bdf64f16d	Qeyd tapılmadı
+2550a4e51	Yanlış açar söz (ən çox 100 simvol; mesajın içində uyğunluq üçün *söz*)
+65d904f46	Cavab boş ola bilməz
+543b45aca	Ən çox ⟨0⟩ filtr ola bilər
+75dac4689	🧩 Filtr ⟨0⟩: ⟨1⟩
+833cd7a4f	yeniləndi
+8421922af	🗑 Filtr silindi
+d52273a24	Filtr tapılmadı
+737953689	Yanlış interval
+8f07eb02e	⏰ Planlaşdırılmış mesaj əlavə edildi
+4a5a1fa05	✅ Yeniləndi
+e10b8c2a9	🗑 Blok götürüldü
+e750a9371	Naməlum əməliyyat
+233235be6	Naməlum ayar
+64198f47f	Əvvəlcə kanalı /forcesub @channel ilə təyin et
+794ac0486	🖥 Veb paneldən dəyişdirildi: ⟨0⟩ | ⟨1⟩
+c5340e8d3	Sessiya yoxlanıla bilmədi. Paneli Telegram daxilində aç.
+650c37e3f	Qrup tapılmadı
+ed8d9ddd6	Bu qrupda admin deyilsən (və ya bot Telegram-a qoşula bilmədi).
+d1d4f67c2	Bot texniki xidmətdədir, bir az sonra yenidən cəhd et.
+e2d7c5c97	POST tələb olunur
+33edae1a5	Sorğu çox böyükdür
+bcde64b8a	Yanlış sorğu
+0429402e5	Yanlış link
+ed8c751c4	Dəstəklənməyən sorğu
+a5bfc246e	Server xətası
+6b75a37b8	🖥 Veb paneli aç
+b76f92e63	Bu bot üçün veb panel aktiv deyil (.env-də WEBAPP_URL boşdur).
+61267ecf8	🖥 Veb panel botla şəxsi çatda açılır:
+1503ed392	🖥 Şəxsi çatda aç
+f6dcc8f07	🖥 <b>Veb panel</b>
+ffdbfe849	Bütün ayarlar bir səhifədə: qorumalar, redaktə qoruması, uyğunsuz media, qoşulma, xoş gəldin, siyahılar, gecə rejimi, qeydlər, filtrlər, planlaşdırılmış mesajlar, bloklanmış media, heyət və qrup statistikası. Dəyişikliklər bir neçə saniyəyə bota çatır.
+72019bbac	əsas
+62ca31689	⟨0⟩: ⟨1⟩ gözləyir⟨2⟩
+3f8811338	, ⟨0⟩ icrada
+e5136258e	⚡ <b>Performans</b> — iş vaxtı ⟨0⟩
+be1d477f1	💬 İşlənmiş yeniləmələr: <b>⟨0⟩</b> · növbə: ⟨1⟩
+fdd4f90c1	🧠 Yaddaş: <b>⟨0⟩ MB</b> (pik ⟨1⟩ MB) · CPU: ⟨2⟩ san
+3da2a45ed	🧠 CPU: ⟨0⟩ san
+3d0951b3b	🗄 Verilənlər bazası: ⟨0⟩ MB · paket yazmaları: ⟨1⟩ dəfə, ⟨2⟩ sətir · gözləyən: ⟨3⟩
+22a8d336d	⏱ Dövr gecikməsi: orta ⟨0⟩ · maks ⟨1⟩ (100 ms-dən çox = hansısa əməliyyat botu bloklayır)
+7f78c41d0	👥 Qruplar: ⟨0⟩ · Kanallar: ⟨1⟩ · Klonlar: ⟨2⟩
+a860ce1ad	🐢 <b>Ən yavaş (orta)</b>
+6ea19cdf0	⟨0⟩. <code>⟨1⟩</code> — orta ⟨2⟩ · maks ⟨3⟩ · ⟨4⟩ dəfə
+b46e47f18	⏳ <b>Ən çox ümumi vaxt</b>
+5d3700941	⟨0⟩. <code>⟨1⟩</code> — cəmi ⟨2⟩ · ⟨3⟩ dəfə
+3e186b7ac	🔄 Yenilə
+7866cfd7a	🧹 Ölçmələr sıfırlandı
+8ed3799c7	🔄 Yeniləndi
+e8f595afe	🪦 Bot çıxarılıb / əlçatan deyil
+fbd3f68b8	⚠️ Bot admin deyil
+7950587b4	🕳 Boş (≤⟨0⟩ üzv)
+c7417acd3	💤 ⟨0⟩ gündür səssizdir
+b2d73a5b7	🤖 <b>⟨0⟩ Security Bot paneli</b>
+6dcd06cc1	📊 Statistika:
+2934c79d8	├ Ümumi qruplar: ⟨0⟩
+e11665156	├ Ümumi kanallar: ⟨0⟩
+98ee4dccc	├ Ümumi istifadəçilər: ⟨0⟩
+2cdc2cc48	└ Şəxsi istifadəçilər: ⟨0⟩
+774aa2184	👥 Qruplar
+de09056f1	🧹 Təmizlik
+d03041124	📊 Statistika
+9782862bd	🚫 Bloklananlar
+009c2e489	Qruplar
+43dd9b917	⟨0⟩ <b>⟨1⟩</b> (⟨2⟩) — səhifə ⟨3⟩/⟨4⟩
+1e4e3b199	Ada toxun: məlumat · 🚪: botu çıxar
+7035c59fd	📢 Qeydiyyatda kanal yoxdur.
+a6492303c	👥 Qeydiyyatda qrup yoxdur.
+8b1164c1a	🔙 Siyahıya qayıt
+6abf2b290	Bu çatın qeydi yoxdur (silinib).
+deacf11c1	✅ admin
+19ae8c1fe	✅ sahib
+c5de3cdae	⚠️ üzv (admin deyil)
+6d25c19b2	❌ qrupda deyil
+9f9a5ad1c	❌ çıxarılıb
+84ba3029b	👥 Üzvlər: ⟨0⟩ · 🤖 Bot: ⟨1⟩
+c86df7e48	📅 Qeydiyyat: ⟨0⟩⟨1⟩
+079fe4cc3	💬 Son mesaj: ⟨0⟩ · 7 gündə ⟨1⟩ mesaj
+33a131ec1	🛡 Aktiv qorumalar: ⟨0⟩
+c215ada82	· Əlavə edən: ⟨0⟩
+cac2ce338	heç vaxt
+d4f5955f6	🚪 Botu çıxar
+84297554a	🗑 Qeydi sil
+5b1da6456	📋 Ayarlarını digər qruplara tətbiq et
+f9c565e5d	🧹 <b>Təmizlik yoxlaması</b> — ⟨0⟩ çat yoxlanıldı
+9309c9a8c	🗑 Qeydləri sil
+f9dc0c92a	🚪 Çıx + sil
+3939c3aa3	📋 Göstər
+4fd13b5b2	✅ Təmizləməyə heç nə yoxdur.
+71017a253	Qeyd: ‘Çıx + sil’ botu həmin çatlardan çıxarır və onların ayarlarını silir.
+78c3f116c	🔄 Yenidən yoxla
+f73473dc3	Bu əmr yalnız şəxsi çatda işləyir!
+42c9a2045	📋 <b>⟨0⟩</b> ayarları digər <b>⟨1⟩</b> qrupa tətbiq edilsin?
+3e1a4c661	Kopyalanır: qoruma ayarları, cəzalar, captcha, gecə rejimi, xəbərdarlıq limiti və s.
+ac2c708cc	Kopyalanmır: xoş gəldin/vida/qaydalar mesajları, məcburi kanal, kilidlər, qrupa xas siyahılar.
+46d884196	<b>+ siyahılar</b>: qadağan olunmuş sözlər və icazə verilən link siyahıları da əlavə edilir (mövcudlar silinmir).
+cc53a5889	✅ Tətbiq et + siyahılar
+4bbf7625d	Mənbə qrupun qeydi yoxdur.
+8b18be741	✅ ⟨0⟩ qrupa tətbiq edildi
+a27027da6	📋 Bu qrupun ayarları ⟨0⟩ qrupa tətbiq edildi | ⟨1⟩
+584db30d0	🚪 Bot bu çatdan çıxarılsın: <b>⟨0⟩</b>?
+5cb08b81f	• <b>Ayarları saxla</b>: bot yenidən əlavə edilərsə, ayarlar geri qayıdır.
+c988453c1	• <b>Qeydi də sil</b>: ayarlar, rütbələr və statistika silinir.
+29f10e48b	🚪 Çıx, ayarları saxla
+874976382	🗑 Çıx və qeydi sil
+1a6229583	Çıxmaq olmadı: ⟨0⟩
+c8614638e	✅ Çıxıldı⟨0⟩
+588b8a501	və qeyd silindi
+4dd5e9778	Yoxlanılır…
+f127b4d7a	🧹 ⟨0⟩ çat yoxlanılır, bu bir az vaxt ala bilər…
+c04373159	Yoxlama köhnəlib, yenidən yoxla.
+f3c33c83f	🔙 Yoxlamaya qayıt
+1a3a3e54d	qeydləri silinsin
+84c117afe	tərk edilsin və qeydləri silinsin
+1f67427da	⚠️ ⟨0⟩: <b>⟨1⟩</b> çat — ⟨2⟩? Bu geri qaytarıla bilməz.
+eb3f9ab14	✅ Bəli
+33889c985	İcra olunur…
+5ac06101c	✅ ⟨0⟩ çat təmizləndi⟨1⟩
+73500e336	Yalnız əsas botun sahibi üçün.
+6a8179ecc	Bloklananlar siyahısı yalnız əsas botun sahibi üçündür.
+7ec9c6536	🚫 <b>Bloklananlar</b>
+2f8268ac0	Heç kim bloklanmayıb.
+13f3c860d	📊 <b>Bot statistikası</b>
+25fdf74b3	├ Ümumi mesaj qeydləri: ⟨0⟩
+31d1735c8	└ Ümumi ban: ⟨0⟩
+511d1c70c	İstifadə: /save <ad> <mətn>  (və ya mesaja cavab ver: /save <ad>)
+b9050868c	Qeydin məzmunu boş ola bilməz.
+fe73e61b7	✅ Qeyd yadda saxlanıldı: #⟨0⟩
+e2c814129	İstifadə: /get <ad>
+6d1ba3c3a	Belə qeyd yoxdur. Siyahıya /notes ilə bax.
+fdb9a02af	Saxlanılmış qeyd yoxdur. /save ilə əlavə et.
+da2bf5ed4	📝 <b>Qeydlər</b>
+755923919	Baxmaq üçün qrupda #ad yaz.
+80841e69d	İstifadə: /clear <ad>
+41afe3456	✅ Qeyd silindi.
+bd44e9b93	Belə qeyd yoxdur.
+c74724c97	🔗 Link bloku
+a2e8d7dd3	↪️ Yönləndirmə bloku
+65984a6d2	🚨 Reyd qoruması
+64de715c0	🐣 Yeni üzv məhdudiyyəti (60 dəq)
+da5934c57	🔤 Söz filtri
+90879408f	🟢 Yüngül
+79b39bda7	🔴 Sərt
+58c29a09a	⚡ <b>Sürətli quraşdırma</b> — ⟨0⟩
+bf650f464	<b>1/3</b> Qoruma şablonunu seç. Hər birini sonra dəyişə bilərsən.
+51a1926be	🟢 <b>Yüngül</b>: linklər + flood
+14630f04b	🟡 <b>Normal</b>: + təkrarlanan spam, captcha, uyğunsuz media
+b89411ab4	🔴 <b>Sərt</b>: + yeni üzv məhdudiyyəti, yönləndirmə bloku, reyd qoruması
+ce91c6e00	⚙️ Özüm seçəcəm
+e45f19110	✖️ Hələlik keç
+d6c79520c	Standart
+e62d3857f	Öz mətnim
+3c5a1bd73	<b>2/3</b> Yeni gələnlərə xoş gəldin mesajı göndərilsin?
+4a80c8576	İndi: <b>⟨0⟩</b>
+f4b2ad895	🚫 Söndürülüb
+b8723d469	👋 Standart
+5566ef1f3	✏️ Öz mətnimi yazacam
+0a255f736	<b>3/3</b> Hansı qorumalar açıq olsun? Açmaq/söndürmək üçün toxun.
+b229f24f3	➡️ Davam et
+39c7bad60	standart mətn
+05c1aeb32	öz mətnin
+d405d7c75	<b>Xülasə</b>
+5618672c1	👋 Xoş gəldin: ⟨0⟩
+f2adce74f	Ayarları yadda saxlamaq üçün Tətbiq et düyməsini bas. Hər şeyi sonra /settings ilə dəyişə bilərsən.
+77676a86d	✅ Tətbiq et
+eebb82b20	🛡 Qorumaları dəyiş
+2e80a5fce	Bu qrup qeydiyyatda deyil. Əvvəlcə botu admin et.
+762cfa3fa	⚡ Sürətli quraşdırma botla şəxsi çatda edilir:
+32f93f6ae	⚡ Quraşdırmanı aç
+ab8bc5e3f	Əvvəlcə 🛡 Qruplarım ilə qrup seç, sonra /setup yaz.
+008c8e774	Quraşdırma ötürüldü. İstənilən vaxt /setup ilə aça bilərsən.
+6f6bec44f	✅ Ayarlar yadda saxlanıldı
+5dc655d64	✅ <b>Quraşdırma tamamlandı!</b> — ⟨0⟩
+46d73ff37	Ətraflı ayarlar: /settings · Avtomatik cavablar: qrupda /filter
+d9a9eba4a	⚡ Sürətli quraşdırma tətbiq edildi | ⟨0⟩
+161bbf828	🧩 <b>Filtrdən istifadə</b>
+8344bd8fb	• Mesaja cavab ver: <code>/filter Salam, xoş gəldin</code> (açar söz cavab verdiyin mesajdır)
+7e201996f	• Cavabsız: <code>/filter salam Salam, xoş gəldin</code>
+cf1db6a05	• Bir neçə söz: <code>/filter "gecən xeyrə" Sənin də gecən xeyrə!</code>
+812fb6d89	• Mesajın içində olarsa: <code>/filter *salam* Salam!</code>
+206f91a6d	• Stiker/şəkil/GIF ilə cavab: mediaya cavab ver → <code>/filter salam</code>
+b0b395569	• Düymələr: cavabın altında, hər sətirdə bir <code>Kanal - https://t.me/channel</code>
+380f07344	Dəyişənlər: <code>{user}</code> <code>{first}</code> <code>{group}</code> · Formatlama (qalın, linklər…) saxlanılır
+528d066d4	Siyahı: /filters · Sil: /stop salam · Hamısını sil: /stopall
+7315f262e	⚠️ Bir qrupda ən çox ⟨0⟩ filtr ola bilər. Köhnələri /stop ilə sil.
+cf56cd5da	mesajın içində olanda
+0272debab	yazılanda
+3045102b7	✅ Filtr ⟨0⟩: <b>⟨1⟩</b> — ⟨2⟩ cavab verəcəm.
+67c264f1a	əlavə edildi
+c64b0c3ca	🧩 Filtr əlavə edildi: ⟨0⟩ | ⟨1⟩
+830911851	Bu qrupda filtr yoxdur. Əlavə etmək üçün: /filter
+32a5d5ddb	🧩 <b>Filtrlər</b> (⟨0⟩)
+3b8b66dd5	Silmək üçün: /stop &lt;açar söz&gt;
+8b3a30608	İstifadə: /stop <açar söz>
+f2ba0c77b	✅ Filtr silindi.
+77a5db13d	Belə filtr yoxdur. Siyahını /filters ilə yoxla.
+b7301e99a	Bu qrupda filtr yoxdur.
+bd0505102	⚠️ Bu qrupdakı bütün <b>⟨0⟩</b> filtr silinsin?
+8d8252e68	🗑 Bəli, hamısını sil
+9b6fcea87	↩️ Ləğv et
+272826aad	Ləğv edildi.
+cf9d69e94	🗑 ⟨0⟩ filtr silindi.
+13c07c249	🧹 Bütün filtrlər silindi (⟨0⟩) | ⟨1⟩
+0451d6399	🏷 Brend adı
+93077ebd5	Botunun mesajlarda göstərəcəyi adı yaz (məs. Alpha Guard).
+efbbbb435	👋 Xoş gəldin mətni
+4e2fd1f48	Kimsə /start yazanda göstərilən xoş gəldin mətnini yaz.
+e840e51a6	🔗 Dəstək linki
+2236aa076	Dəstək qrupu/kanalı linkini yaz (https://t.me/...). Silmək üçün: -
+74af46bea	❓ Kömək başlığı
+ce0e0d6dc	Kömək menyusunun başlığını yaz.
+07075bae9	İstifadəçi
+8c59b527c	🤖 <b>Klon bot təsdiqi</b> #⟨0⟩
+673f5ba81	👤 Bot açmaq istəyən şəxs: ⟨0⟩ — ID: <code>⟨1⟩</code>
+286285872	🔑 Bot tokeni: <code>⟨0⟩</code>
+140e8742e	🏷 Bot adı: ⟨0⟩ (@⟨1⟩)
+bbde0b439	Token yanlışdır və ya ləğv edilib.
+2f1be69b6	Token başqa bota aiddir.
+b8261ca98	⚠️ @⟨0⟩ klon botun dayandırıldı: ⟨1⟩
+5b74bc345	BotFather-dən yeni token al və 🤖 Klon menyusunda <b>Tokeni dəyiş</b> ilə yenidən başlat.
+15f0441be	yanlış token (⟨0⟩)
+c079ca840	⏳ <b>@⟨0⟩</b> bot sahibinin təsdiqini gözləyir. Təsdiqləndikdən sonra işə düşəcək.
+f3fc6979c	ULUS mühərriki ilə işləyən, öz bot adınla qoruma botu aç.
+4fbf35472	1) @BotFather-də /newbot ilə bot yarat
+632cbf17b	2) Aldığın tokeni aşağıdakı düymə ilə göndər
+883193ad7	3) Bot sahibi təsdiqləyəndə botun işə düşür⟨0⟩
+3a5be4fd4	🔑 Token göndər
+e76ac71f1	🟢 İşləyir
+f8a7fde2a	⚠️ Yanlış token
+b535c1e0c	🤖 <b>Klon botun</b>: @⟨0⟩
+0bc0356ba	Status: ⟨0⟩ · Qruplar/kanallar: ⟨1⟩
+47500a892	🏷 Brend: <b>⟨0⟩</b>
+ca0fe8e9a	🔗 Dəstək: ⟨0⟩
+b07ee01ba	❓ Kömək başlığı: ⟨0⟩
+8e9727f2e	👋 Xoş gəldin: ⟨0⟩⟨1⟩
+de54dae36	standart
+53f82bc49	⏸ Dayandır
+60446c88d	↩️ Sorğunu geri götür
+ded7cc646	🔑 Tokeni dəyiş
+367b6aa51	Klon əməliyyatları botla şəxsi çatda edilir.
+a51f7d30f	Bu sorğuya artıq baxılıb.
+c862658b2	Köhnə versiyadan sorğu; istifadəçi /clone ilə token göndərməlidir.
+a102e834e	🤖 Klon sistemi yeniləndi: /clone yaz və bot tokenini göndər; bot sahibi təsdiqləyəndə botun işə düşür.
+982a0150c	Başlatmaq olmadı: ⟨0⟩
+447501409	⚠️ Başlatmaq olmadı: ⟨0⟩
+64fbe849e	⚠️ Klon botunu başlatmaq olmadı: ⟨0⟩
+03718599d	/clone ilə yeni token göndərə bilərsən.
+ba7f6e886	✅ Təsdiqləndi, bot işə düşdü
+705bd8131	❌ Rədd edildi
+744d07117	✅ <b>Klon botun təsdiqləndi və işə düşdü!</b> @⟨0⟩
+90edeb341	Ad, xoş gəldin mətni və dəstək linki üçün: /clone
+172a66fda	❌ @⟨0⟩ üçün klon bot sorğun rədd edildi.
+dffc58eb3	Artıq icazə istəməyə ehtiyac yoxdur: tokeni göndər, bot sahibi təsdiqləyəndə botun işə düşür.
+7269890c3	Bunu yalnız bot sahibi edə bilər.
+741c29704	Gözləyən sorğun yoxdur.
+a353b8903	↩️ İstifadəçi sorğunu geri götürdü
+cb7da55c2	↩️ Sorğu geri götürüldü
+b30c05510	🔑 @BotFather-dən aldığın bot tokenini yaz (məs. <code>123456789:ABC...</code>).
+0adaad0bb	Ləğv etmək üçün: cancel
+a54c0e304	Bu klon sənin deyil.
+8f8af330e	Yanlışdır.
+6a47f34ed	Bu klon silinib.
+21d148b57	🗑 @⟨0⟩ klonu silinsin? Bot dayanır, qruplardakı ayarlar qalır.
+e53f197f7	🗑 Bəli, sil
+cb1a5e233	🗑 @⟨0⟩ klon botun bot sahibi tərəfindən silindi.
+19e55244e	Link https://t.me/ ilə başlamalıdır. Yenidən yaz və ya cancel yaz.
+6e97fcc27	✅ ⟨0⟩ yeniləndi.
+feae94615	❌ Bu bot tokeninə oxşamır. @BotFather-dən tam tokeni göndər.
+19769e756	❌ Bu əsas botun tokenidir.
+d305390e4	❌ Yanlış token. @BotFather-dən düzgün tokeni kopyala.
+82a945d00	❌ Bu bot artıq başqasının klonudur.
+d190f37f5	❌ Bu bot üçün başqasının gözləyən sorğusu var.
+fa9063dd4	❌ Bot başladıla bilmədi: ⟨0⟩
+8ffa38acb	✅ <b>Klon botun hazırdır!</b> @⟨0⟩
+9b90f4091	Qrupa əlavə etmək üçün: https://t.me/⟨0⟩?startgroup=ulus&admin=⟨1⟩
+34ed30a8e	↩️ Əvəzində yeni sorğu göndərildi
+98545fdcd	✅ Təsdiqlə
+b3bf17908	📨 <b>@⟨0⟩</b> üçün sorğun bot sahibinə göndərildi.
+988ee3c22	Təsdiqləndikdən sonra botun işə düşəcək və sənə xəbər verəcəm.
+eb51d0e12	Bu bot artıq başqasının klonudur.
+dfe2324b4	⟨0⟩ @⟨1⟩ — sahibi <code>⟨2⟩</code>
+1cd8c4513	⏳ @⟨0⟩ — sorğu verən: <code>⟨1⟩</code>
+92021a063	🤖 <b>Klon botlar</b> (⟨0⟩) · Təsdiq gözləyir: ⟨1⟩
+21bb22c3f	Hələ klon yoxdur.
+32f6170ef	<b>Təsdiq gözləyir</b>
+f666e1d93	🗄 Verilənlər bazasının ehtiyat nüsxəsi · ⟨0⟩ MB (sıxılmış ⟨1⟩ MB)
+9cfd9973e	Bərpa etmək üçün zip-dəki .db faylını bot qovluğuna bot_data.db adı ilə qoy.
+391c8e6d0	🗄 Ehtiyat nüsxə alındı, amma Telegram-a sığmır (⟨0⟩ MB): ⟨1⟩
+c3fcc95df	🗄 Ehtiyat nüsxə alınır...
+103ec5f85	Çat: ⟨0⟩
+0f97d9633	⚠️ Bot xətası
+15781d4a0	⚠️ Bu düymə köhnəlib və ya yanlışdır. Menyunu yenidən aç.
+043246756	⚠️ Nəsə səhv getdi, əməliyyat tamamlanmadı. Zəhmət olmasa, yenidən cəhd et.
+4e9b13c4d	⛔ Bu əmrdən yalnız adminlər istifadə edə bilər.
+af7654ae4	⏳ Admin siyahısı indicə yeniləndi. ⟨0⟩ san sonra yenidən cəhd et.
+7117a9ab8	⚠️ Admin siyahısı alınmadı. Bot bu qrupda admindirmi?
+48b81ffc1	🔄 <b>Admin siyahısı yeniləndi</b> — ⟨0⟩ admin
+10701ad0a	➕ Rütbə verildi: ⟨0⟩
+7eed3b278	➖ Rütbə götürüldü (artıq admin deyil): ⟨0⟩
+3ffb1dffa	Qeydlər artıq aktualdır.
+be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
+2a8ec5530	🟢 ULUS işə düşdü
+82459fdce	Verilənlər bazası: <code>⟨0⟩</code> (⟨1⟩ KB)
+d2e59a824	Qeydiyyatda olan qruplar/kanallar: <b>⟨0⟩</b>
+6c20c0dd0	⚠️ Verilənlər bazası boş açıldı və son ehtiyat nüsxədən bərpa edildi: <code>⟨0⟩</code>
+0e4276ce2	⚠️ Qeydiyyatda çat yoxdur. Bot yenidən başlayanda bu say azalırsa, verilənlər bazası faylı silinmiş ola bilər və ya bot başqa qovluqdan işləyir.
+3831f1221	Serverə qoşulmaq olmadı
+ca576aa9b	Xəta ⟨0⟩
+44d8a56f0	Yadda saxla (⟨0⟩)
+8c5f53f0b	🖼 ⟨0⟩ əlavə olunub — silmək üçün işarələ
+6050fb2fa	Məcburi kanal: ⟨0⟩
+2101bb05d	⟨0⟩ silinsin?
+210266e99	Aç/söndür
+ac3d94f38	Mesajlar (7 gün)
+251aa63e3	Aktiv insanlar
+7782d329c	Qoşulanlar (7 gün)
+f515fefde	Xəbərdarlıq alanlar
+b32121bc6	Banlananlar
+4136a9068	📋 Jurnal kanalı: ⟨0⟩
+1f589ad54	təyin edilməyib (botda /setlog istifadə et)
+91e55d41e	🌙 Gecə rejimi
+5a572078e	· indi aktivdir
+db433084f	· açıq
+841c11292	Seçilmiş icazələr bu saatlarda söndürülür və sonra bərpa olunur (UTC+3).
+587308129	Başlanğıc
+2a2a44bc3	Son
+e07763331	Söndürüləcək:
+fb5b6de88	Gecə rejimini yadda saxla
+626b1b386	📝 Qeydlər (⟨0⟩)
+9ba887ab0	Hələ qeyd yoxdur. Qrupda #ad yazanda qeyd göndərilir.
+0ebe5615b	Qeyd adı (məs. rules)
+83fff7c73	Qeyd məzmunu (formatlama: <b>qalın</b>, düymələr: Mətn - https://link)
+0c4734df9	🧩 Filtrlər / avtomatik cavablar (⟨0⟩/⟨1⟩)
+40d6aee5f	💬 tərkibində: ⟨0⟩
+25ea7b948	Hələ filtr yoxdur.
+8e0bb1fb8	Açar söz (mesajın içində uyğunluq: *söz*)
+db212635d	Cavab ({user} {first} {group} dəyişənləri, düymə sətirləri)
+75a77232d	➕ Filtr əlavə et
+ed3622d45	Media (stiker/şəkil) ilə cavab üçün qrupda mediaya /filter ilə cavab ver.
+aa7a25249	⏰ Planlaşdırılmış mesajlar (⟨0⟩)
+3eb72af09	Hər ⟨0⟩ · növbəti: ⟨1⟩
+240088248	Aç/söndür
+f479b96fd	Bu planlaşdırılmış mesaj
+158f37bff	Hələ planlaşdırılmış mesaj yoxdur.
+38f7fb835	Mesaj (düymə sətirləri və %%% təsadüfi variantlar dəstəklənir)
+67866ebd3	İnterval
+039052532	➕ Planlaşdırılmış mesaj əlavə et
+ec1ffce3d	🚫 Bloklanmış media (⟨0⟩)
+39590ef60	Bu blok
+35fb023cf	Əlavə etmək üçün qrupda mediaya /blockmedia ilə, stiker paketi üçün /blockpack ilə cavab ver.
+2de76a779	👮 Heyət (⟨0⟩)
+bf3bc5b16	Rütbə vermək/götürmək üçün qrupda /admin, /senioradmin, /cofounder; şəxsi icazələr üçün botda /perms istifadə et.
+3a5e96d47	Yüklənir…
+7419f16f9	✅ Yadda saxlanıldı
+69efe9b3e	Dəyişiklik yoxdur
+4c12da56f	İdarə etdiyin qruplar
+b57672cb0	Heç bir qrupu idarə etmirsən
+03396c6dd	Botun admin, sənin isə heyət üzvü olduğun qrup tapılmadı.
+274139b9d	Yadda saxlanmamış dəyişikliklər atılsın?
+67b14047c	Düymələr: hər sətirdə bir  Mətn - https://link  (yan-yana: &&) · Qaydalar - rules · Məlumat - popup:mətn · Dəyişənlər: {user} {first} {group} {count} · Təsadüfi mesaj: arada %%% sətri · Qalın/kursiv üçün <b> <i> teqlərindən istifadə et. Medianı bot vasitəsilə /setwelcome ilə əlavə et.
 '''
 
 I18N_EN = r'''
@@ -22970,7 +25049,7 @@ b5116fff1	You already joined, good luck! 🍀
 b05652dd1	✅ <b>Giveaway ended</b>
 4cc381328	🎉 The giveaway has ended! No participant met the requirements.
 8e2d564a7	🎉 <b>The giveaway has ended!</b>⟨0⟩
-5aa86da43	🏆 Winner⟨0⟩: ⟨1⟩
+5aa86da43	🏆 Winner(s): ⟨1⟩
 e9ade43fd	👥 Participants: ⟨0⟩
 7438ab083	🏆 Giveaway ended: ⟨0⟩ | ⟨1⟩
 1e5f2647b	no winner
@@ -25125,7 +27204,7 @@ b5116fff1	Ya participas, ¡suerte! 🍀
 b05652dd1	✅ <b>Sorteo terminado</b>
 4cc381328	🎉 ¡El sorteo terminó! Ningún participante cumplió los requisitos.
 8e2d564a7	🎉 <b>¡El sorteo terminó!</b>⟨0⟩
-5aa86da43	🏆 Ganador⟨0⟩: ⟨1⟩
+5aa86da43	🏆 Ganador(es): ⟨1⟩
 e9ade43fd	👥 Participantes: ⟨0⟩
 7438ab083	🏆 Sorteo terminado: ⟨0⟩ | ⟨1⟩
 1e5f2647b	sin ganador
@@ -27250,7 +29329,7 @@ b5116fff1	قبلاً شرکت کرده‌اید، موفق باشید! 🍀
 b05652dd1	✅ <b>قرعه‌کشی تمام شد</b>
 4cc381328	🎉 قرعه‌کشی تمام شد! هیچ شرکت‌کننده‌ای شرایط را نداشت.
 8e2d564a7	🎉 <b>قرعه‌کشی تمام شد!</b>⟨0⟩
-5aa86da43	🏆 برنده⟨0⟩: ⟨1⟩
+5aa86da43	🏆 برندگان: ⟨1⟩
 e9ade43fd	👥 شرکت‌کنندگان: ⟨0⟩
 7438ab083	🏆 قرعه‌کشی تمام شد: ⟨0⟩ | ⟨1⟩
 1e5f2647b	بدون برنده
@@ -27742,6 +29821,2116 @@ b57672cb0	هیچ گروهی را مدیریت نمی‌کنید
 03396c6dd	گروهی پیدا نشد که ربات در آن ادمین و شما در کادر آن باشید.
 274139b9d	تغییرات ذخیره‌نشده کنار گذاشته شود؟
 67b14047c	دکمه‌ها: هر خط یکی  متن - https://لینک  (کنار هم: &&) · قوانین - rules · اطلاعات - popup:متن · متغیرها: {user} {first} {group} {count} · پیام تصادفی: یک خط %%% بینشان · برای پررنگ/کج از تگ‌های <b> <i> استفاده کنید. رسانه را از طریق ربات با /setwelcome اضافه کنید.
+'''
+
+I18N_ID = r'''
+a9826a4de	⟨0⟩ Security Bot
+89c80575f	⚡ Bot utama: @⟨0⟩
+d86fae223	✅ Bahasa diatur: ⟨0⟩
+972caaca5	🌍 <b>Bahasa</b>
+0c1e30399	Pilih bahasamu:
+fea7d950e	✅ Bahasa grup: ⟨0⟩
+1b6f202bc	🌍 <b>Bahasa grup</b>
+9ab6017a5	Saat ini: ⟨0⟩
+9d13d74f6	Pilih bahasa bot untuk grup ini:
+448e35ffe	Kamu tidak punya izin!
+17665e8c1	🌍 Bahasa grup: ⟨0⟩ | ⟨1⟩
+4c9e57207	👑 Pendiri
+bfa3235c4	🔱 Wakil Pendiri
+ef61a4d09	⭐ Admin Senior
+8d0d91abe	⚠️ Peringatkan
+9a83dd2de	🗑 Hapus pesan
+d7d2f6eb2	🔇 Bisukan
+4acd35f89	👢 Keluarkan
+41605b650	🔨 Ban / buka ban
+1a7979b5e	↩️ Cabut peringatan
+5b4929b15	📌 Sematkan
+6880a0676	🧹 Bersihkan / mode lambat
+1b5d5b3d1	📩 Permintaan gabung / banding
+6a285730c	📜 Aturan / sambutan / catatan
+eab57b3ab	🚨 Kunci darurat (buka)
+932bdd7e5	⚙️ Pengaturan perlindungan
+6628cf302	👑 Beri / cabut peringkat
+178f46a47	🧩 Filter (balasan otomatis)
+5d856e480	🏷 Tag massal (/tag)
+8c664bc3f	🔗 Tautan undangan
+5fc826495	🚫 Batasi / ban
+52e1acc4f	🎙 Obrolan suara
+c264fb5af	💬 Kelola topik
+5e74fa6f0	📖 Posting cerita
+1e9853465	✏️ Edit cerita
+f56347abf	🗑 Hapus cerita
+fc5b6f247	ℹ️ Info grup
+16f35c22f	⭐ Tambah admin
+5a2dcf161	Bot tidak punya izin untuk ini. Jadikan bot admin dengan hak yang diperlukan.
+da1585078	Bot tidak bisa memberikan hak yang tidak dimilikinya sendiri.
+5f334b209	Orang ini adalah admin di grup; tindakan ini tidak bisa diterapkan pada admin.
+a34bdfc67	Pengguna tidak ditemukan di grup.
+247a273bd	Pesan tidak ditemukan (mungkin sudah dihapus).
+342d7a053	Pesan ini tidak bisa dihapus (mungkin lebih lama dari 48 jam).
+59b207012	Telegram sedang menerima terlalu banyak permintaan, coba lagi nanti.
+29072692d	Obrolan tidak ditemukan. Apakah bot ada di obrolan itu?
+9a9bee4a1	Ini hanya berfungsi di supergrup.
+e99fefa09	Tidak ada akses ke bot (bot diblokir atau dikeluarkan dari obrolan).
+f6a39420d	Tidak bisa menjangkau Telegram, coba lagi nanti.
+fce0709e2	❌ Tindakan gagal, coba lagi.
+c1a2c3bf9	Kamu tidak bisa melakukan ini pada dirimu sendiri.
+58503ae82	Tindakan ini tidak bisa diterapkan ke akun ini.
+c93d8e442	⛔ ⟨0⟩ berperingkat sama atau lebih tinggi darimu; kamu tidak bisa bertindak terhadapnya.
+7c6c0a917	Orang ini
+980a088c1	⛔ Kamu tidak punya izin! (⟨0⟩ atau lebih tinggi)
+f78cc4201	⛔ Untuk perintah ini kamu harus admin asli di grup.
+1a089160e	⛔ Bot bukan admin di grup ini atau kurang izin.
+ec502d773	⟨0⟩ jam
+1d683512c	⟨0⟩ menit
+e0250a8c0	⟨0⟩ detik
+4f52d88ec	Halo {user}, selamat datang di {group}!
+41006f31c	🙏 Terima kasih! Bot ditambahkan: ⟨0⟩
+e89ec2f7d	Jenis: ⟨0⟩
+484b4f591	Ketik /help untuk melihat perintah.
+fbb8f4be4	Bot ditambahkan: ⟨0⟩ (⟨1⟩) | pemilik: ⟨2⟩
+417b3cc01	✅ Bot ditambahkan dan terdaftar! Perintah: /help, pengaturan: /settings.
+189f689b9	🌍 Bahasa: /setlang
+cde2bd7c8	peringatan
+929d8360f	pencabutan peringatan
+3c0ddc51a	bisu
+9c030a691	buka bisu
+91787bcf5	dikeluarkan dari grup
+d34c44d0e	ban permanen
+b131626a5	buka ban
+6838cf1a3	penghapusan
+b707492ec	ban sementara
+6f1a328f6	pencabutan hak
+4f0282227	laporan
+12c391a8f	tombol
+b581541a3	daftar hitam
+b01a6a6e8	voting
+e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> peringatan
+ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Peringatan: ⟨3⟩/⟨4⟩ | ⟨5⟩
+9e23d2151	ban sementara (⟨0⟩)
+953cd28f3	dikeluarkan dari grup
+090d91568	📨 Untuk banding, bisa kirim /appeal ke bot lewat chat pribadi.
+ddd70b55a	⟨0⟩ ⟨1⟩ mencapai ⟨2⟩ peringatan → <b>⟨3⟩</b> (⟨4⟩)⟨5⟩
+f05514a4b	🚫 ⟨0⟩ ⟨1⟩ | Alasan: ⟨2⟩ | ⟨3⟩
+33762701b	🗑 ⟨0⟩ → pesan ⟨1⟩ dihapus | ⟨2⟩
+e83ba4992	🔇 ⟨0⟩ ⟨1⟩ → dibisukan selama ⟨2⟩
+4689a9495	👢 ⟨0⟩ ⟨1⟩ → dikeluarkan dari grup
+24b70b24b	🚫 ⟨0⟩ ⟨1⟩ → diban
+f881648dd	🗑 Pesan dihapus
+a1ce809b5	⚠️ Dihapus + diperingatkan
+4d4d20ba3	🔇 Dihapus + dibisukan 1 jam
+3a4a2408d	🚫 Dihapus + diban
+184e9ea25	✅ Diabaikan
+1cd1dbdf9	🗑 Hapus
+d193c645a	⚠️ Peringatkan
+bb7ad37ac	🔇 Bisukan 1 jam
+ebe01fecc	🚫 Ban
+e7e0e2df9	✅ Abaikan
+3397853de	Laporan dikirim dengan membalas pesan di grup: /report [alasan]
+b61b50bf7	Balas sebuah pesan dan ketik /report untuk melaporkannya.
+9cf259e34	Staf tidak bisa dilaporkan.
+c5bbdb405	Kamu terlalu sering melapor, tunggu sebentar.
+bd7e0099e	Pesan ini sudah dilaporkan.
+896d1ca10	🚩 <b>Laporan baru</b> #⟨0⟩
+cec4cf481	Grup: <b>⟨0⟩</b>
+c3a6b7566	Pelapor: ⟨0⟩
+5083aeebb	Terlapor: ⟨0⟩ (<code>⟨1⟩</code>)
+9b4b6cd06	<a href="⟨0⟩">Ke pesan</a>
+679ec2d36	✅ ⟨0⟩, laporanmu sudah dikirim ke staf.
+008e3c181	⚠️ ⟨0⟩, laporan diterima tapi saat ini tidak ada staf yang bisa dihubungi.
+ad6b780a2	Laporan tidak ditemukan.
+04f22133c	Laporan ini sudah ditangani: ⟨0⟩
+94cea35e5	↩️ Batalkan peringatan
+2446ce8e3	🔊 Buka bisu
+d3d996724	↩️ Peringatan dicabut (⟨0⟩/⟨1⟩)
+2ffab4aa4	🔇 Dibisukan 1 jam
+969014784	🔊 Bisu dibuka
+96524e022	🚫 Diban
+c1ef156c4	✅ Ban dibuka
+7181ac4be	Tindakan tidak valid.
+3461c44ea	Untuk ini kamu harus admin di grup.
+74042fc88	Bot bukan admin di grup ini atau kurang izin.
+aec9fe5ec	Tidak bisa diterapkan ke staf.
+14fea3d87	👋 Halo ⟨0⟩!
+b6ba013b6	Untuk menulis di grup, jawab pertanyaan di bawah.
+30a234e49	⏰ Batas waktu: ⟨0⟩. Jawaban salah atau waktu habis membuatmu dikeluarkan dari grup.
+5941a96e3	⏰ Waktu captcha habis → ID:⟨0⟩ dikeluarkan | ⟨1⟩
+47de968f7	Kesalahan.
+371e8fa90	Captcha ini bukan milikmu!
+4b056df52	Captcha sudah kedaluwarsa.
+16a67ec53	✅ Benar!
+13e7c138f	✅ ⟨0⟩ terverifikasi!
+d8c5044b0	✅ Lolos captcha: ⟨0⟩ | ⟨1⟩
+d4d19c221	❌ Jawaban salah!
+be0ff1965	❌ ⟨0⟩ menjawab salah dan dikeluarkan.
+921ae23b1	❌ Gagal captcha → ⟨0⟩ dikeluarkan | ⟨1⟩
+a1d75b185	🗑 ⟨0⟩ — pesan yang dikirim sebagai saluran (⟨1⟩) dihapus | ⟨2⟩
+c537f5f16	🆕 ⟨0⟩, anggota baru tidak bisa mengirim tautan/media/terusan selama ⟨1⟩ menit pertama. (sisa ~⟨2⟩ menit)
+df471627f	paket stiker diblokir
+d3bfcdff9	media diblokir
+c82923d6d	file berbahaya (⟨0⟩)
+c83f1da6c	konten tidak pantas
+5fb084a5f	AI: ⟨0⟩
+51da96b93	konten tidak pantas (⟨0⟩)
+c5baa0aed	Media tidak pantas (⟨0⟩)
+acae614af	otomatis: media tidak pantas berturut-turut (dugaan serangan)
+f77a6df47	🚨 <b>Serangan media</b> terdeteksi, pengiriman media di grup dikunci.
+d6fc51018	postingan tanpa tanda tangan
+93f2e53e1	🔞 <b>Media tidak pantas dihapus di saluran</b>
+a99d18293	Pengirim: ⟨0⟩
+d6c8546a4	Saluran: <code>⟨0⟩</code>
+cb902699f	Media tidak pantas berturut-turut di saluran (dugaan upaya agar saluran diblokir)
+ade12807b	🔒 <b>Kunci media</b>: foto, video, stiker, GIF dan file dinonaktifkan selama ⟨0⟩.
+d21e8724d	Alasan: ⟨0⟩
+0ca7ff868	🔓 Kunci media dibuka, izin sebelumnya dipulihkan.
+874318f86	🔓 Kunci media dibuka | ⟨0⟩
+4bf6387ff	Gunakan perintah ini di grup dengan membalas media yang ingin diblokir.
+b38691ea2	Balas foto/video/GIF/stiker/file yang ingin diblokir.
+19a0caff5	Balas sebuah stiker untuk memblokir paketnya.
+a6fdf7132	paket stiker <code>⟨0⟩</code>
+478778014	(di semua grup)
+350c5b7db	🚫 ⟨0⟩ diblokir. Jika dikirim lagi akan dihapus.
+3506ca524	Ini sudah diblokir.
+4d19611fc	🚫 Media diblokir (⟨0⟩) | ⟨1⟩
+63de95c9c	Pilih grup dulu dengan /select!
+0d2990bb6	🔓 Kunci media dibuka.
+5efbe835d	Kunci media sudah nonaktif.
+bc8817800	🔒 Media dikunci.
+57dd35ab6	Gagal mengunci (mungkin kunci anti-raid aktif atau bot kurang izin).
+6fc9219df	⟨0⟩ hr ⟨1⟩ j
+184dd1447	⟨0⟩ j ⟨1⟩ mnt
+65f0ede73	⟨0⟩ mnt
+c55e9eeb2	✏️ ⟨0⟩, pesan yang lebih lama dari ⟨1⟩ menit tidak boleh diedit; pesan editanmu dihapus.
+e4ec4ef08	<i>tidak ada catatan (pesan dikirim sebelum perlindungan diaktifkan)</i>
+4f135e257	<a href="⟨0⟩">Lokasi pesan</a>
+a81c7ed8d	✏️ <b>Pesan yang diedit terlambat dihapus</b>
+ff6af8a83	Pengguna: ⟨0⟩ (<code>⟨1⟩</code>)
+6c94268e3	Dikirim: ⟨0⟩ · diedit ⟨1⟩ kemudian
+eba784f45	<b>Sebelum:</b>
+817e491aa	<b>Sesudah:</b>
+ba4e72261	Terusan
+330690bdd	terusan (#⟨0⟩)
+a00507082	flood media (⟨0⟩/⟨1⟩ dtk)
+a77f997a9	flood (⟨0⟩ pesan/⟨1⟩ dtk)
+74c953a60	🔗 Tautan dihapus → ⟨0⟩ | ⟨1⟩
+427c1fec3	mengirim tautan
+794910b1f	Kata terlarang
+8fb66aa89	kata terlarang
+4e5efb06d	spam berulang
+c91e153a9	Anti-terusan sekarang: ⟨0⟩
+6d6d358e6	Penggunaan: /antiforward on|off
+117ba2454	AKTIF
+6a2055cc2	Anti-terusan ⟨0⟩.
+596cfaf0b	Anti-terusan ⟨0⟩ | ⟨1⟩
+d2102fa46	Anti-media sekarang: ⟨0⟩
+332b15c14	Penggunaan: /antimedia on|off
+3227848c2	Anti-flood media ⟨0⟩.
+48d9c6287	Anti-flood media ⟨0⟩ | ⟨1⟩
+8cc0eba99	Anti-flood sekarang: ⟨0⟩
+d1a5f38ec	Batas: ⟨0⟩ pesan / ⟨1⟩ detik
+3599fb42c	Penggunaan: /antispam on|off
+64adfe1a4	Ubah batas: /antispam on 10 5 (10 pesan/5 detik)
+1a836ee8e	Anti-flood ⟨0⟩. (Batas: ⟨1⟩ pesan/⟨2⟩ dtk)
+27867ef23	Anti-spam ⟨0⟩ | ⟨1⟩
+5a6f48edd	Anti-tautan sekarang: ⟨0⟩
+d947593b7	Penggunaan: /antilink on|off
+5ddc225c5	Blokir tautan ⟨0⟩. (Admin dikecualikan)
+298cef31c	Anti-tautan ⟨0⟩ | ⟨1⟩
+dc5c98faf	Captcha sekarang: ⟨0⟩
+0742b23d4	Penggunaan: /captcha on|off
+348974ec8	Captcha ⟨0⟩.
+070cf47b7	Captcha ⟨0⟩ | ⟨1⟩
+f8303f57c	✅ ⟨0⟩ bukan staf lagi.
+eb3b60248	🗑 Peringkat ⟨0⟩ dicabut | ⟨1⟩
+36a946671	Pengguna tidak ditemukan!
+92274adac	📂 ⟨0⟩ sekarang pengelola folder!
+b7a687056	📂 ⟨0⟩ ditetapkan sebagai pengelola folder | ⟨1⟩
+3b49b9b50	Tanpa alasan
+42ca54745	🚫 ⟨0⟩ terkena ⟨1⟩! Alasan: ⟨2⟩
+023576cd7	Tentukan pengguna! Balas pesannya atau beri ID/username.
+bad97a937	✅ Ban ⟨0⟩ dibuka!
+b83344e83	✅ Ban ⟨0⟩ dibuka | ⟨1⟩
+dee699309	👢 ⟨0⟩ dikeluarkan!
+16d07ca95	👢 ⟨0⟩ dikeluarkan | ⟨1⟩
+299422191	24 jam (batas admin)
+b2fbfc457	🔇 ⟨0⟩ dibisukan selama ⟨1⟩!
+9247b48e0	🔇 ⟨0⟩ dibisukan selama ⟨1⟩ | ⟨2⟩
+b13185722	⟨0⟩ ⟨1⟩: bisu dibuka!
+dd3fea678	⟨0⟩ ⟨1⟩: bisu dibuka | ⟨2⟩
+08ccab800	buka bisu manual
+f990c822c	Gagal membuka bisu: ⟨0⟩
+fa5f86984	⟨0⟩ ⟨1⟩: peringatan dicabut (⟨2⟩/⟨3⟩).
+e222d2c43	↩️ ⟨0⟩: peringatan dicabut (⟨1⟩) | ⟨2⟩
+b26226e44	📊 Peringatan ⟨0⟩: ⟨1⟩/⟨2⟩
+fcbd59f04	Balas sebuah pesan dan ketik /pin untuk menyematkannya!
+821dc813a	📌 Pesan disematkan!
+f07ba3194	📌 Pesan disematkan | ⟨0⟩
+84ce06e7a	✅ Sematan dilepas!
+7a8e925ad	📍 Sematan dilepas | ⟨0⟩
+a166505b1	Penggunaan: /slowmode <detik> (0 = nonaktif)
+5efa94a44	Contoh: /slowmode 30
+d9e0a5f25	⏩ Mode lambat dinonaktifkan.
+c9f3d97aa	🐢 Mode lambat: ⟨0⟩ detik.
+90fc9c4e8	🐢 Mode lambat ⟨0⟩ dtk | ⟨1⟩
+04ee47e62	Masukkan jumlah detik yang valid!
+ec7dc1340	Pilih grup dulu dengan /select!
+ef6a75200	Gunakan perintah ini di dalam grup yang ingin dibersihkan.
+8ab6d8456	Penggunaan: /purge <jumlah> atau /purge all
+f726b6834	20.000 pesan terakhir
+ad1696ee9	⟨0⟩ pesan terakhir
+09bed8e26	🧹 Menghapus pesan, tunggu sebentar...
+1f937217d	🧹 Dibersihkan: ⟨0⟩.
+f6a3aa1c3	🧹 Dibersihkan: ⟨0⟩ | ⟨1⟩
+ca1480b4e	📋 Daftar ban kosong.
+3df0209e0	🚫 <b>Daftar Ban</b> (20 terakhir):
+a2ef54f04	📋 Daftar bisu kosong.
+f3ad3e028	🔇 <b>Daftar Bisu</b> (20 terakhir):
+4d02c60e6	sisa ⟨0⟩ mnt
+e9fa5b6c6	kedaluwarsa
+50bd44457	Penggunaan: /antispam on|off
+aaf3e3fa7	Perlindungan spam ⟨0⟩!
+032f12948	⚙️ Perlindungan spam ⟨0⟩ | ⟨1⟩
+db5c288ba	Penggunaan: /wordban <kata>
+5ce049d2e	Regex tidak valid: ⟨0⟩
+382054e7a	'⟨0⟩' ditambahkan ke daftar kata terlarang!
+a061e639e	'⟨0⟩' sudah terlarang!
+c690df9b8	Sistem kata terlarang diaktifkan!
+a04bd920f	Sistem kata terlarang dinonaktifkan!
+908cb2d50	Penggunaan: /setautoaccept on|off
+ad89cff79	Terima otomatis ⟨0⟩!
+8a77c7461	Penggunaan: /setautoreject on|off
+de72bc915	Tolak otomatis ⟨0⟩!
+f4661e0bb	Penggunaan: /setautorejectbot on|off
+4f2789f4b	Penolakan bot/akun palsu ⟨0⟩!
+19f41bbbf	Belum ada statistik undangan!
+8618c4bd5	📈 Statistik undangan:
+4dff67686	⟨0⟩: ⟨1⟩ anggota
+fae5737f3	🚨 RAID TERDETEKSI!
+7b14ac650	⟨0⟩ anggota / ⟨1⟩ detik
+cf9fdec29	Grup dikunci selama ⟨0⟩ menit. Untuk membuka: /unlockdown
+1124ad26d	🔒 Grup dikunci selama ⟨0⟩ menit: ⟨1⟩
+93ff62fcf	Grup sudah terkunci.
+0182255e2	🚨 Kunci darurat: ⟨0⟩
+121e5db73	🔒 Grup dikunci selama ⟨0⟩ menit. Wakil Pendiri ke atas bisa membukanya dengan /unlockdown.
+2aadb84f8	Gagal mengunci (periksa izin bot).
+aff77f945	✅ Kunci anti-raid dibuka otomatis | ⟨0⟩
+8fcabef94	🔒 Sedang TERKUNCI
+94a774e51	🔓 Terbuka
+376d9283f	🚨 Anti-Raid: ⟨0⟩
+8827355aa	Penggunaan: /antiraid on|off
+f0e5d75da	Ubah batas: /antiraid on 15 20 (15 anggota/20 dtk)
+ecbb4a7da	🚨 Anti-raid ⟨0⟩.
+4f3192d13	Batas: ⟨0⟩ anggota / ⟨1⟩ detik
+bdf82e0b3	🚨 Anti-raid ⟨0⟩ | ⟨1⟩
+cc103ac23	Grup tidak terkunci.
+374c81aa3	✅ Kunci anti-raid dibuka, izin grup sebelumnya kembali.
+2551f6fe1	✅ Kunci anti-raid dibuka manual | ⟨0⟩
+4918e916d	Kesalahan: gagal membuka kunci (periksa izin bot).
+bce49f901	Gagal mengambil profil!
+9131de73e	Pengguna tidak ditemukan!
+0aaf03287	Diban
+bf84ddcb3	Dibisukan (sisa ⟨0⟩ j ⟨1⟩ mnt)
+08c52b8c6	Dibisukan (sisa ⟨0⟩ mnt)
+c5a6c0399	👤 <b>Profil Pengguna</b>
+8359545a8	Nama: ⟨0⟩
+0fd8daf31	ID: <code>⟨0⟩</code>
+16d1a3d6f	Status: ⟨0⟩
+c90e09fec	Peringatan: ⟨0⟩/⟨1⟩
+c6a441715	(Terakhir: ⟨0⟩)
+f7b55484b	Tindakan terbaru:
+1ebb0f458	Tidak ada tindakan moderasi.
+ea0db6b35	Kata terlarang: ⟨0⟩
+67b2688cb	Tidak ada kata terlarang.
+ab2a94371	Untuk menambah: /wordban <kata>
+bc50a233e	Hapus: ⟨0⟩
+ea1ef9198	Hapus semua
+9e6ecd595	Tutup
+d4ff2fcbb	Kata terlarang: ⟨0⟩
+1e892c51e	Total: ⟨0⟩ kata
+d6c5bc3c9	Gunakan tombol di bawah untuk menghapus:
+3e285778b	AKTIF
+86fc112e5	NONAKTIF
+3b9e05b52	Daftar kata ditutup.
+a9b768614	Semua kata terlarang dihapus.
+baa6a8908	Semua kata terlarang dihapus | ⟨0⟩
+f3b918935	Kata terlarang dihapus: ⟨0⟩ | ⟨1⟩
+09e3ab40d	Semua kata dihapus.
+4b153db82	Kata terlarang: AKTIF
+dbddb7434	Mengirim pesan
+399307b2e	Mengirim media
+17dec3f5f	Mengirim tautan
+a6d462ad9	Mengirim file
+b80944077	Simpan
+b0bd84b1e	Batal
+eec2005a5	Pilih saluran dulu dengan /select!
+056d48fa9	Mode malam diaktifkan manual.
+aad062b54	Mode malam dinonaktifkan manual.
+511a5144a	Jam mode malam diatur:
+cb1460461	Mulai: ⟨0⟩:⟨1⟩
+771bcaf96	Selesai: ⟨0⟩:⟨1⟩
+7989dd84a	Untuk mengatur batasan: /nightmod
+79514002a	Format salah. Penggunaan: /nightmod 23:00 07:00
+204b48fc8	Atur (chat pribadi)
+42031a2a7	Mode malam baru pertama dipakai! Kirim pesan pribadi ke bot untuk mengaturnya:
+3de48344f	Nonaktif
+de1f5c130	Mode Malam: ⟨0⟩ (⟨1⟩)
+b1d3baa6d	Jam: ⟨0⟩:⟨1⟩ - ⟨2⟩:⟨3⟩ (UTC+3)
+b5356dbcd	Pilih izin yang ingin dibatasi, lalu tekan Simpan:
+bc2943e26	🌙 Mode malam dimulai. Batasan berlaku sampai pukul ⟨0⟩:⟨1⟩ pagi.
+86a8a2d6d	Mode malam diaktifkan | ⟨0⟩
+2a8fea2da	☀️ Mode malam selesai. Izin normal dipulihkan.
+19d0c7302	Mode malam selesai | ⟨0⟩
+5f5e93020	Pengaturan mode malam dibatalkan.
+9ca4e6abd	Media
+c0ceeb976	Pesan suara/video
+d0517071a	Tautan
+02c5387be	Tidak ada batasan yang dipilih
+8c6724096	Mode malam disimpan!
+4c2f064b0	Batasan: ⟨0⟩
+ec5110d51	Untuk mengatur jam: /nightmod 23:00 07:00
+015f290e6	Mode malam diatur | ⟨0⟩
+a6ff502b6	⟨0⟩ Ban sementara habis tetapi gagal membuka ban: <code>⟨1⟩</code>
+09caa25fa	⟨0⟩ Ban sementara selesai → ban ⟨1⟩ dibuka
+45cdd1bd7	🔗 Tautan
+a70e468cd	Pesan berisi tautan, tautan tersembunyi (tertanam) dan tombol tautan dihapus.
+a0c63db58	🔤 Kata terlarang
+09f922f95	Kata dalam daftar terdeteksi termasuk huruf Turki, huruf besar/kecil dan leetspeak.
+58c8ebdab	🔁 Spam berulang
+61bbb7e24	Jika sebagian besar dari 10 pesan terakhir dalam 60 dtk sama, itu spam.
+a8ee9b9f5	Pesan melebihi batas dalam waktu singkat.
+283d462ac	↪️ Terusan
+93442a52b	Pesan yang diteruskan dari chat lain.
+4592320db	🖼 Flood media
+b65eef3f3	Foto/video/stiker melebihi batas dalam waktu singkat.
+32d0d473e	🔞 Media tidak pantas
+cf1a8e3ca	Porno/ketelanjangan (AI, jika terpasang), media dan paket stiker yang diblokir, file berbahaya (.apk, .exe…).
+353ad5e39	Hapus
+a79d71fbf	Peringatkan
+229c67bd8	Bisukan
+0855009c4	Keluarkan
+7f3fcf8f1	Ban
+bd3c8d60c	Ban sementara
+7c65bba4a	⟨0⟩ pesan
+5df501398	⟨0⟩ dtk
+cf6293e00	⟨0⟩ media
+637c7d4eb	⟨0⟩ anggota
+2a687b503	⟨0⟩ orang
+2dd4cbf18	⟨0⟩ tindakan/jam
+d507ef055	Pesan
+cc9e030d6	Pesan suara/video
+1949df42c	Pratinjau tautan
+01674713d	File/musik
+0a4ef3c95	✏️ Tulis pesan sambutan baru atau kirim foto/video/GIF (keterangannya jadi pesan).
+a5e32e95a	Tombol: satu per baris  Teks - https://tautan  (berdampingan: dengan &&)
+1ee44f2e2	Variabel: {user} {first} {username} {group} {count} · Acak: pisahkan pesan dengan baris %%%
+989ac76ce	Selamat datang {user}!
+f4b119f84	✏️ Tulis pesan perpisahan (boleh media dan tombol). Variabel: {first} {user} {group}
+3fffcf251	👋 {name} telah meninggalkan kita.
+e32be930c	📜 Tulis aturan grup. Format (tebal, tautan) dan tombol dipertahankan.
+8a546a91a	1) Saling menghormati  2) Tanpa iklan
+369899a51	📢 Tulis saluran wajib: @channel, t.me/channel atau ID -100…. Bot harus admin di sana.
+ffb95707b	@channel
+0bf3f943d	⏰ Tulis interval dulu, lalu pesannya. Mis.: 6h Jangan lupa baca aturan!
+b7be418c7	Interval: 30m, 6h, 1d · Untuk media, tulis di keterangan foto.
+dafcc65fa	6h Pesan
+c1e570e92	🔤 Tulis kata yang ingin dilarang (satu per baris). Untuk regex, awali dengan re:
+2038b8200	kata
+8031790fb	🔗 Tulis domain yang diizinkan (pisahkan dengan spasi). Mis.: youtube.com t.me/salurankusaya
+dd20fa7d1	📝 Tulis catatan seperti ini: nama isi
+750db2552	rules Aturan grup...
+2f50f0128	🧾 Tulis ID saluran/grup log (mis. -1001234567890). Bot harus bisa mengirim pesan di sana.
+0a89e21a0	🛟 Tulis ID pengguna orang tepercaya (dia bisa mendapatkannya dengan mengirim /id ke bot).
+678669669	Nonaktif
+5e05f56cb	⬅️ Kembali
+3425aebce	🛡 <b>Perlindungan</b> — ⟨0⟩
+a9aa38570	Ketuk sebuah perlindungan untuk mengaktifkan/menonaktifkan dan mengatur hukuman serta batasnya.
+dfc009e83	⟨0⟩ <b>perlindungan</b> — ⟨1⟩
+196e11b00	Hukuman: <b>⟨0⟩</b>
+3b58939e6	(batas ⟨0⟩ → ⟨1⟩)
+e882e3937	Bisu bertingkat: 10 mnt → 30 mnt → 5 jam
+10d361785	Perlindungan ⟨0⟩
+24d948e4b	Batas
+a92c81c26	🔗 Tautan yang diizinkan ›
+05bd7ca2c	🔤 Daftar kata ›
+7bb491e04	🚪 <b>Bergabung</b> — ⟨0⟩
+a956dd268	• <b>Captcha</b>: anggota baru tidak bisa menulis di grup sampai menjawab soal matematika.
+29aad6032	• <b>Verifikasi pribadi</b>: bot mengajukan pertanyaan lewat chat pribadi ke orang yang meminta bergabung; yang menjawab benar diterima otomatis. «Setujui anggota baru» harus aktif di grup dan bot perlu izin mengundang.
+d33b884be	Captcha (di grup)
+6fe48b7bb	Verifikasi pribadi
+34c8b8ee3	Terima otomatis
+747e46068	Tolak otomatis
+eb973fe6c	Tolak bot / pengguna tanpa username
+371ffa7fa	Bisukan anggota baru tanpa username
+df3d708d0	🆕 Batasan anggota baru ›
+119163a69	🚨 <b>Anti-Raid</b> — ⟨0⟩
+3d6f3a6ef	Jika anggota yang bergabung melebihi batas dalam waktu yang ditentukan, grup dikunci ⟨0⟩ menit, lalu izin sebelumnya dipulihkan.
+12e3f2f5a	🔒 Terkunci
+5ebba95e7	🔓 Buka sekarang
+80ea856ce	🆕 <b>Batasan anggota baru</b> — ⟨0⟩
+983dcd824	Anggota baru tidak bisa mengirim tautan, media atau terusan selama waktu yang ditentukan (pesannya dihapus dan muncul pemberitahuan).
+b55881f2f	⚠️ <b>Peringatan</b> — ⟨0⟩
+979ac1fa7	Perlindungan dengan hukuman «Peringatkan» dan /warn memberi peringatan; saat batas tercapai, hukuman yang dipilih diterapkan.
+cd70c61ed	Sekarang: <b>⟨0⟩</b> peringatan → <b>⟨1⟩</b>
+e72447e76	Batas peringatan
+a380d0c65	Durasi hukuman
+c601b3f5f	Bisu perlindungan
+6a05e68f4	🌙 <b>Mode Malam</b> — ⟨0⟩
+9ca9fb409	Status: <b>⟨0⟩</b>⟨1⟩
+d772b08c3	Jam: <b>⟨0⟩:⟨1⟩ – ⟨2⟩:⟨3⟩</b> (UTC+3)
+145d44a73	Izin yang dipilih dimatikan pada jam ini dan dipulihkan setelahnya.
+4a4847e71	(aktif sekarang)
+ed1a5ae4e	Mode malam
+58910c4c5	Mulai ⟨0⟩:⟨1⟩
+8e87dff1c	Selesai ⟨0⟩:⟨1⟩
+586001e9d	🔗 <b>Tautan yang diizinkan</b> — ⟨0⟩
+53a0c084e	Domain ini dikecualikan dari perlindungan tautan (termasuk subdomain). Total: ⟨0⟩
+0aa28d421	Ketuk untuk menghapus.
+c619b874d	➕ Tambah
+20540dbc7	<b>Hapus semua kata terlarang?</b>
+b12c1611e	🔤 <b>Kata terlarang</b> — ⟨0⟩
+cbdf733da	Filter: <b>⟨0⟩</b> · Total: ⟨1⟩
+acb2cf3c1	Filter kata
+9de026dc8	🧹 Hapus semua
+866ffe59a	📝 <b>Catatan</b> — ⟨0⟩
+8488244a4	Mengetik <code>#nama</code> di grup menampilkan catatan. Total: ⟨0⟩
+6e5864d9f	➕ Tambah catatan
+64d1a5476	🧩 <b>Filter</b> — ⟨0⟩
+75e34f897	Bot membalas saat pemicu ditulis di grup. Total: ⟨0⟩
+c8063c80c	Untuk menambah, di grup: <code>/filter</code> · Ketuk untuk menghapus.
+7cb292fe4	🧾 <b>Saluran log</b> — ⟨0⟩
+399fb6ff5	Semua catatan moderasi dikirim ke sini.
+6a7bdfba4	Saat ini: <code>⟨0⟩</code>
+e76134e13	Hanya pemilik grup yang bisa mengubahnya.
+d92dcb23a	✏️ Atur saluran log
+c62c45415	🗑 Hapus
+07210c024	⚙️ <b>⟨0⟩ — Pengaturan Grup</b>
+9006cb8f1	🛡 Perlindungan aktif: ⟨0⟩
+16ccea6ec	🚪 Captcha: ⟨0⟩ · Verifikasi pribadi: ⟨1⟩
+cc096b5a7	⚠️ Peringatan: ⟨0⟩ → ⟨1⟩
+06292addb	🌙 Mode malam: ⟨0⟩
+e5044a295	🛡 Perlindungan
+82a6a709d	🌙 Mode Malam
+2eed1225e	🔗 Tautan
+d38c4e47a	🔤 Kata
+6828b98dc	🧩 Filter
+7956a13a3	⏰ Pesan terjadwal
+81bddc593	🏷 Tag
+5961a42e8	✏️ Edit & Laporan
+1ff65156a	🧾 Saluran Log
+f1a57e125	🌐 Jaringan Grup
+f5c96387f	🛟 Pemulihan
+5244ca690	🌍 Bahasa: ⟨0⟩
+1bd24917c	✖️ Tutup
+e38a49a6f	Pengaturan Perlindungan Saluran
+f81ca3a77	Hanya pendiri grup yang bisa mengubah pengaturan ini.
+4081e665c	Pengaturan tidak valid
+ce432606a	✅ Diaktifkan
+ca037fcc4	❌ Dinonaktifkan
+a006b158d	⚙️ Hukuman ⟨0⟩ → ⟨1⟩ | ⟨2⟩
+0ebfd3ac6	Hukuman: ⟨0⟩
+286a11648	Hukuman batas: ⟨0⟩
+c32110889	Daftar berubah, diperbarui
+cf6b53ca2	🗑 ⟨0⟩ dihapus: ⟨1⟩ | ⟨2⟩
+64e48562d	Tautan yang diizinkan
+ed6b18d70	🗑 ⟨0⟩ dihapus
+36a8cc3d4	🧹 Semua kata terlarang dihapus | ⟨0⟩
+5db717ed8	Semua kata dihapus
+0f2ad553f	Filter dihapus
+3247c21b8	🌙 Mode malam ⟨0⟩
+672441418	aktif
+ba4dc20d1	nonaktif
+d3d694451	Tersimpan
+95bf688eb	Saluran log dihapus
+e413c4b9e	Aturan dihapus
+0f514bbde	✅ Kunci anti-raid dibuka dari panel | ⟨0⟩
+8e6a20f22	🔓 Terbuka
+f5014f259	Gagal membuka (izin bot?)
+7f0e2a142	Grup tidak ditemukan.
+f41c17d41	Kamu harus admin di grup untuk memakai panel ini.
+8213d6575	<i>Untuk membatalkan: cancel</i>
+1465f36fd	Tulis jawabanmu sebagai balasan ke pesan yang terbuka.
+3035a6b30	⏰ Waktu habis, coba lagi dari panel.
+18363eae4	Dibatalkan.
+3a22b8f74	❌ Aturan tidak boleh kosong.
+fa98ef9b6	Pesan sambutan
+a9e0c5b00	✏️ ⟨0⟩ diperbarui | ⟨1⟩
+074e8897f	✅ ⟨0⟩ diperbarui (⟨1⟩). Kamu bisa cek dengan 👁 Pratinjau di panel.
+4f4799ddf	✅ Saluran wajib aktif: <b>⟨0⟩</b>
+9dc44c973	❌ Tulis pesan setelah interval. Mis.: <code>6h Baca aturannya!</code>
+564247ab5	✅ Pesan terjadwal #⟨0⟩: setiap ⟨1⟩.
+390237a11	✅ ⟨0⟩ kata ditambahkan, filter kata aktif.
+28ebadbf6	❌ Regex tidak valid: ⟨0⟩
+8d642d759	✅ ⟨0⟩ domain ditambahkan.
+f6b268d0d	❌ Format: <code>nama isi</code> (nama: huruf, angka, - atau _)
+1b6abf7f2	✅ Catatan disimpan: <code>#⟨0⟩</code>
+d872c76cd	Hanya pemilik grup yang bisa mengubah saluran log.
+1731f9a98	❌ ID tidak valid. Contoh: <code>-1001234567890</code>
+e84190fc5	✅ Saluran log ULUS terhubung: ⟨0⟩
+9d4e14027	❌ Aku tidak bisa mengirim pesan ke chat ini. ⟨0⟩
+d8947ff95	✅ Saluran log diatur.
+7f9f8fabc	Tindakan tidak dikenal.
+c3ecef83d	dtk
+e3a725f35	Hanya anggota
+fb155ed20	Anggota + Admin
+5e998efe4	Anggota + Admin + Admin senior
+431e199fa	Semua kecuali pendiri
+8b3606b03	🤖 Pemindaian AI⟨0⟩
+2abda5f05	(tidak terpasang)
+af96fe25f	📦 File berbahaya (.apk .exe …)
+c977dbc41	🔒 Kunci media otomatis saat serangan
+1c409b726	Durasi kunci
+e4b73af2e	🚫 Daftar media diblokir ›
+a5265e3d7	🔓 Buka kunci media
+c1a903ce0	🔒 Kunci media sekarang
+678507459	aktif
+c293fc85c	nonaktif
+8dd94c76e	tidak terpasang (di server: <code>pip install nudenet</code>)
+043b96df1	🔒 Kunci media aktif sampai ⟨0⟩
+059a31b37	Pemindaian AI: ⟨0⟩
+c77da8b2d	Untuk memblokir, balas media dengan <code>/blockmedia</code> · paket stiker: <code>/blockpack</code>⟨0⟩
+a54dfcd87	🚫 <b>Media diblokir</b> — ⟨0⟩
+b1fe46387	Dihapus saat media yang sama dikirim lagi. Total: ⟨0⟩
+2d00f3347	Ketuk untuk menghapus. Untuk menambah: balas media dengan <code>/blockmedia</code>
+0c575feaa	✏️ <b>Edit & 🚩 Laporan</b> — ⟨0⟩
+fe3d0969d	• <b>Perlindungan edit terlambat</b>: pesan yang diedit lebih dari ⟨0⟩ menit setelah dikirim akan dihapus; versi lama dan baru dikirim lewat chat pribadi ke pendiri grup dan orang yang menambahkan bot (mereka harus sudah memulai bot secara pribadi).
+48166d583	• <b>Laporan</b>: anggota membalas pesan dengan <code>/report</code> atau <code>@admin</code>; staf menerima notifikasi dengan tombol.
+9a9d43302	👥 Berlaku untuk: <b>⟨0⟩</b> (ketuk tombol untuk mengubah; hanya pendiri)
+60543a144	Perlindungan edit terlambat
+2719eae25	👥 Berlaku untuk: ⟨0⟩
+8173539b7	Durasi
+a95a8ac50	Beri tahu pendiri/penambah
+337b927c6	Sistem laporan
+283ea618d	🌍 <b>Bahasa</b> — ⟨0⟩
+ecfd0b504	Pesan, tombol dan pemberitahuan bot di grup ini akan memakai bahasa yang dipilih. Sambutan, aturan dan catatan yang kamu tulis tidak berubah.
+b04edf4df	👮 <b>Audit admin</b> — ⟨0⟩
+46926b2fa	• <b>Ringkasan harian</b>: setiap malam pendiri dan penambah bot menerima siapa melakukan berapa ban, bisu, peringatan dan penghapusan.
+9e35dc551	• <b>Batas tindakan</b>: jika staf yang bukan pendiri melakukan lebih dari ⟨0⟩ ban/keluarkan/bisu dalam 1 jam, haknya ditangguhkan dan kamu menerima notifikasi dengan tombol (ban-nya bisa dibatalkan sekali ketuk).
+dbc65734d	• <b>Log pesan terhapus</b>: pesan yang dihapus dengan /del dan /purge disalin ke saluran log. (Telegram tidak memberi tahu bot tentang pesan yang dihapus manual di aplikasi.)
+fef769989	Ringkasan instan: <code>/audit 7</code> · Riwayat pesan: balas pesan dengan <code>/edits</code>
+5d565355a	Staf ditangguhkan: ⟨0⟩
+fbe3b7863	Hanya pendiri yang bisa mengubah pengaturan ini.
+011f51955	Ringkasan admin harian
+f8f216c2d	Batas tindakan admin
+c1017ac8a	Batas
+75d76fc04	Salin pesan terhapus ke saluran log
+b91937b6d	🌐 <b>Jaringan grup</b> — ⟨0⟩
+e26434728	Grup ini ada di jaringan ⟨0⟩ (⟨1⟩ grup):
+4515b950e	Selama sinkronisasi ban aktif, orang yang diban di satu grup akan diban di semua grup jaringan (bukan kick); saat ban dibuka, dibuka di semua.
+2a41a6019	Sinkronisasi ban
+7b9394ab7	📋 Salin daftar kata & tautan ke jaringan
+35c1578b6	⚙️ Salin pengaturan perlindungan ke jaringan
+a0ec7c7bd	➖ Keluarkan grup ini dari jaringan
+db918b20f	Grup ini tidak ada di jaringan. Jika grup yang kamu kelola dimasukkan ke jaringanmu, ban menyebar ke semuanya dan pengaturan bisa disalin sekali ketuk. (Perlu pendiri / wakil pendiri.)
+e44c5b572	➕ Tambahkan grup ini ke jaringanku
+fe6b211f8	⟨0⟩ (⟨1⟩ admin)
+1c979a8ff	belum ada
+9f41d74fa	🛟 <b>Pemulihan admin</b> — ⟨0⟩
+62477adfc	Daftar admin disimpan setiap 6 jam. Jika seseorang mencabut hak 3+ admin dalam waktu singkat, admin dan orang tepercaya menerima peringatan dengan tombol pemulihan. Orang tepercaya bisa memulihkan admin dengan mengirim <code>/recover</code> ke bot secara pribadi.
+092c6482f	Snapshot terakhir: ⟨0⟩
+ba8991412	Orang tepercaya (⟨0⟩/3) — ketuk untuk menghapus:
+5729ee3a9	➕ Tambah orang tepercaya
+72e9b014a	Pulihkan otomatis
+cdfef870d	📸 Simpan sekarang
+521787de8	♻️ Pulihkan ›
+c578b31d8	Snapshot tidak ditemukan.
+b5e5e7de1	Bahasa tidak valid
+a85ca0330	Hanya pendiri grup yang bisa mengubah ini.
+43ce9c01e	✏️ Cakupan perlindungan edit: ⟨0⟩ | ⟨1⟩
+446ff86ee	Berlaku untuk: ⟨0⟩
+59e922883	🔒 Media dikunci
+dd43607b8	Gagal mengunci (kunci anti-raid atau izin bot)
+650f54e0c	🔓 Kunci media dibuka
+a6220f5d4	Kunci sudah nonaktif
+1d4e3c6c4	Blokir dihapus
+de91565ff	Kamu harus pendiri grup ini untuk menambahkannya ke jaringan.
+6b85bac2e	🌐 Grup ditambahkan ke jaringan ⟨0⟩
+6c4e9120a	Ditambahkan ke jaringan
+b605b46d7	Grup ini tidak ada di jaringan
+4f36e2321	Dikeluarkan dari jaringan
+bd4ac87bb	Hanya pemilik jaringan yang bisa melakukan ini.
+f9a34a2ad	Sinkronisasi ban ⟨0⟩
+78a09a0ea	🌐 Pengaturan disalin ke ⟨0⟩ grup di jaringan | ⟨1⟩
+eacfa093c	Disalin ke ⟨0⟩ grup
+c39c747b1	Hanya pendiri yang bisa mengubah pengaturan pemulihan.
+95e917987	Dihapus
+87f3326f9	📸 Tersimpan
+49c866e1e	Gagal menyimpan (apakah bot admin?)
+b13ed05bb	♻️ ⟨0⟩ admin dipulihkan⟨1⟩
+8670a3a46	, ⟨0⟩ gagal
+c3b595125	Hanya pendiri yang bisa menambah orang tepercaya.
+32cb829ea	❌ Orang tidak ditemukan. Tulis ID penggunanya (dia bisa mendapatkannya dengan mengirim /id ke bot).
+89f663ce6	Maksimal 3 orang tepercaya.
+dfe9ba864	✅ ⟨0⟩ ditambahkan sebagai orang tepercaya. Dia harus sudah memulai bot secara pribadi.
+a4167566b	Pilih grup dulu dengan /select!
+62d623326	saluran
+3fca554f2	orang
+ffd1ee882	📝 draf
+4bf27d98f	⏰ terjadwal
+4c10fb3fc	📤 mengirim
+2467aa607	✅ selesai
+578b9744b	❌ dibatalkan
+71db82dfe	Tulis waktunya seperti ini: -time 20:00
+c3cd977ee	Tulis nama templat seperti ini: /broadcast -save update "pesan"
+530791023	tidak ada target
+9a2c72e2d	🔕 Matikan pengumuman
+9f242a754	🗳 Belum ada suara
+37e3719ed	🗳 ⟨0⟩ suara: ⟨1⟩
+186e99c6e	✅ <b>Pengumuman #⟨0⟩ selesai</b>
+53acfe01d	⏹ <b>Pengumuman #⟨0⟩ dihentikan</b>
+8fa7a67a9	📊 ⟨0⟩/⟨1⟩ diproses
+6b12880d0	✅ Terkirim: <b>⟨0⟩</b>
+ddb6da67b	🚫 Memblokir / belum memulai bot: ⟨0⟩ (dilewati di pengumuman berikutnya)
+814224bfc	⚠️ Gagal mengirim (bot dikeluarkan / tanpa izin): ⟨0⟩
+d4d2773cb	📌 Disematkan: ⟨0⟩
+53ffa3f09	👆 Klik tombol ditampilkan di /broadcasts
+0d709ac7c	🗳 Hasil polling ditampilkan di /broadcasts
+dd370224e	Untuk menghentikan: /stopbroadcast
+be085c333	📢 <b>Pengumuman</b>
+0b7be0b19	<code>/broadcast "pesan"</code> — grup + saluran
+1e622cf6b	<code>/broadcast -users "pesan"</code> — orang yang memakai bot secara pribadi
+25a35b0aa	<code>/broadcast -users -channels "pesan"</code> — orang + saluran (bisa digabung)
+0b87fef23	<code>/broadcast all "pesan"</code> — semuanya
+bc83a4f15	Opsi: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (7 hari terakhir; <code>-active 30</code>) · <code>-test</code> (hanya kamu) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+1aca894ba	🎯 Di pratinjau kamu bisa memilih grup/saluran tertentu.
+9fa263da2	🗳 Polling: <code>/broadcast -poll -users "Pertanyaan?
+735ec279d	Opsi 1
+98805337f	Opsi 2"</code> — semua suara dikumpulkan dalam satu polling
+aaa59ea0d	💾 Templat: <code>/broadcast -save nama "pesan"</code> → <code>/broadcast -users #nama</code> · /templates
+a3caa1df0	💡 Jika kamu membalas sebuah pesan (gambar, video, dengan tombol atau emoji premium) dengan <code>/broadcast -users</code>, pesan itu dikirim apa adanya. Kamu juga bisa menulis baris tombol di teks: <code>Saluran - https://t.me/channel</code> (klik dihitung)
+fb071e726	/broadcasts — riwayat, klik, hasil polling · /stopbroadcast — hentikan pengiriman
+344eb221b	⚠️ Emoji premium diubah Telegram menjadi emoji biasa (bot tidak bisa mengirim emoji premium dengan mengetik). Solusi: tulis pesannya sendiri, lalu balas dengan /broadcast — pesan yang disalin tetap mempertahankannya.
+f87763b78	👆 <b>Pratinjau pengumuman #⟨0⟩</b>
+3790c85e6	🎯 Target: ⟨0⟩
+d46292455	🔥 Hanya yang aktif dalam ⟨0⟩ hari terakhir
+019c9cc1b	✅ Grup/saluran terpilih: ⟨0⟩
+14d962307	👤 Orang: yang memakai bot secara pribadi; Telegram tidak mengizinkan mengirim pesan ke orang yang terlihat di grup tetapi belum pernah memulai bot (dicoba sekali, lalu dilewati).
+f7bcd6c82	⏱ Perkiraan waktu: ~⟨0⟩ dtk
+aaca2bf64	⏰ Dikirim pada: ⟨0⟩
+4046d6be5	📌 Akan disematkan di grup dan saluran
+c3eded236	🔕 Senyap
+cffb2a880	👆 Klik tombol akan dihitung
+251fac5c6	🗳 Polling akan diteruskan; suara dikumpulkan di polling ini
+ba70fe09b	⏰ Jadwalkan
+8241e1495	✅ Kirim
+86f2e67ab	❌ Batal
+d53523fb6	Tidak ada yang bisa dikirimi.
+2882de09f	🎯 Pilih grup/saluran
+78f17fac4	❌ Tutup
+e6b5975cd	◀️ Sebelumnya
+b84641c59	Berikutnya ▶️
+9a4dab900	🔄 Hapus pilihan
+6044624ae	✅ Selesai
+786000738	🎯 <b>Pengumuman #⟨0⟩: pilih grup/saluran</b> (halaman ⟨1⟩/⟨2⟩)
+8273973d4	Terpilih: <b>⟨0⟩</b> — jika tidak ada yang dipilih, dikirim ke semua.
+0b988bbef	Perintah ini hanya bisa dipakai pemilik bot!
+4b64d112c	Tulis pesan atau balas pesan untuk templat.
+9cc026c97	💾 Templat disimpan: #⟨0⟩
+12933b18c	Untuk memakainya: /broadcast -users #⟨0⟩
+dcba9eba6	Tidak ada templat bernama #⟨0⟩. Lihat daftar dengan /templates.
+c3b81b13d	Tulis polling seperti ini:
+185c6d7a9	/broadcast -poll -users "Pertanyaan?
+27ced0bf8	Opsi 2"
+9de509dc5	Gagal membuat polling: ⟨0⟩
+e8c8a3987	🧪 Polling uji dikirim hanya kepadamu.
+f6c39b561	Gagal mengirim uji: ⟨0⟩
+3ccbd9c93	🧪 Pengumuman uji dikirim hanya kepadamu.
+305ee0f9a	(pribadi)
+cb34b252b	Gagal mengirim pratinjau: ⟨0⟩
+68aa08ebf	🔕 Pengumuman dimatikan. Untuk menyalakan lagi: /subscribe
+ead4b09a2	🗑 Dihapus
+6fc68153b	Tidak berwenang atau tidak valid.
+5027629e8	Pengumuman ini sudah diproses.
+1b315a09e	⏰ Pengumuman #⟨0⟩ dijadwalkan: ⟨1⟩
+08d8e26cc	Kamu bisa melihatnya di /broadcasts.
+d236ce6c8	📤 Mengirim pengumuman #⟨0⟩…
+e15ad036b	Dibatalkan
+8c0a53753	❌ Pengumuman #⟨0⟩ dibatalkan.
+32ff8287a	Tidak dijadwalkan.
+95d0599f3	⏹ Menghentikan…
+a96302489	Sedang tidak dikirim.
+7afa989da	📢 Belum ada pengumuman.
+b0b0b34ae	📢 <b>Pengumuman terbaru</b>
+a2148c2a7	🗳 polling
+771c7f3fb	👆 ⟨0⟩ klik⟨1⟩
+8139aea8f	(⟨0⟩ orang)
+71fc8c6a3	❌ Batalkan #⟨0⟩
+6b91bce73	⏹ Hentikan #⟨0⟩
+55b4c1882	💾 Tidak ada templat tersimpan.
+4dc8bf919	Untuk menyimpan: <code>/broadcast -save nama "pesan"</code> atau balas sebuah pesan dengan <code>/broadcast -save nama</code>
+a5f43a44d	💾 <b>Templat pengumuman</b>
+bd5b7fec5	📋 pesan salinan
+8ebf8c6d8	Penggunaan: <code>/broadcast -users #nama</code>
+d9ecd93d0	⏹ Menghentikan pengumuman…
+e6989213d	Tidak ada pengumuman yang sedang dikirim.
+1d2937461	🔔 Pengumuman dinyalakan.
+b75b13003	➕ <b>Aku ditambahkan ke ⟨0⟩ baru</b>
+862253052	· ⟨0⟩ anggota
+7171ced0d	👤 Ditambahkan oleh: ⟨0⟩⟨1⟩
+b0c699f59	🔐 Admin
+7505ec5cf	⚠️ Belum menjadi admin (pengingat dikirim dalam 24 jam)
+93e256834	➖ <b>Aku dikeluarkan dari:</b> ⟨0⟩
+f6cedb404	👤 Dikeluarkan oleh: ⟨0⟩ · <code>⟨1⟩</code>
+545d22c19	⚠️ Aku masih belum admin di <b>⟨0⟩</b>, jadi perlindungan tidak berjalan.
+e7c66ff8b	Pengaturan grup → Administrator → Tambah admin → @⟨0⟩ (hapus pesan dan batasi pengguna sudah cukup) atau pakai tombol di bawah.
+519fdb65c	⚡ Jadikan aku admin
+977c42cf0	📈 <b>Laporan mingguan ⟨0⟩</b> (⟨1⟩ – ⟨2⟩)
+075c08a00	👥 Grup: <b>⟨0⟩</b> · 📢 Saluran: <b>⟨1⟩</b>
+626db2ea3	➕ Ditambahkan ke: <b>⟨0⟩</b> · ➖ Dikeluarkan dari: <b>⟨1⟩</b>
+3b300252b	👤 Pengguna pribadi: <b>⟨0⟩</b> (minggu ini +⟨1⟩)
+8ebb70df7	💬 Pesan: <b>⟨0⟩</b>⟨1⟩ · orang aktif: <b>⟨2⟩</b>
+179fe6c75	🚪 Bergabung ke grup: <b>⟨0⟩</b> · keluar: <b>⟨1⟩</b>
+171919cd0	🆕 <b>Chat baru</b>
+8298e9706	… dan ⟨0⟩ lainnya
+7ba765796	🏆 <b>Grup paling aktif</b>
+03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ pesan
+57d75c0ab	🛠 Bot sedang dalam pemeliharaan singkat; akan segera kembali. Perlindungan tetap berjalan.
+fc94758f1	🛠 Mode pemeliharaan <b>aktif</b>⟨0⟩
+588994912	— berakhir pukul ⟨0⟩
+35ea18ef8	✅ Mode pemeliharaan nonaktif
+e1a334ce2	(tanpa batas waktu)
+e7103f4b6	<code>/maintenance 30</code> — 30 menit · <code>/maintenance on</code> — tanpa batas waktu · <code>/maintenance off</code>
+c05840eb1	Tambahkan <code>-duyur</code> di akhir untuk mengirim catatan singkat ke grup.
+fe8a047fd	Selama pemeliharaan, perintah dan tombol nonaktif untuk semua (kecuali kamu); perlindungan seperti spam, tautan, flood dan captcha tetap berjalan.
+9fd9dff45	✅ Mode pemeliharaan dimatikan.
+280c2df8e	Mode pemeliharaan sudah nonaktif.
+a476c76e4	✅ Pemeliharaan selesai, bot berfungsi penuh.
+5a2d5c21d	🛠 Mode pemeliharaan aktif, akan nonaktif otomatis pukul ⟨0⟩.
+321af0468	🛠 Mode pemeliharaan aktif (tanpa batas waktu). Untuk menonaktifkan: /maintenance off
+81851cbcd	Penggunaan: /maintenance 30 · /maintenance on · /maintenance off
+0d8f36bae	Perintah dan tombol dinonaktifkan untuk semua orang (kecuali kamu); perlindungan tetap berjalan.
+0e64031cc	/invite digunakan di grup: memberimu tautan undangan pribadi dan menghitung orang yang kamu bawa.
+882848490	Kontes undangan nonaktif di grup ini.
+b5811c1fa	Aku tidak bisa membuat tautan undangan: aku butuh izin "undang pengguna".
+c2dee7686	Aku tidak bisa membuat tautan undangan, coba lagi sebentar lagi.
+24b1d9ce7	🔗 ⟨0⟩, tautan undanganmu:
+1dafe45ec	👥 Kamu membawa: <b>⟨0⟩</b> orang⟨1⟩
+6f74b2ba9	🏆 Peringkat: /invites
+060348723	(⟨0⟩ orang keluar)
+cb5bdaa5f	/invites digunakan di grup.
+1db2cf152	🏆 Belum ada yang bergabung lewat undangan. Dapatkan tautanmu dengan /invite!
+4ba6e3c96	🏆 <b>Peringkat undangan</b>⟨0⟩
+d7ee0f9c5	(7 hari terakhir)
+b71ab530b	⟨0⟩ ⟨1⟩ — <b>⟨2⟩</b> orang
+e309c956d	Untuk tautanmu sendiri: /invite⟨0⟩
+ff021375b	· mingguan: /invites 7
+db6ff4fd5	🚫 Blokir
+ead127c24	📨 Pesanmu telah diteruskan ke admin bot. Balasannya akan muncul di sini.
+b3be121db	✅ Balasan terkirim.
+6a71974f7	❌ Gagal terkirim: pengguna memblokir bot.
+29d8bcae2	❌ Gagal terkirim: ⟨0⟩
+a299e6f40	Tidak berwenang!
+67149866b	tanpa username
+e9d283a8a	ID: ⟨0⟩
+546855b2f	Total pesan: ⟨0⟩
+4caedc905	🚫 Diblokir: pesannya tidak akan diteruskan lagi.
+aa1be6bef	✅ Blokir dibuka.
+05fe7a9ae	✅ Buka blokir
+347667dc7	💬 Pesan yang kamu tulis ke bot secara pribadi diteruskan ke admin bot; balasannya juga datang ke sini.
+fb6c079d1	💬 Layanan bantuan: <b>⟨0⟩</b>
+29ab6a683	7 hari terakhir: ⟨0⟩ pesan, ⟨1⟩ orang
+d3a86e2ed	Pesan pribadi pengguna ke bot diteruskan kepadamu; jika kamu <b>membalas</b> pesan itu, jawabanmu dikirim ke pengguna (identitasmu tetap tersembunyi). Gunakan 🚫 di bawahnya untuk memblokir seseorang.
+2e8d13df7	/support off — nonaktifkan
+b9d5c0506	/support on — aktifkan
+69750b260	👢 keluarkan
+ba949e0b3	🔇 bisukan
+499389526	⚠️ peringatan
+2146683b0	🗑 penghapusan
+29c555d38	✅ buka ban
+2adb56b78	🔊 buka bisu
+be630c265	↩️ pencabutan peringatan
+4a1bf66db	dikeluarkan
+804ba7661	hapus
+324073880	🔻 Hak admin Telegram-nya juga dicabut.
+cf9b454c2	⚠️ Tidak bisa mencabut hak admin Telegram-nya (mungkin bukan bot yang mengangkatnya); cabut secara manual di pengaturan grup jika perlu. (⟨0⟩)
+b55e087a5	🚨 <b>Batas tindakan admin terlampaui</b> — ⟨0⟩
+427b5c6c1	⟨0⟩ melakukan <b>⟨1⟩</b> ban/kick/bisu dalam satu jam terakhir (batas ⟨2⟩). Haknya ditangguhkan⟨3⟩.⟨4⟩
+95dbff4c7	(pangkat: ⟨0⟩)
+1f08073ce	♻️ Pulihkan haknya
+007e62b21	↩️ Batalkan ban-nya dari 2 jam terakhir
+62523d9c0	✅ Oke, tetap ditangguhkan
+edef2b326	Hanya pendiri grup yang bisa melakukan ini.
+c2ee2c9d8	↩️ Ban ⟨0⟩ orang dibuka
+91b30283d	↩️ Ban terbaru oleh ⟨0⟩ dibatalkan (⟨1⟩) | ⟨2⟩
+9ed54f7b6	Tidak ditangguhkan (sudah diselesaikan).
+65e104036	(Hak Telegram tidak bisa dipulihkan: ⟨0⟩)
+fdec34132	♻️ Hak dipulihkan⟨0⟩
+e44b14d39	♻️ Hak ⟨0⟩ dipulihkan | ⟨1⟩
+caddb66f3	✅ Hak tetap dicabut
+a9968a219	⛔ ⟨0⟩: hak ditangguhkan
+5d7617657	👮 <b>Ringkasan admin harian</b> — ⟨0⟩
+053473339	<i>Telegram tidak memberi tahu bot tentang pesan yang dihapus manual di aplikasi; penghapusan hanya menghitung yang dilakukan dengan /del dan /purge.</i>
+46faeb5b0	Pilih grup dulu dengan /select!
+c1c404194	Perintah ini untuk pendiri dan wakil pendiri.
+3960d6a99	Tidak ada tindakan staf dalam periode ini.
+42c00ba90	👮 <b>Audit admin</b> — ⟨0⟩ (⟨1⟩ hari terakhir)
+5cb08e285	Jumlah hari: <code>/audit 7</code>
+3de0d27b9	📩 Ringkasan audit dikirim secara pribadi.
+57a762312	Aku tidak bisa mengirim pesan pribadi kepadamu: kirim /start ke bot dulu.
+6accc9fd5	… dan ⟨0⟩ pesan lainnya
+37de34f22	🗑 <b>Pesan dihapus</b>⟨0⟩ | Dihapus oleh: ⟨1⟩
+9a1505c99	/del digunakan di grup, sebagai balasan ke pesan yang akan dihapus.
+d223e7b03	Balas pesan yang ingin dihapus dengan /del.
+9fada83b0	🗑 <b>Pesan dihapus</b> | Penulis: ⟨0⟩ | Dihapus oleh: ⟨1⟩
+a1c331d8e	/edits digunakan di grup, sebagai balasan ke sebuah pesan.
+5f93a0deb	Balas pesan yang riwayatnya ingin kamu lihat dengan /edits.
+250e055ba	Tidak ada riwayat edit untuk pesan ini (disimpan selama ⟨0⟩ hari terakhir).
+36da7c07e	📝 <b>Riwayat edit</b> — ⟨0⟩ · ⟨1⟩ edit
+27ec83d6a	asli
+afea26f62	edit #⟨0⟩
+39562283b	🌐 Pengguna yang diban global bergabung dan diban: ⟨0⟩
+b42c13323	🤖 Akun mencurigakan dibatasi: ⟨0⟩ → ⟨1⟩
+3c4fe05e5	👋 ⟨0⟩ bergabung → ⟨1⟩
+aa9673f91	HARI INI
+fe5b02de1	MINGGU INI
+05e451c40	BULAN INI
+a65b592d7	SEPANJANG MASA
+fa5c481c7	Pengguna → Pesan
+11a5c6c19	├ Total pengguna aktif: ⟨0⟩
+d8524730d	└ Total pesan: ⟨0⟩
+cd18a00ba	Kamu ⟨0⟩ : ⟨1⟩
+8b57b7048	Grup ini belum terdaftar! Jika kamu menggunakannya secara pribadi, pilih grup dulu dengan /select.
+d2fc8f52c	15 orang paling aktif bulan ini di grupmu:
+10710d7e5	📊 Peringkat ini untuk bulan ini.
+0bffc9609	15 orang paling aktif sepanjang masa di grupmu:
+5552d868e	📊 Peringkat sepanjang masa.
+9d75c68d7	Belum ada statistik pesan!
+54dbc7053	15 orang paling aktif hari ini di grupmu:
+86767b480	📊 Peringkat ini untuk satu hari terakhir.
+25670a03f	15 orang paling aktif minggu ini di grupmu:
+17af6b262	📊 Peringkat ini untuk satu minggu terakhir.
+43d197ca4	📅 Harian
+f70fa8d28	📅 Mingguan
+1b9326b3c	📅 Bulanan
+c9c0e3bcd	📊 Sepanjang masa
+d4d0010bd	📋 Detail
+674ed30af	👥 Pilih jenis peringkat untuk grup ini.
+0f3a59f6a	Menu ini dibuka oleh ⟨0⟩.
+bbf0e9940	👥 ⟨0⟩ orang paling aktif di grupmu:
+62e79a0f9	Interaksi grupmu sejak bot menjadi admin:
+f55378a92	👥 Pengguna aktif:
+503794387	💬 Total pesan:
+ef5bd5de0	📊 Total interaksi:
+c6c4664dd	Untuk pengguna tertentu, gunakan /info @user atau balas pesannya.
+7e811e0d2	👱 Nama: ⟨0⟩
+9b0e7b293	🌐 Username: ⟨0⟩
+14ed29970	👥 Jumlah grup yang kamu ikuti: ⟨0⟩
+ba33e26dc	💬 Total pesan di grup-grupmu:
+8cb7f31a3	├📆 Harian: ⟨0⟩
+5ee653a06	🔍 Total di grup-grupmu:
+0df3dab20	├🃏 Stiker: ⟨0⟩
+e93a634c3	📊 Statistik ⟨0⟩:
+ae2b984ac	💬 Jumlah pesan:
+3e08d6dfd	┌📆 Harian: ⟨0⟩
+037b7c646	├📆 Mingguan: ⟨0⟩
+9f577c2b5	├📆 Bulanan: ⟨0⟩
+cf3b5cf8f	└Total: ⟨0⟩
+e1ed2556f	📊 Detail interaksi:
+0327b318b	┌🃏 Stiker: ⟨0⟩
+5ca7902a2	├🀄️ GIF: ⟨0⟩
+b667cf812	├🙃 Emoji: ⟨0⟩
+68fa09ce3	├📷 Foto: ⟨0⟩
+886e342ec	├🎥 Video: ⟨0⟩
+a11d703a7	├💾 File: ⟨0⟩
+0afb08ea1	├🎙 Pesan suara: ⟨0⟩
+5199486f9	└📼 Musik: ⟨0⟩
+7d244b585	🏆 Peringkat keseluruhan: #⟨0⟩
+9394cb52f	Pulihkan semua admin
+846fa3804	Pulihkan semua kecuali spammer
+ea0ec5a8c	Tersangka: ⟨0⟩
+40ab78429	🚨 <b>MODE PERLINDUNGAN SALURAN AKTIF</b>
+65bfd4f34	⟨0⟩Saluran: <code>⟨1⟩</code>
+d5d022cd9	Semua hak admin dicabut kecuali pendiri dan admin yang menambahkan bot.
+11b7596d5	⟨0⟩ admin dipulihkan
+19c35e8f0	🌐 Ban jaringan dicabut: ⟨0⟩ (di semua grup jaringan)
+c2e7013a3	🌐 Ban jaringan: ⟨0⟩ diterapkan ke ⟨1⟩ grup lain di jaringan
+9fe755831	tidak ada catatan
+d121e65b8	tidak bisa mendapatkan info bot: ⟨0⟩
+463126054	♻️ Pemulihan admin: ⟨0⟩ admin dipulihkan⟨1⟩
+90d9a6b20	, gagal: ⟨0⟩
+caa60fdc5	🚨 <b>Pencopotan massal</b>
+8ba5e6709	Grup/saluran: <b>⟨0⟩</b>
+5d095f637	⟨0⟩ (<code>⟨1⟩</code>) mencabut hak ⟨2⟩ admin dalam 10 menit.
+8d21e12ea	Snapshot baik terakhir: ⟨0⟩
+9ba30f2ce	♻️ Pulihkan admin
+a96545d83	♻️ Dipulihkan otomatis: ⟨0⟩ admin⟨1⟩
+a556aedb4	(gagal: ⟨0⟩)
+ee38d1474	Tidak ada snapshot admin yang bisa dipakai.
+d94586a2d	Tidak ada grup/saluran yang bisa kamu pulihkan. Pemilik grup harus menambahkanmu sebagai 'orang tepercaya' di panel.
+a186abeb7	Admin grup/saluran mana yang ingin kamu pulihkan?
+358350243	Belum ada snapshot admin untuk grup ini (snapshot diambil setiap 6 jam).
+e0f04d2e3	⟨0⟩ · ⟨1⟩ admin
+629844d31	<b>⟨0⟩</b> — pilih snapshot yang akan dipulihkan:
+b5ad3a8e7	Tidak ada izin atau tidak ada snapshot.
+0644770db	♻️ Admin dalam snapshot ⟨0⟩ akan dipulihkan:
+700b3ac82	Kamu yakin?
+1ca35b0e1	✅ Ya, pulihkan
+e6a5e85cd	❌ Batal
+805c38798	Memulihkan...
+cf63ea900	♻️ ⟨0⟩ admin dipulihkan.⟨1⟩
+b8058c528	❌ Gagal: ⟨0⟩
+e82edc1de	(Bot tidak bisa memberikan hak yang tidak dimilikinya dan tidak bisa mengubah admin yang diangkat orang lain.)
+f13124b3b	Daftar admin dipulihkan (⟨0⟩ admin).
+400c018e5	banjir media
+60ff56604	⟨0⟩ pesan / ⟨1⟩ dtk
+97268aded	2+ admin melakukan spam dalam 30 mnt
+d739884a3	⚠️ <b>Spam Admin Terdeteksi!</b>
+3302869c8	Admin: ⟨0⟩ (<code>⟨1⟩</code>)
+3cbc92eef	Tindakan: ⟨0⟩
+3d7963ca4	Mode perlindungan saluran: Tidak aktif
+72f491ffe	Ban + hak dicabut
+35cf8f7fb	Hak dicabut
+b6331605b	🤖 Penambahan bot diblokir
+ad9ead387	Bot: ⟨0⟩
+a7c242666	Ditambahkan oleh: ⟨0⟩
+9b75f55a2	⚠️ Pengangkatan admin tanpa izin terdeteksi!
+e97409070	Diangkat oleh: ⟨0⟩ (<code>⟨1⟩</code>)
+c065dbd5f	Yang diangkat: ⟨0⟩ (<code>⟨1⟩</code>)
+17a403bbb	Ban massal terdeteksi: ⟨0⟩ (⟨1⟩) ⟨2⟩ ban / ⟨3⟩ dtk
+e21052fad	Judul: '⟨0⟩' → '⟨1⟩'
+eb38d7d1c	Deskripsi diubah
+b2209389a	Perlindungan kloning saluran terpicu!
+85a87d615	Perubahan dibatalkan:
+b79ccad39	📋 <b>Laporan Log Saluran Mingguan</b>
+546658b9b	Ban + Cabut hak
+2c124f337	Hanya cabut hak
+a5505fdbd	⟨0⟩ Perlindungan Spam Admin
+183b4aa2e	Tindakan spam: ⟨0⟩
+5d5673266	⟨0⟩ Banjir Media Admin
+652974e14	Tindakan media: ⟨0⟩
+9123863e2	⟨0⟩ Perlindungan Tautan
+3d1465b74	⟨0⟩ Perlindungan Kloning
+a03517abc	⟨0⟩ Perlindungan Penambahan Bot
+b27f8f968	⟨0⟩ Perlindungan Ban Massal
+006229c38	👥 Admin Aman
+ec411a6b8	💾 Simpan Judul/Deskripsi Saluran
+a8d6a7aa4	🔙 Tutup
+e0a90af5c	Saluran tidak ditemukan!
+9abd1a97e	Perintah ini untuk pengaturan saluran. Untuk pengaturan grup gunakan /settings.
+d63cd9886	Disimpan: ⟨0⟩
+c3d254196	Daftar admin aman:
+ff4ef369c	(Boleh mengirim tautan)
+5243a71a1	Postingan saluran
+f6489e475	admin saluran
+29bb8c58f	Menyetujui permintaan, harap tunggu...
+218960722	Tidak ada permintaan bergabung yang tertunda.
+1b385aeaa	✅ ⟨0⟩ permintaan disetujui.
+fb8bc6b23	(⟨0⟩ permintaan tidak bisa disetujui; mungkin sudah kedaluwarsa atau ditarik)
+05d63d7c6	Persetujuan permintaan: ⟨0⟩ disetujui | ⟨1⟩
+9ea0064d2	Kamu telah diblokir dari penggunaan bot ini.
+db8a1871b	Penggunaan: /membertag @user <tag> atau balas + /membertag <tag>
+584a09e9f	Pengguna dan tag wajib diisi!
+84aa89869	Tag maksimal 32 karakter!
+fcd61489e	⛔ Kamu tidak bisa memberi tag kepada orang dengan pangkat yang sama atau lebih tinggi.
+5f53e65d3	⟨0⟩ bukan admin! Tag hanya bisa diberikan kepada admin.
+f4fc9906d	🏷 Tag diberikan: ⟨0⟩ → ⟨1⟩
+be06d3d2f	Hanya pendiri yang bisa mengangkat wakil pendiri.
+0ef49a704	Pengguna tidak ditemukan! Gunakan ID, @username, atau balasan.
+4de20141f	Penggunaan: /⟨0⟩ @user [tag]
+e1b55fb8a	Tag: ⟨0⟩
+b60f7c81a	⟨0⟩ diangkat: ⟨1⟩⟨2⟩
+9adcfd5da	Penggunaan: /block <id> [alasan]
+dd3f79560	ID tidak valid!
+b53956227	✅ ⟨0⟩ diblokir.
+68a3942e7	Penggunaan: /unblock <id>
+7f14d47f5	✅ Blokir ⟨0⟩ dibuka.
+a07c6c04c	Batas peringatan saat ini: ⟨0⟩
+eeceb0ee6	Penggunaan: /setwarnlimit <2-20>
+68cb7aa9e	Batas harus antara 2 dan 20!
+7fdd7a44f	Batas peringatan diatur ke ⟨0⟩.
+32cb8952a	Daftar pengecualian spam kosong.
+804f32102	Tambahkan dengan /whitelist @user.
+7ec4b51e6	Daftar Pengecualian Spam:
+c0c03c505	⟨0⟩ dihapus dari daftar pengecualian.
+e6695a6db	⟨0⟩ ditambahkan ke daftar pengecualian spam.
+9e5f1a353	Grup privat
+688f939e9	Filter Kata
+cbabb7d8b	Tidak ada
+28b8f5479	👥 Anggota: ⟨0⟩
+ceb987630	👮 Admin: ⟨0⟩
+af72a68a6	📈 Statistik
+28086b0d5	├ Total pesan: ⟨0⟩
+01c7b8d8a	├ Pengguna aktif: ⟨0⟩
+12279a365	├ Total ban: ⟨0⟩
+74d4fdeab	├ Total peringatan: ⟨0⟩
+69516a922	└ Batas peringatan: ⟨0⟩
+c77739311	Perlindungan aktif: ⟨0⟩
+58b3e5e14	Gambar! 🪙
+561c75012	Angka! 🪙
+1a786e9bf	⟨0⟩ Dadu: ⟨1⟩
+e7e394f96	🤖 ⟨0⟩ — Perintah Pemilik Bot
+f4e511a55	/panel — Grup dan statistik botmu
+94da61b33	/broadcast — Pengumuman ke grup, saluran, dan orang (ketik /broadcast untuk melihat cara pakai)
+5d08c9107	/broadcasts — Riwayat pengumuman, klik, hasil polling
+cbbbbd1fd	/templates — Template pengumuman
+70215bc5f	/growth — Laporan pertumbuhan mingguan (otomatis setiap Senin)
+7a7fa1e0f	/support — Layanan bantuan (pesan pribadi diteruskan kepadamu)
+0d05bfd3b	/gban <id|@user> [alasan] — Ban di semua grup botmu
+1db86c395	/ungban <id|@user> — Cabut ban
+2eb535697	/gbanlist — Daftar ban
+eeedac8d1	/select — Pilih grup
+98b86d999	🤖 Perintah Pemilik Bot
+6e9bfe3b7	/clones — Kelola bot klon (hentikan/mulai/hapus)
+e48ef6b31	/clone — Bot klon milikmu sendiri
+3f50c5d54	/panel — Panel manajemen (grup/saluran, keluarkan bot, 🧹 pembersihan)
+5e0335772	/perf — Performa: operasi lambat, memori, antrean
+6d08e2352	/maintenance — Mode pemeliharaan (perintah mati, perlindungan tetap aktif)
+f160302c5	/block <id> [alasan] — Blokir
+b1c36dc93	/unblock <id> — Buka blokir
+647651cb8	/gban <id|@user> [alasan] — Ban di semua grup
+86ee8d200	/ungban <id|@user> — Cabut ban global
+d094b4c43	/gbanlist — Daftar ban global
+d729d3ba2	/backup — Cadangkan database
+0e556fad9	/gblockmedia — Blokir media yang dibalas di semua grup
+8af5e8c17	/recover — Pemulihan admin
+f0032f0c7	/select — Pilih saluran
+97a1889ae	/channelsettings — Pengaturan saluran
+def1847f5	⟨0⟩/start — Mulai
+f467f5a12	/menu — Tampilkan menu
+579f051c8	/settings — Panel pengaturan bertombol untuk grup terpilih
+0ecfed5c8	/help — Bantuan
+d1d491df3	/select — Hubungkan grup/saluran
+a64b799ed	/appeal <penjelasan> — Kirim banding ban
+3aaf39bd7	/recover — Pemulihan admin (untuk orang tepercaya)
+e8a9f2564	💬 Pesan yang kamu tulis ke bot diteruskan ke admin bot; balasannya datang ke sini.
+90b35c202	/clone — Buat bot klon dengan namamu sendiri
+53ff31717	👤 Perintah Pengguna
+a6ac25fa6	📊 Statistik & Profil
+7c1cddd9b	/profile — Lihat profilmu
+4794e486d	/daily — Peringkat pesan harian
+9304026c3	/weekly — Peringkat mingguan
+0f2144ac5	/monthly — Peringkat bulanan
+dab273f01	/alltime — Peringkat sepanjang masa
+ffca95898	/top — Menu peringkat dengan tombol
+f6859df4f	/info @user — Statistik pengguna
+f739f3e69	/chatinfo — Informasi tentang grup
+96d41dfbc	/rules — Lihat aturan grup
+cf6de9a2b	/afk [alasan] — Mode AFK (orang yang menandaimu akan diberi tahu; hilang saat kamu menulis)
+427ccde79	/votemute — Mulai voting bisu untuk orang yang kamu balas
+f2f9f9eaf	/notag — Keluar dari daftar /tag (ketik lagi untuk bergabung kembali)
+6de9402ed	/invite — Tautan undangan pribadimu (orang yang kamu bawa dihitung) · /invites — peringkat
+82789607f	📝 Catatan
+f9f2a17b9	/notes — Catatan tersimpan
+46ba4fefd	#catatan — Ambil catatan (contoh: #rules)
+a37fbde9a	/get <nama> — Ambil catatan
+5ff3c9cb2	🎰 Hiburan
+b0d9549b8	/coin — Lempar koin
+3ab74dacf	/dice — Lempar dadu
+304dfe62b	ℹ️ Lainnya
+b4031dc89	/help — Menu ini
+6467c9dbe	/id — Tampilkan ID
+0af5bde71	/appeal <penjelasan> — Banding ban (secara pribadi ke bot)
+aff60c67d	/report [alasan] atau @admin — Laporkan pesan yang dibalas ke staf
+15575b067	👮 Perintah Staf — pangkatmu: ⟨0⟩
+d955391ce	Urutan pangkat: 👑 Pendiri > 🔱 Wakil Pendiri > ⭐ Admin Senior > 🛡 Admin
+cb1ecf135	🛡 Admin ke atas
+ba31c6e75	/warn @user [alasan] — Peringatkan
+9db2b48b7	/mute @user [waktu] — Bisukan (Admin: maksimal 24 jam)
+0d7e990d0	/unmute @user — Buka bisu
+258592394	/kick @user — Keluarkan dari grup
+40e58c981	/warns · /banlist · /mutelist — Daftar
+07722765d	/giveaway · /endgiveaway — Giveaway
+faabdc38a	/filter — Balasan otomatis (mis. halo → Hai juga; media dan tombol diperbolehkan)
+0e48d2662	/filters · /stop <kata> · /stopall — Daftar filter / hapus
+a295c1d2b	/tag <pesan> · /stoptag — Tandai anggota bertahap / hentikan
+43f5db5d3	/record @user — Riwayat hukuman dan nama lama di semua grup bot (dikirim secara pribadi)
+4268b44a9	/giveaway 1d 3 Hadiah | channel=@channel messages=20 days=7 — Giveaway dengan syarat dan durasi
+f9892b61b	/myrank — Pangkat dan izinmu
+10ead6ab1	⭐ Admin Senior ke atas
+667e625bc	/ban @user [waktu] [alasan] · /unban — Ban
+387e5f34e	/unwarn @user — Hapus 1 peringatan
+48c85c764	/purge <jumlah/all> · /slowmode <dtk> — Hapus massal, mode lambat
+2454c2b92	/pin · /unpin — Sematkan
+d0ffce66f	/lockdown [mnt] · /lockmedia [mnt] — Kunci darurat
+f6b07290c	/approveall — Setujui permintaan bergabung
+f252c350e	/setrules · /setwelcome · /setgoodbye · /save · /clear — Aturan, sambutan, perpisahan, catatan
+7bf273598	(media, tombol, format, dan pesan acak didukung; ketik /setwelcome untuk bantuan)
+8c7cbbe68	/welcome · /goodbye · /resetwelcome — Pratinjau / kembalikan ke bawaan
+df2e5eccc	/schedule 6h <pesan> · /schedules — Pesan terjadwal (berulang)
+de546f6e8	🔱 Wakil Pendiri ke atas
+d18538a2d	/settings — Panel pengaturan bertombol (semua pengaturan perlindungan)
+00043ba1c	/setup — Pengaturan cepat (preset + sambutan + perlindungan)
+bfe1425f8	/forcesub @channel — Pengguna harus bergabung ke saluran untuk menulis (nonaktifkan: /forcesub off)
+886d570db	/unlockdown · /unlockmedia — Buka kunci
+5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
+443a00692	/setwarnlimit · /setwarnaction · /captchatime
+3d2493394	/blockmedia · /blockpack — Blokir media/paket
+20abda0cf	/admin (/addadmin) · /senioradmin @user [tag] — Beri pangkat
+3c7389596	/remove @user — Cabut pangkat
+a83e94dc8	/perms — Panel izin pribadi (secara pribadi ke bot)
+13accc070	/membertag @user <tag> — Tag admin
+775ec46f0	/reload — Segarkan daftar admin dari Telegram (hak yang diberikan manual/oleh bot lain)
+9a654a567	👑 Khusus pendiri
+f0d85c250	/cofounder @user — Jadikan wakil pendiri
+aed09d232	/setlog — Saluran log · Jaringan grup · Pemulihan admin cadangan
+81fcecc0c	📊 Info
+99e6db648	/stats · /chatinfo · /leaderboard · /staff
+a475e9c96	Format waktu: 30m, 2h, 7d
+78f33d7b8	Admin Telegram
+5a0e84cda	⚙️ Panel Pengaturan
+f910032f2	🌍 Bahasa: /setlang⟨0⟩
+215259316	⚙️ Pengaturan
+96fccfef2	🛡 Grup saya
+5e167ed13	📊 Statistik
+4ab530c07	❓ Bantuan
+3f15c0b6a	🤖 Bot klon
+a2c4fcfa1	🔗 Pilih grup
+ed11ea7cd	📢 Pilih saluran
+d7f837819	Pilih dari menu atau ketik perintah…
+2ac5318f5	➕ Tambahkan ke grup
+7357057be	📢 Tambahkan ke saluran
+2dadb70db	Menu di bawah 👇
+71aa20a4d	Pilih grup dulu: gunakan tombol 🛡 Grup saya atau 🔗 Pilih grup.
+3224664d6	Bot bukan admin di obrolan ini. Jadikan bot admin di sana lalu pilih lagi.
+78ad7212f	Kamu tidak punya izin di obrolan ini.
+2216a64f4	✅ Dipilih: <b>⟨0⟩</b>
+e107177fc	Menu bantuan
+9e88862d9	Aturan grup
+07efa78b4	Catatan tersimpan
+cf90a04f1	Profil dan peringatanmu
+b79df54d5	Peringkat aktivitas
+a0d54db08	Statistik pengguna
+c3da965fe	Info grup
+aa6b818af	Tampilkan ID
+c23bc7fa5	Lempar dadu
+cbd34c9f1	Lempar koin
+1a6e6af53	Laporkan pesan yang dibalas ke staf
+61e89c9ef	Mode AFK
+c51b37c71	Keluar dari daftar tag
+d1076c2fa	Bahasa grup
+03811f00b	Voting bisu (balas sebuah pesan)
+ef4e5e596	Tautan undangan pribadimu
+1db922722	Peringkat undangan
+53d58e1ac	Panel pengaturan bertombol
+0c4051b76	Segarkan daftar admin
+c55aa4167	Peringatkan
+cec03bba0	Hapus 1 peringatan
+263cc2188	Lihat peringatan
+76f0023be	Buka bisu
+9d1a81717	Buka ban
+6118dce5a	Keluarkan dari grup
+18bbd14ee	Hapus pesan secara massal
+2d7017ef2	Sematkan pesan
+d7722a3e3	Lepas sematan
+a263e4e53	Mode lambat
+9da046535	Daftar ban
+6d6c46eda	Daftar bisu
+a84a2a1e7	Simpan catatan
+385c7d8ec	Hapus catatan
+a60cb06d0	Pengaturan cepat
+d2dd24bcc	Tambah balasan otomatis
+364057e43	Daftar filter
+5d24c4032	Hapus filter
+e46d6d528	Pesan sambutan (media/tombol)
+2c1419a05	Pesan perpisahan
+27f1ba342	Tulis aturan
+3d5b58779	Tambah pesan terjadwal
+943458e1e	Pesan terjadwal
+2331d765c	Tandai anggota
+b0d7d4f3d	Hentikan penandaan
+e912877cd	Saluran wajib
+29cc4c872	Rekam jejak pengguna
+8871a3c02	Mulai giveaway
+dfae805ce	Akhiri giveaway
+1945bd345	Darurat: kunci grup
+c0559b5cc	Buka kunci grup
+422c89bec	Pangkat dan izinmu
+fa7d4e18f	Daftar staf
+84be9db5d	Statistik grup
+3a085165d	Blokir media yang dibalas
+414c8153f	Blokir paket stiker
+c3e7837f2	Kunci pengiriman media
+956c0ce19	Buka kunci media
+4e382259e	Mulai dan menu
+1c4ce1da4	Tampilkan menu
+7e27a3b5a	Pilih grup/saluran
+dc6cac394	Pengaturan grup terpilih
+e78fa8e35	Kirim banding ban
+eaba0a794	Bantuan
+cbad220d3	Pemulihan admin (orang tepercaya)
+fcea72bad	Pengaturan cepat untuk grup terpilih
+495825a5e	Panel web (semua pengaturan di satu halaman)
+9674953cf	Matikan pengumuman bot
+99ab93b21	Bahasa
+333895635	Tulis ke admin (layanan bantuan)
+0d0187ac4	Grup dan statistik botmu
+8938961a5	Pengumuman ke grup, saluran, orang
+be4f2dea9	Riwayat pengumuman
+0c8b2de83	Template pengumuman
+ecced9e02	Laporan pertumbuhan mingguan
+52b5b2176	Aktifkan/nonaktifkan layanan bantuan
+32791cc9a	Ban di grup-grup botmu
+a7b61f397	Kelola bot klon
+205162f9b	Statistik performa
+5d22ead7d	Panel manajemen
+84c0cbd02	Ban global
+68cd0b7eb	Cabut ban global
+a38b6848f	Daftar ban global
+45a767875	Blokir pengguna/obrolan
+4902bf286	Buka blokir
+cfc719f1d	Cadangan database
+efdd2ee59	Mode pemeliharaan
+bf65fdcd0	Blokir media di semua grup
+385efb5c0	⚡ Bot utama: @⟨0⟩
+8f13119d3	⟨0⟩ — bot pelindung grup dan saluran: spam, tautan, flood, raid, dan captcha.
+63edd3296	🛡 ⟨0⟩ Security Bot
+7ebe2ab6b	Melindungi grup dan saluranmu dari spam, tautan, flood, raid, dan akun palsu. Semua pengaturan dilakukan dari panel bertombol.
+287dec170	Untuk memulai: /start⟨0⟩
+81daf5632	Permintaanmu untuk bergabung ke <b>⟨0⟩</b> telah diterima. Jawab pertanyaan ini agar disetujui:
+784db6bac	⏰ Waktu: ⟨0⟩
+90d0b5f0a	🔐 Verifikasi pribadi dikirim: ⟨0⟩ | ⟨1⟩
+49349d70e	Verifikasi ini sudah kedaluwarsa.
+6af257079	Permintaan ini sudah tidak berlaku (mungkin sudah diproses).
+d7eff8c3b	✅ Terverifikasi! Kamu telah diterima di <b>⟨0⟩</b>.
+69af7d417	✅ Terverifikasi secara pribadi dan diterima: ⟨0⟩ | ⟨1⟩
+99c1bac07	❌ Jawaban salah. Permintaanmu untuk bergabung ke <b>⟨0⟩</b> ditolak; kamu bisa mengirim permintaan baru.
+86e28712b	❌ Verifikasi pribadi gagal, ditolak: ⟨0⟩ | ⟨1⟩
+9dbf30953	⏰ Waktu habis, permintaan bergabungmu ditolak. Kamu bisa mengirim permintaan baru.
+2ec5e8129	⏰ Waktu verifikasi pribadi habis → ID:⟨0⟩ ditolak | ⟨1⟩
+12ae98fff	⚠️ Flood saluran terdeteksi! ⟨0⟩ postingan dalam 10 detik
+f271bb123	🌐 Permintaan bergabung dari pengguna yang diban global ditolak: ⟨0⟩
+7b944f9a5	❌ Bot/akun palsu ditolak: ⟨0⟩ → ⟨1⟩
+d5d491f80	✅ Diterima otomatis: ⟨0⟩ → ⟨1⟩
+5f7e623cd	❌ Ditolak otomatis: ⟨0⟩ → ⟨1⟩
+f8cddb848	📩 Permintaan baru: ⟨0⟩ → ⟨1⟩
+a984efcca	Kamu tidak bisa bertindak terhadap orang ini.
+30a92b565	⛔ Pengelolaan pangkat memerlukan ⟨0⟩ atau lebih tinggi.
+f57eaa44e	⛔ Kamu tidak bisa mengubah orang dengan pangkat yang sama atau lebih tinggi.
+c8857eea2	⛔ Pangkat ⟨0⟩ hanya bisa diberikan oleh pangkat yang lebih tinggi.
+fd71ebc88	Pengguna tidak ditemukan.
+fa5ded262	❌ Bot tidak bisa mengangkat admin!
+889786c65	❌ Pengguna tidak ditemukan di grup!
+3c0a7e1f2	⚙️ Izin
+e9e94dc59	Orang ini tidak punya pangkat. Beri pangkat dulu dengan /admin atau /senioradmin.
+627b90668	⚠️ ⟨0⟩ (bot tidak memilikinya)
+ae8f6f509	📡 Izin Telegram
+033d23563	🤖 Izin bot
+3d3a3d682	→ 📡 Izin Telegram
+8bff101a7	→ 🤖 Izin bot
+daddb4f0e	❌ Cabut pangkat
+12ec1558f	✅ Tutup
+8f4a3cad6	👤 <b>Mengubah izin:</b> ⟨0⟩
+2a138f61a	Pangkat: <b>⟨0⟩</b>
+9d0d28c34	✅ aktif · ❌ nonaktif · 🔒 pangkat terlalu rendah
+bc2ec6c27	<i>Perubahan langsung berlaku. Tombol pangkat mengubah pangkat.</i>
+4dd50d885	Tombol tidak valid.
+2f00bbdcd	Izin ini di atas pangkatnya.
+da5fcba10	Pangkat tidak valid.
+8ba8423be	Sudah ⟨0⟩.
+aac33021a	⟨0⟩ diangkat: ⟨1⟩ | ⟨2⟩
+d37ea2c16	Pangkat: ⟨0⟩
+222dfbc00	Pangkat dicabut.
+f97fd51ad	✅ Pangkat ⟨0⟩ dicabut.
+570da29a3	Kamu tidak punya izin.
+c119667e9	✅ Panel izin ditutup. Perubahan disimpan.
+cf9f2e455	⟨0⟩ bukan staf di grup ini.
+d4df62038	🔒 Izin ini di atas pangkatmu atau bot tidak memilikinya.
+ca3e89467	Tidak ada staf yang bisa kamu ubah. Untuk memberi pangkat, ketik /admin @orang di grup.
+9befd0808	👑 <b>Pengelolaan izin</b>
+6fcfd3b55	Pilih orang yang akan diubah:
+770d8a43d	Konfigurasi Mode Malam
+0d3da9061	Pilih izin yang akan dibatasi, lalu tekan Simpan:
+3014d10c7	Untuk mengubah jam: /nightmod 23:00 07:00
+8b386c8fe	Kesalahan konfigurasi mode malam.
+441634b34	🛡 ⟨0⟩ aktif! /settings untuk pengaturan, /help untuk perintah.
+f9f826fff	🛡 <b>⟨0⟩ Security Bot</b>
+a299d1e4f	Perlindungan spam, tautan, flood, raid, dan captcha untuk grup dan saluranmu.
+b40285a71	1️⃣ Tambahkan bot ke grupmu dengan izin yang diperlukan menggunakan tombol di bawah.
+15b8ba9ba	2️⃣ Pilih grupmu dari menu di bawah dan kelola semuanya dengan ⚙️ Pengaturan.
+eae59de08	💬 Bantuan
+81e22b47b	Tautan izin tidak valid.
+5af6c10c1	Grup terdaftar! Sekarang kamu bisa memilihnya secara pribadi dengan 🛡 Grup saya.
+425ac7c01	ID grup: ⟨0⟩
+60a03153e	Gagal mendaftar: jadikan bot admin di grup ini dulu.
+08cdd8869	Grup ini terdaftar (ID: ⟨0⟩)
+7b80705e1	Ketik /select di DM untuk membuka panel manajemen.
+c6668e444	Tidak ditemukan grup/saluran terdaftar milikmu.
+489f886fe	Pilih obrolanmu dengan tombol 🔗 Pilih grup / 📢 Pilih saluran di bawah: jika bot adalah admin di sana, otomatis dikenali. Jika bot belum ditambahkan, gunakan tombol Tambahkan ke grup terlebih dahulu.
+529f5b296	Pilih saluran/grup yang akan dikelola:
+3b561f5ba	✅ Dipilih: ⟨0⟩
+e537ee79f	Sekarang kamu bisa menggunakan perintah di DM.
+5da9ca5b4	ID-mu: <code>⟨0⟩</code>
+758b4fa2f	ID orang yang dibalas: <code>⟨0⟩</code>
+a52056450	Contoh:
+8db290527	Saluran tidak ditemukan!
+d7db3c4cf	Log saat ini: ⟨0⟩
+354f04cc0	Penggunaan: /setlog -1001234567890
+9cc790504	✅ Saluran log diperbarui: ⟨0⟩
+f40d6696a	STAF GRUP
+511c4973a	Total: ⟨0⟩ staf
+284837aa3	Penggunaan: /gban <id|@user> [alasan] (atau balas sebuah pesan)
+e2d4f8ab8	Orang ini tidak bisa diban.
+01c3bd4a0	di semua bot
+cb8da44a3	di grup-grup ⟨0⟩
+49aed1394	🌐 Mem-ban ⟨0⟩ ⟨1⟩...
+73497703d	🌐 ⟨0⟩ diban ⟨1⟩.
+a960dfa59	✅ ⟨0⟩ obrolan | ❌ ⟨1⟩ (tanpa izin/bukan anggota)
+ffc42c25d	Penggunaan: /ungban <id|@user>
+ad983fea1	✅ ⟨0⟩: ⟨1⟩ban dicabut.
+63de87994	Daftar ban kosong.
+d65a4bee5	Daftar Ban Global
+c58c96fc0	Daftar Ban ⟨0⟩
+6d34fa6d2	🌐 <b>⟨0⟩</b> (50 terakhir):
+15db0d20b	Saat ini: ⟨0⟩ (⟨1⟩)
+08771c47b	Penggunaan:
+9ebd56f1c	✅ Hukuman saat batas peringatan tercapai: ⟨0⟩⟨1⟩
+bd06580b1	Pembatasan anggota baru: ⟨0⟩
+d8eaa4a1a	Penggunaan: /newbie <menit> atau /newbie off
+4986c7002	Masukkan menit antara 0-1440 atau ketik off.
+7e4bdbce0	✅ Pembatasan anggota baru dinonaktifkan.
+d5a3095ed	✅ Anggota baru tidak bisa mengirim tautan/media/terusan selama ⟨0⟩ mnt pertama.
+d4c80a6a7	🔗 Daftar pengecualian tautan:
+f3425da9b	/allowlink add youtube.com
+71399725d	/allowlink del youtube.com
+99d71c223	(jalur seperti t.me/mychannel juga bisa ditambahkan)
+d555eadad	(kosong)
+4bcfe1994	✅ ⟨0⟩ ditambahkan ke daftar pengecualian tautan.
+e6dffb4e9	✅ ⟨0⟩ dihapus dari daftar.
+c22e23f31	Penggunaan: /captchatime 2m (antara 30s dan 60min)
+b4b2c0b74	✅ Waktu captcha: ⟨0⟩
+42cf26778	Untuk banding, kirim pesan pribadi kepadaku: /appeal <penjelasan>
+ef023696b	Penggunaan: /appeal <mengapa ban-mu harus dicabut?>
+294f98c41	Kamu tidak punya ban yang tercatat.
+78158a307	Untuk grup mana bandingmu?
+0072d91b7	Kamu bisa mengajukan banding sekali setiap 24 jam untuk grup ini.
+0799f76c1	✅ Cabut ban
+1358a154b	❌ Tolak
+6d20aaa15	📨 <b>Banding ban</b> #⟨0⟩
+1040c08fa	Grup: <code>⟨0⟩</code>
+fae78e9bb	Alasan ban: ⟨0⟩
+76700df28	✅ Bandingmu telah dikirim ke admin. Kamu akan diberi tahu hasilnya di sini.
+53667435f	Waktu habis, ketik /appeal lagi.
+6486efe3d	Mengirim...
+6c9744f83	Banding tidak ditemukan.
+e2457d551	Banding ini sudah ditangani: ⟨0⟩
+07b34dcdd	✅ Bandingmu diterima, ban-mu dicabut. Kamu bisa bergabung kembali ke grup.
+ed103ceb6	❌ Bandingmu ditolak.
+f7480a2b3	<b>Hasil:</b> ⟨0⟩ — ⟨1⟩
+b497d1353	✅ Diterima
+6c25e020d	❌ Ditolak
+97239bc70	📨 Banding #⟨0⟩ ⟨1⟩ | ⟨2⟩
+7a80eefec	🖼 tanpa media
+573052e01	🔘 ⟨0⟩ tombol
+b81be0f7f	🎲 ⟨0⟩ varian
+d542cb1c4	💎 salinan persis
+03cb45a36	Foto
+638bbfe15	File
+867b291d2	Musik
+e8bff35ea	Suara
+2e9d0e77a	Stiker
+966648de4	Pesan video
+7d472b473	jam
+f4a9f3249	Tombol ini sudah tidak berlaku.
+30dc00c2e	Tautan ini sudah tidak berlaku.
+c9910a305	Catatan ini sudah tidak ada.
+0e89955b2	👋 {name} telah meninggalkan kita. Selamat jalan!
+e41edf275	📜 <b>Aturan ⟨0⟩</b>
+3f1696378	<b>Format:</b> pesan disimpan persis seperti yang kamu tulis di Telegram (tebal, miring, tautan, spoiler, kutipan).
+06c164645	<b>Media:</b> balas foto/video/GIF/stiker lalu ketik perintahnya.
+6a1a1a0ad	<b>Tombol</b> (setiap baris adalah satu deret, berdampingan dengan <code>&amp;&amp;</code>):
+a1c3d2c0b	<code>Saluran kami - https://t.me/channel &amp;&amp; Bantuan - @support</code>
+3424e60cc	<code>Baca aturan - rules</code> · <code>Info - popup:Teks</code> · <code>Catatan - #nama</code>
+dd3608634	Warna: di akhir baris <code>#green</code> <code>#red</code> <code>#blue</code> · Gaya Rose: <code>[Saluran](buttonurl://t.me/channel)</code>
+90f26740a	<b>Variabel:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
+23adc295f	<b>Acak:</b> pisahkan beberapa pesan dengan baris yang hanya berisi <code>%%%</code>.
+7d75ab43e	Pesan ini tidak bisa digunakan di saluran.
+93a792a44	Sambutan
+06ba336bf	Perpisahan
+ff0fe91d4	Aturan
+86eca05aa	✏️ <b>Pesan ⟨0⟩</b>
+0d20c41d6	Penggunaan: <code>/⟨0⟩ teks</code> atau balas pesan/media: <code>/⟨1⟩</code>
+ee9b02bb7	💎 Emoji premium dipertahankan: pesan disalin persis. Jangan hapus pesan sumbernya (jika dihapus, dikirim dengan emoji biasa).
+d54d1a799	✅ Pesan ⟨0⟩ disimpan (⟨1⟩).⟨2⟩
+32bc1141c	Pratinjau:
+a4fd88326	✏️ Pesan ⟨0⟩ diperbarui | ⟨1⟩
+f2ecba035	Belum ada aturan di grup ini.
+f6d49a8a4	Kamu bisa menambahkannya dengan /setrules.
+3dadf54ab	Pesan ⟨0⟩: ⟨1⟩ · ⟨2⟩
+42b967a7b	Untuk mengubahnya: /set⟨0⟩
+6d2d95e97	👋 Sambutan
+46af570c5	🚪 Perpisahan
+6413cb724	✅ Pesan sambutan dikembalikan ke bawaan.
+14324da2a	Format interval: <code>30m</code>, <code>6h</code>, <code>1d</code>
+a44cbb972	Interval minimal 10 menit dan maksimal 7 hari.
+7e69525ad	Satu grup maksimal memiliki ⟨0⟩ pesan terjadwal.
+ee86ab412	⏰ <b>Pesan terjadwal</b>
+8dada6c44	Penggunaan: <code>/schedule 6h Jangan lupa baca aturan!</code>
+82c791f2c	atau balas pesan/media: <code>/schedule 6h</code>
+7939ca797	Daftar dan hapus: /schedules
+62c97be15	✅ Pesan terjadwal #⟨0⟩: akan dikirim setiap ⟨1⟩ (yang pertama dalam ⟨2⟩). Daftar: /schedules
+bd18601d1	⏰ Pesan terjadwal ditambahkan (setiap ⟨0⟩) | ⟨1⟩
+e2d35adb1	⟨0⟩ <b>#⟨1⟩</b> setiap ⟨2⟩ · berikutnya ⟨3⟩
+76c241937	🧹 Hapus yang sebelumnya
+b35d597c9	📌 Simpan yang sebelumnya
+225f856c3	⏰ <b>Pesan terjadwal</b>
+207dc0f12	Untuk menambah: <code>/schedule 6h pesan</code> (media/tombol didukung)
+351e8911a	Belum ada.
+242c0f02c	Tidak ditemukan
+ec93a493c	⏸ Dihentikan
+e388dd558	▶️ Dimulai
+d08a36466	➕ Pesan terjadwal baru
+25cda8fe6	🚪 <b>Pesan perpisahan</b> — ⟨0⟩
+b61184fea	Status: <b>⟨0⟩</b> · ⟨1⟩
+0eec2952d	Hanya dikirim untuk orang yang keluar sendiri (bukan dikeluarkan/diban). Waktu hapus otomatis sama dengan sambutan.
+b0037f2fb	👋 <b>Sambutan</b> — ⟨0⟩
+611ef08d1	Sambutan: <b>⟨0⟩</b> · ⟨1⟩
+a4530174c	📜 Aturan: ⟨0⟩ · 🚪 Perpisahan: ⟨1⟩ · ⏰ Pesan terjadwal: ⟨2⟩
+d0b1d849f	Untuk media, tombol, dan variabel tekan ✏️ Edit (atau ketik /setwelcome di grup untuk melihat bantuannya).
+2b7ced272	Aktif
+e5b4e786e	ada
+68b8326a2	tidak ada
+2bae1a721	✏️ Edit
+894e0e55f	👁 Pratinjau
+099ae3d9c	🖼 Hapus media
+8bb5bb494	↩️ Kembalikan ke bawaan
+adcf7aa93	🧹 Hapus yang lama
+1eaf255d1	👥 Satu pesan untuk banyak orang
+7ef1d92b8	⏱ Hapus otomatis
+e0454a0ce	📩 Kirim secara pribadi
+060b7f669	📜 Tulis aturan
+ee89e73e1	👁 Aturan
+b6669596d	🚪 Pesan perpisahan ›
+0c2dc5967	⏰ Pesan terjadwal ›
+9a8a538db	Daftar hitam: ⟨0⟩
+0eed14a22	Tidak ada aturan
+a6aea5676	👁 Pratinjau dikirim
+eb9f11f93	↩️ Dikembalikan ke bawaan
+14af210b4	🖼 Media dihapus
+f615cd8f5	⏹ Penandaan dihentikan
+ce76be77d	✅ Penandaan selesai
+98452c88d	⟨0⟩: ⟨1⟩/⟨2⟩ orang ditandai.
+7f535520c	/tag digunakan di grup.
+59b9ad51d	⏳ Penandaan sudah berjalan di grup ini. Untuk menghentikan: /stoptag
+46a8f403f	⏳ Ada jeda antar penandaan agar grup tidak dibanjiri. Coba lagi dalam ⟨0⟩ mnt.
+02343ede4	Tidak ada yang bisa ditandai. (Bot mengenal anggota yang menulis atau bergabung di grup.)
+29099e290	🏷 Penandaan dimulai: <b>⟨0⟩</b> orang, ⟨1⟩ per pesan · sekitar ⟨3⟩ mnt
+5a101718d	Untuk menghentikan: /stoptag
+f64e607e0	⏹ Hentikan
+87e8dab7e	🏷 /tag dimulai (⟨0⟩ orang) | ⟨1⟩
+93e9f8e23	Tidak ada penandaan yang sedang berjalan.
+de3fd2d6f	⏹ Menghentikan penandaan…
+6e637aa42	⏹ Menghentikan
+a0fd2c146	Penandaan sudah selesai.
+60c103470	Tulis ini di grup tempat kamu tidak ingin ditandai.
+170599775	🔔 Kamu masuk daftar /tag lagi.
+3812eb431	🔕 Kamu tidak akan ditandai dengan /tag di grup ini lagi. Untuk membatalkan, ketik /notag lagi.
+21946f144	⚠️ Saluran wajib tidak bisa diperiksa: apakah bot admin di saluran? (atur ulang dengan /forcesub)
+8e87bf498	Gabung ke saluran
+cbb50c7c3	✅ Sudah bergabung
+0ca6d0da1	📢 ⟨0⟩, untuk menulis di grup ini kamu harus bergabung dulu ke saluran <b>⟨1⟩</b>.
+c0ec4b2f3	Tombol ini bukan untukmu.
+aaed7d345	✅ Terima kasih, sekarang kamu bisa menulis!
+bd2685273	Kamu belum bergabung ke saluran. Gabung dulu dengan tombol 📢, lalu tekan lagi.
+1886b3d17	Tulis saluran sebagai <code>@username</code>, <code>t.me/channel</code>, atau ID <code>-100…</code>.
+f02d79616	Saluran tidak ditemukan atau bot tidak ada di saluran. ⟨0⟩
+87bee0af3	Ini bukan saluran.
+4171be67d	Tambahkan bot ke saluran sebagai <b>admin</b> dulu (diperlukan untuk melihat anggota).
+9d38f82c5	Aktif — <b>⟨0⟩</b>
+4adcca7b1	📢 <b>Saluran wajib</b>: ⟨0⟩
+a3407edfd	Atur: <code>/forcesub @channel</code>
+95acb52af	Nonaktifkan: <code>/forcesub off</code>
+045928d81	Bot harus menjadi admin di saluran. Admin dan pemilik bot dikecualikan.
+fe929a5d7	📢 Saluran wajib dinonaktifkan.
+53a5e40c2	Pesan dari orang yang belum bergabung ke saluran dihapus dan tombol gabung ditampilkan.
+cef984319	📢 Saluran wajib: ⟨0⟩ | ⟨1⟩
+d48d5b5ae	sebentar
+05260e946	⟨0⟩ hari
+b04fc7f5d	baru saja
+21aaa5a62	selama ⟨0⟩ mnt
+7448bebe4	selama ⟨0⟩ jam
+5ba98ca40	selama ⟨0⟩ hari
+ad5b41977	💤 ⟨0⟩ sekarang AFK⟨1⟩
+44c5de771	👋 ⟨0⟩ kembali (AFK selama ⟨1⟩).
+e117178d7	💤 ⟨0⟩ sedang AFK (⟨1⟩)⟨2⟩
+44140939f	📢 <b>Saluran wajib</b> — ⟨0⟩
+e5b1aac1e	Status: <b>⟨0⟩</b>
+0716f7bc2	Saluran: ⟨0⟩
+0d5b480e5	Pesan anggota yang belum bergabung ke saluran dihapus dan muncul pemberitahuan dengan tombol '📢 Gabung ke saluran / ✅ Sudah bergabung'. Admin dikecualikan. Bot harus menjadi admin di saluran.
+7d73e8088	belum diatur
+6ba5f155e	✏️ Atur saluran
+c9606c43c	🏷 <b>Pengaturan tag</b> — ⟨0⟩
+203ce8b22	<code>/tag pesan</code> menandai anggota secara bertahap. <code>/stoptag</code> menghentikannya, anggota bisa keluar dari daftar dengan <code>/notag</code>.
+b86bf2507	Per pesan: <b>⟨0⟩ orang</b> · Gaya: <b>⟨1⟩</b> · Siapa: <b>⟨2⟩</b>
+d2abd1ed8	Nama
+1da63df5e	aktif dalam 7 hari terakhir
+4b30ca4e3	semua orang
+4e45e032a	Orang
+4dd25e398	⟨0⟩Dengan nama
+c39394400	⟨0⟩Dengan emoji
+b48e5cb08	Hanya yang aktif dalam 7 hari terakhir
+b1d807974	Beri tahu
+ca39fe0f8	diban di ⟨0⟩ grup lain milik bot
+9872ca74d	terdaftar di daftar spam CAS
+9396a2730	🚩 ⟨0⟩ ada di daftar hitam (⟨1⟩) → <b>diban</b>.
+545b1c5c1	🚩 ⟨0⟩ ada di daftar hitam (⟨1⟩) → <b>dibisukan</b>. Admin bisa melepaskannya.
+07441d924	🚩 Peringatan: ⟨0⟩ ⟨1⟩.
+45358021b	✏️ Perubahan nama: ⟨0⟩ (ID <code>⟨1⟩</code>)
+281b2747a	Lama: ⟨0⟩
+059547382	Baru: ⟨0⟩
+a2c2bec19	📋 <b>Rekam jejak</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
+0786218b9	🏷 Nama lama: ⟨0⟩
+14c5bccb9	🚩 Daftar hitam bersama: ⟨0⟩
+38fd7e621	<b>diban di ⟨0⟩ grup</b>
+15ab6d34d	bersih
+04a2454bb	🌐 CAS: ⟨0⟩
+66b71c0f8	⚠️ terdaftar
+5a25bd323	📊 ⟨0⟩ hari terakhir: ⚠️ ⟨1⟩ peringatan · 🔇 ⟨2⟩ bisu · 👢 ⟨3⟩ kick · 🚫 ⟨4⟩ ban
+5f914853f	Tidak ada hukuman yang tercatat.
+05d9f273c	Penggunaan: /record @user, /record ID, atau /record sebagai balasan ke pesan
+f3ac03616	📩 Rekam jejak dikirim secara pribadi.
+5d8b9aade	📩 Agar rekam jejak bisa dikirim secara pribadi, kirim /start kepadaku di chat pribadi dulu.
+2e3efd222	🤖 Buka bot
+859b5bb09	🔇 Bisukan (⟨0⟩/⟨1⟩)
+4d8231ce2	❌ Batalkan (admin)
+39229bf11	/votemute digunakan di grup, sebagai balasan ke sebuah pesan.
+6a2b8f19c	Voting bisu nonaktif di grup ini.
+61afc3c7f	Balas pesan orang yang ingin kamu bisukan dengan /votemute.
+89cfeb825	Voting tidak bisa dimulai untuk orang ini.
+77053150c	Anggota baru tidak bisa memulai voting (kamu harus sudah di grup minimal 1 hari).
+ebb86ddce	Kamu baru saja memulai voting, tunggu sebentar.
+2848c7501	Voting untuk orang ini sudah berjalan.
+97509d3a2	🗳 <b>Voting bisu</b> untuk ⟨0⟩ (⟨1⟩)
+49efb6ab2	Dimulai oleh: ⟨0⟩ · butuh ⟨1⟩ suara · dalam ⟨2⟩ mnt
+dc6640321	Voting ini sudah kedaluwarsa.
+608b293ec	Voting dibatalkan
+0fdae78cf	❌ Voting dibatalkan oleh ⟨0⟩.
+a0e2f43f9	Kamu tidak bisa memberi suara untuk dirimu sendiri.
+ffff3ff40	Anggota baru tidak bisa memberi suara (kamu harus sudah di grup minimal 1 hari).
+fe7fa73cc	Kamu sudah memberi suara.
+e0e085981	✅ Suaramu dihitung
+73e49db75	Gagal membisukan (izin bot?)
+aa6350471	🔇 Dibisukan
+75f1001f2	🔇 ⟨0⟩ dibisukan selama ⟨2⟩ dengan ⟨1⟩ suara.
+8555c063c	🗳 Voting: ⟨0⟩ dibisukan selama ⟨2⟩ dengan ⟨1⟩ suara | ⟨3⟩
+18fb9aaaa	🧑‍⚖️ <b>Perlindungan komunitas</b> — ⟨0⟩
+f1deffa09	🚩 <b>Daftar hitam bersama:</b> jika seseorang yang diban di grup lain milik bot bergabung ke sini, tindakan yang dipilih diterapkan.
+43a185211	🌐 <b>CAS:</b> akun yang terdaftar di daftar spam dunia juga ditangkap.
+6e4660beb	✏️ <b>Pelacakan nama:</b> perubahan nama/username ditulis ke saluran log (riwayat di /record).
+adabf49fe	🗳 <b>Voting bisu:</b> anggota bisa memberi suara pada pesan dengan /votemute untuk membisukan seseorang sementara (anggota baru tidak bisa memberi suara, tidak bisa dipakai pada staf).
+b800b8e5f	🚩 Daftar hitam bersama
+97bceca81	✏️ Pelacakan nama
+c5772d4e7	🗳 Voting
+f12c4aec5	Suara yang dibutuhkan
+662158acd	Bisu
+5c4935039	🎁 <b>Giveaway</b>⟨0⟩
+0dad0ba32	🏆 Jumlah pemenang: <b>⟨0⟩</b>
+7c606f70b	⏰ Berakhir: <b>⟨0⟩</b>
+92b031d27	📢 menjadi anggota saluran ⟨0⟩
+1a822445f	💬 minimal ⟨0⟩ pesan di grup (⟨1⟩ hari terakhir)
+d9e82561c	📅 berada di grup minimal ⟨0⟩ hari
+d0610eddb	🛡 akun asli dengan foto profil atau username
+208622235	📋 <b>Syarat</b>
+99c8d7297	👥 Peserta: <b>⟨0⟩</b>
+cadb40104	🎁 Ikut (⟨0⟩)
+5ccfb1128	Saluran
+eb533cc4f	Ada giveaway yang sedang berjalan di grup ini. Untuk mengakhirinya: /endgiveaway
+10870143e	Durasi harus antara 1 menit dan 30 hari.
+9c50f1ba5	❌ Syarat saluran: ⟨0⟩
+ec58b461d	✅ Giveaway dimulai.⟨0⟩
+9d6e7b1e0	Contoh dengan syarat: /giveaway 1d 3 Hadiah | channel=@channel messages=20 days=7
+8a942b576	Untuk mengakhiri: /endgiveaway [jumlah pemenang]
+05fd915f2	🎉 ⟨0⟩ memulai giveaway: ⟨1⟩ | ⟨2⟩
+30f5e7aae	Bot tidak bisa ikut.
+f03d1a2cb	Kamu harus bergabung ke grup dulu.
+b5417cc27	Keanggotaan grupmu tidak bisa diverifikasi.
+004bfc204	Akun tanpa foto profil atau username tidak bisa ikut (perlindungan akun palsu).
+39a47e334	Kamu harus bergabung ke ⟨0⟩ dulu.
+99797f0e4	Kamu butuh minimal ⟨0⟩ pesan di grup (sekarang ⟨1⟩).
+f21f9c94c	Kamu harus sudah berada di grup minimal ⟨0⟩ hari.
+ff2167b09	Giveaway ini sudah berakhir.
+b5116fff1	Kamu sudah ikut, semoga beruntung! 🍀
+5c88f09bc	🎉 Kamu ikut giveaway, semoga beruntung!
+b05652dd1	✅ <b>Giveaway berakhir</b>
+4cc381328	🎉 Giveaway telah berakhir! Tidak ada peserta yang memenuhi syarat.
+8e2d564a7	🎉 <b>Giveaway telah berakhir!</b>⟨0⟩
+5aa86da43	🏆 Pemenang: ⟨1⟩
+e9ade43fd	👥 Peserta: ⟨0⟩
+7438ab083	🏆 Giveaway berakhir: ⟨0⟩ | ⟨1⟩
+1e5f2647b	tanpa pemenang
+12a0187af	Tidak ada giveaway yang aktif.
+9de1a5b57	✅ Giveaway diakhiri.
+ff647517b	Pesan harian — 30 hari terakhir
+34673a626	Pesan per jam (waktu Turki, 30 hari)
+fa46923fb	Bergabung / keluar — 30 hari terakhir
+0edbd3fce	Bergabung (⟨0⟩)
+03822ea5b	Keluar (⟨0⟩)
+5b09123ba	Anggota paling aktif — 7 hari terakhir
+8faf5f37f	Belum ada data
+c68b2a090	💬 Pesan: 7 hari <b>⟨0⟩</b> · 30 hari <b>⟨1⟩</b> · anggota aktif (7 hari): <b>⟨2⟩</b>
+efd6992e0	👥 Dalam 30 hari bergabung <b>⟨0⟩</b> · keluar <b>⟨1⟩</b>
+980151f9d	🛡 Total: 🚫 ⟨0⟩ ban · 🔇 ⟨1⟩ bisu · 👢 ⟨2⟩ kick · 🔁 ⟨3⟩ spam · 🙋 ⟨4⟩ permintaan
+8b3ad8463	⟨0⟩ — statistik
+afd536817	Hukuman
+74a1b4f70	🌊 Flood: batas pesan
+7d5fdce06	🌊 Flood: rentang waktu
+6eec7f346	🖼 Banjir media: batas media
+188dc2ac4	🖼 Banjir media: rentang waktu
+4cb84b51a	🔇 Durasi bisu
+3b723e30f	🕊 Orang yang dikecualikan dari spam
+62af570a8	Satu ID pengguna per baris. Perlindungan spam, flood, dan tautan tidak berlaku untuk orang-orang ini.
+97559aa34	🛡 Perlindungan
+eaecb6e7c	🔤 Daftar kata dan tautan
+50e7fc41b	Kata terlarang
+5d70efcb4	Satu kata per baris. Untuk regex, awali dengan re:
+a59a817c8	Domain yang diizinkan
+98ae8882f	Satu domain per baris (mis. youtube.com).
+17dfd3589	🚪 Bergabung
+47bc3cee8	Waktu captcha
+31a22d269	📩 Verifikasi pribadi untuk permintaan bergabung
+51640d5b4	Raid: batas anggota
+33500eff3	Raid: rentang waktu
+bcd337aa1	🐣 Pembatasan anggota baru
+b7e0a1cb1	Bisukan pengguna tanpa username
+3fe9d6820	✅ Terima otomatis permintaan bergabung
+876437b88	❌ Tolak otomatis permintaan bergabung
+94dd4d1bd	🤖 Tolak bot / pengguna tanpa username
+b582c2d59	🖼 Media tidak pantas
+ca770c605	🤖 Pemindaian AI untuk konten 18+
+737b0637b	Foto, stiker, dan GIF dipindai (nudenet harus terpasang di server).
+1903d3d63	📦 Hapus file berbahaya
+9c0ff36ee	file seperti .apk .exe .bat .scr
+c79ee4fbb	Jika banyak media tidak pantas masuk dalam waktu singkat, media grup dikunci sementara.
+b43510a81	✏️ Edit dan laporan
+e97c80f7b	✏️ Perlindungan edit terlambat
+7f9f3195d	Pesan yang diedit beberapa waktu setelah dikirim akan dihapus; versi lama dan baru dikirim ke pendiri.
+5e74ca845	👥 Berlaku untuk
+ddd26077d	Pangkat yang tidak dipilih dikecualikan. Hanya pendiri yang bisa mengubah ini.
+66613016d	Batas waktu edit
+e0d3940a6	📨 Beri tahu pendiri / penambah
+9b1e938f3	🚩 Sistem laporan (/report, @admin)
+44d53d26e	⚠️ Peringatan
+70d607de5	Batas peringatan
+a8dd080ee	Saat batas tercapai
+453982208	Durasi hukuman sementara
+bfbfead91	👋 Sambutan
+e8a88eb95	🧹 Hapus yang lama saat ada anggota baru
+5c2fbdfa8	👥 Satu pesan untuk banyak yang bergabung
+90de79bd5	🚪 Pesan perpisahan
+0f39f1096	📜 Aturan
+f9c17c1f0	🏷 Penandaan dan saluran
+4f7b4fd4f	/tag: per pesan
+4aa6ce6cc	Gaya /tag
+6b93199e3	Dengan nama
+aa42b8748	Dengan emoji
+1d365363e	📢 Saluran wajib
+7b7afd285	Atur saluran dengan /forcesub @channel.
+87bb0ff1a	🔗 Kontes undangan
+1c0fda956	Anggota mendapatkan tautan sendiri dengan /invite, peringkat dengan /invites.
+c8d05f85f	🧑‍⚖️ Perlindungan komunitas
+33af72703	Saat seseorang yang diban di grup lain milik bot bergabung.
+25347c8be	Tindakan daftar hitam
+f7e588100	🌐 Daftar spam CAS
+4a02f552b	✏️ Pelacakan perubahan nama
+32a52c44c	🗳 Voting bisu
+9b96d57aa	Durasi voting bisu
+d51893a35	🌍 Bahasa
+8d6c8a4a5	Bahasa bot di grup ini
+45ac69c17	Pesan, tombol, dan peringatan bot akan dalam bahasa ini. Konten yang kamu tulis tidak berubah.
+a53ce8e7e	👮 Audit admin
+d06ffe7b8	📋 Ringkasan admin harian
+79c2f9928	Setiap malam: siapa melakukan berapa ban, bisu, peringatan, dan penghapusan (ke pendiri dan orang yang menambahkan bot).
+c1b823489	🚨 Batas tindakan admin
+b05a27d38	Jika staf selain pendiri melakukan ban/kick/bisu melebihi batas dalam 1 jam, haknya ditangguhkan.
+2a6b6f7f9	Batas per jam
+99f28dbae	🗑 Salin pesan yang dihapus ke saluran log
+704d44996	Yang dihapus dengan /del dan /purge. Telegram tidak memberi tahu bot tentang penghapusan manual.
+bf952a57c	🛟 Pemulihan admin
+c4395cbb9	Orang tepercaya (maksimal 3)
+94f3d0e2c	Satu ID pengguna per baris. Jika admin dicopot massal, orang-orang ini bisa mengirim /recover ke bot.
+44ada5469	♻️ Pulihkan otomatis setelah pencopotan massal
+fe85b70c6	#green
+485f81ade	#red
+9cfcbc726	Pilihan tidak valid
+4094a1250	Terlalu panjang: ⟨0⟩…
+3994c99a9	ID tidak valid: ⟨0⟩ (hanya angka)
+5055a2323	Maksimal ⟨0⟩ orang
+abe802098	Tidak valid
+43936b588	Pesan tidak boleh kosong
+45313b745	Kolom tidak dikenal
+98d2db628	Setiap 30 menit
+15ff62ef8	Setiap jam
+3ff28dc87	Setiap 2 jam
+b7b8f6424	Setiap 3 jam
+b5416f932	Setiap 6 jam
+d74bcca07	Setiap 12 jam
+e07f13000	Sekali sehari
+f1868872f	Setiap 3 hari
+b09892476	Sekali seminggu
+fe3e896af	📦 Paket stiker: ⟨0⟩
+cce0f0bc2	Kamu tidak punya izin
+b91959e41	Format waktu harus HH:MM
+6ed0b041b	🌙 Mode malam disimpan
+04f474277	Nama catatan: huruf, angka, - atau _ (maksimal 32)
+064f4b29e	Isi catatan tidak boleh kosong
+a918fc143	📝 #⟨0⟩ disimpan
+8af22b61d	🗑 Catatan dihapus
+bdf64f16d	Catatan tidak ditemukan
+2550a4e51	Pemicu tidak valid (maksimal 100 karakter; *kata* untuk mencocokkan di dalam pesan)
+65d904f46	Balasan tidak boleh kosong
+543b45aca	Maksimal ⟨0⟩ filter
+75dac4689	🧩 Filter ⟨0⟩: ⟨1⟩
+833cd7a4f	diperbarui
+8421922af	🗑 Filter dihapus
+d52273a24	Filter tidak ditemukan
+737953689	Interval tidak valid
+8f07eb02e	⏰ Pesan terjadwal ditambahkan
+4a5a1fa05	✅ Diperbarui
+e10b8c2a9	🗑 Blokir dihapus
+e750a9371	Tindakan tidak dikenal
+233235be6	Pengaturan tidak dikenal
+64198f47f	Atur saluran dulu dengan /forcesub @channel
+794ac0486	🖥 Diubah dari panel web: ⟨0⟩ | ⟨1⟩
+c5340e8d3	Sesi tidak bisa diverifikasi. Buka panel di dalam Telegram.
+650c37e3f	Grup tidak ditemukan
+ed8d9ddd6	Kamu bukan admin di grup ini (atau bot tidak bisa menjangkau Telegram).
+d1d4f67c2	Bot sedang dalam pemeliharaan, coba lagi nanti.
+e2d7c5c97	Memerlukan POST
+33edae1a5	Permintaan terlalu besar
+bcde64b8a	Permintaan tidak valid
+0429402e5	Tautan tidak valid
+ed8c751c4	Permintaan tidak didukung
+a5bfc246e	Kesalahan server
+6b75a37b8	🖥 Buka panel web
+b76f92e63	Panel web belum diaktifkan untuk bot ini (WEBAPP_URL di .env kosong).
+61267ecf8	🖥 Panel web dibuka di chat pribadi dengan bot:
+1503ed392	🖥 Buka secara pribadi
+f6dcc8f07	🖥 <b>Panel web</b>
+ffdbfe849	Semua pengaturan di satu halaman: perlindungan, perlindungan edit, media tidak pantas, bergabung, sambutan, daftar, mode malam, catatan, filter, pesan terjadwal, media terblokir, staf, dan statistik grup. Perubahan sampai ke bot dalam beberapa detik.
+72019bbac	utama
+62ca31689	⟨0⟩: ⟨1⟩ menunggu⟨2⟩
+3f8811338	, ⟨0⟩ sedang diproses
+e5136258e	⚡ <b>Performa</b> — uptime ⟨0⟩
+be1d477f1	💬 Pembaruan diproses: <b>⟨0⟩</b> · antrean: ⟨1⟩
+fdd4f90c1	🧠 Memori: <b>⟨0⟩ MB</b> (puncak ⟨1⟩ MB) · CPU: ⟨2⟩ dtk
+3da2a45ed	🧠 CPU: ⟨0⟩ dtk
+3d0951b3b	🗄 Database: ⟨0⟩ MB · penulisan batch: ⟨1⟩ kali, ⟨2⟩ baris · tertunda: ⟨3⟩
+22a8d336d	⏱ Jeda loop: rata-rata ⟨0⟩ · maks ⟨1⟩ (di atas 100 ms = ada operasi yang memblokir bot)
+7f78c41d0	👥 Grup: ⟨0⟩ · Saluran: ⟨1⟩ · Klon: ⟨2⟩
+a860ce1ad	🐢 <b>Paling lambat (rata-rata)</b>
+6ea19cdf0	⟨0⟩. <code>⟨1⟩</code> — rata-rata ⟨2⟩ · maks ⟨3⟩ · ⟨4⟩ kali
+b46e47f18	⏳ <b>Total waktu terbanyak</b>
+5d3700941	⟨0⟩. <code>⟨1⟩</code> — total ⟨2⟩ · ⟨3⟩ kali
+3e186b7ac	🔄 Segarkan
+0b681bc34	🧹 Reset
+7866cfd7a	🧹 Pengukuran direset
+8ed3799c7	🔄 Disegarkan
+e8f595afe	🪦 Bot dikeluarkan / tidak terjangkau
+fbd3f68b8	⚠️ Bot bukan admin
+7950587b4	🕳 Kosong (≤⟨0⟩ anggota)
+c7417acd3	💤 Sepi selama ⟨0⟩ hari
+b2d73a5b7	🤖 <b>Panel ⟨0⟩ Security Bot</b>
+6dcd06cc1	📊 Statistik:
+2934c79d8	├ Total grup: ⟨0⟩
+e11665156	├ Total saluran: ⟨0⟩
+98ee4dccc	├ Total pengguna: ⟨0⟩
+2cdc2cc48	└ Pengguna pribadi: ⟨0⟩
+f93b0152d	📢 Saluran
+774aa2184	👥 Grup
+de09056f1	🧹 Pembersihan
+d03041124	📊 Statistik
+9782862bd	🚫 Diblokir
+c5249c21a	⚡ Performa
+9e1bd9726	Saluran
+009c2e489	Grup
+43dd9b917	⟨0⟩ <b>⟨1⟩</b> (⟨2⟩) — halaman ⟨3⟩/⟨4⟩
+1e4e3b199	Ketuk nama: info · 🚪: keluarkan bot
+7035c59fd	📢 Tidak ada saluran terdaftar.
+a6492303c	👥 Tidak ada grup terdaftar.
+e5b94ef1a	🔙 Kembali
+8b1164c1a	🔙 Kembali ke daftar
+6abf2b290	Obrolan ini tidak punya catatan (dihapus).
+deacf11c1	✅ admin
+19ae8c1fe	✅ pemilik
+c5de3cdae	⚠️ anggota (bukan admin)
+6d25c19b2	❌ tidak ada di grup
+9f9a5ad1c	❌ dikeluarkan
+84ba3029b	👥 Anggota: ⟨0⟩ · 🤖 Bot: ⟨1⟩
+c86df7e48	📅 Terdaftar: ⟨0⟩⟨1⟩
+079fe4cc3	💬 Pesan terakhir: ⟨0⟩ · ⟨1⟩ pesan dalam 7 hari
+33a131ec1	🛡 Perlindungan aktif: ⟨0⟩
+c215ada82	· Ditambahkan oleh: ⟨0⟩
+cac2ce338	tidak pernah
+d4f5955f6	🚪 Keluarkan bot
+84297554a	🗑 Hapus catatan
+5b1da6456	📋 Terapkan pengaturannya ke grup lain
+f9c565e5d	🧹 <b>Pemindaian pembersihan</b> — ⟨0⟩ obrolan dipindai
+9309c9a8c	🗑 Hapus catatan
+f9dc0c92a	🚪 Keluar + hapus
+3939c3aa3	📋 Tampilkan
+4fd13b5b2	✅ Tidak ada yang perlu dibersihkan.
+71017a253	Catatan: ‘Keluar + hapus’ mengeluarkan bot dari obrolan tersebut dan menghapus pengaturannya.
+78c3f116c	🔄 Pindai lagi
+f73473dc3	Perintah ini hanya berfungsi di chat pribadi!
+42c9a2045	📋 Terapkan pengaturan <b>⟨0⟩</b> ke <b>⟨1⟩</b> grup lainnya?
+3e1a4c661	Disalin: pengaturan perlindungan, hukuman, captcha, mode malam, batas peringatan, dll.
+ac2c708cc	Tidak disalin: pesan sambutan/perpisahan/aturan, saluran wajib, kunci, daftar khusus grup.
+46d884196	<b>+ daftar</b>: daftar kata terlarang dan tautan yang diizinkan juga ditambahkan (yang sudah ada tidak dihapus).
+cc53a5889	✅ Terapkan + daftar
+4bbf7625d	Grup sumber tidak punya catatan.
+8b18be741	✅ Diterapkan ke ⟨0⟩ grup
+a27027da6	📋 Pengaturan grup ini diterapkan ke ⟨0⟩ grup | ⟨1⟩
+584db30d0	🚪 Keluarkan bot dari <b>⟨0⟩</b>?
+5cb08b81f	• <b>Simpan pengaturan</b>: jika bot ditambahkan lagi, pengaturannya kembali.
+c988453c1	• <b>Hapus juga catatannya</b>: pengaturan, pangkat, dan statistik dihapus.
+29f10e48b	🚪 Keluar, simpan pengaturan
+874976382	🗑 Keluar dan hapus catatan
+1a6229583	Gagal keluar: ⟨0⟩
+c8614638e	✅ Keluar⟨0⟩
+588b8a501	dan catatannya dihapus
+4dd5e9778	Memindai…
+f127b4d7a	🧹 Memindai ⟨0⟩ obrolan, ini mungkin perlu waktu…
+c04373159	Hasil pemindaian sudah usang, pindai lagi.
+f3c33c83f	🔙 Kembali ke pemindaian
+1a3a3e54d	dihapus catatannya
+84c117afe	ditinggalkan dan dihapus catatannya
+1f67427da	⚠️ ⟨0⟩: <b>⟨1⟩</b> obrolan akan ⟨2⟩? Ini tidak bisa dibatalkan.
+eb3f9ab14	✅ Ya
+33889c985	Memproses…
+5ac06101c	✅ ⟨0⟩ obrolan dibersihkan⟨1⟩
+73500e336	Khusus pemilik bot utama.
+6a8179ecc	Daftar blokir hanya tersedia untuk pemilik bot utama.
+7ec9c6536	🚫 <b>Diblokir</b>
+2f8268ac0	Tidak ada yang diblokir.
+13f3c860d	📊 <b>Statistik Bot</b>
+25fdf74b3	├ Total catatan pesan: ⟨0⟩
+31d1735c8	└ Total ban: ⟨0⟩
+511d1c70c	Penggunaan: /save <nama> <teks>  (atau balas pesan: /save <nama>)
+b9050868c	Isi catatan tidak boleh kosong.
+fe73e61b7	✅ Catatan disimpan: #⟨0⟩
+e2c814129	Penggunaan: /get <nama>
+6d1ba3c3a	Catatan itu tidak ada. Lihat daftarnya dengan /notes.
+fdb9a02af	Tidak ada catatan tersimpan. Tambahkan dengan /save.
+da2bf5ed4	📝 <b>Catatan</b>
+755923919	Untuk melihatnya, ketik #nama di grup.
+80841e69d	Penggunaan: /clear <nama>
+41afe3456	✅ Catatan dihapus.
+bd44e9b93	Catatan itu tidak ada.
+c74724c97	🔗 Blokir tautan
+a2e8d7dd3	↪️ Blokir terusan
+65984a6d2	🚨 Perlindungan raid
+64de715c0	🐣 Pembatasan anggota baru (60 mnt)
+da5934c57	🔤 Filter kata
+90879408f	🟢 Ringan
+79b39bda7	🔴 Ketat
+58c29a09a	⚡ <b>Pengaturan cepat</b> — ⟨0⟩
+bf650f464	<b>1/3</b> Pilih preset perlindungan. Kamu bisa mengubah masing-masing nanti.
+51a1926be	🟢 <b>Ringan</b>: tautan + flood
+14630f04b	🟡 <b>Normal</b>: + spam berulang, captcha, media tidak pantas
+b89411ab4	🔴 <b>Ketat</b>: + pembatasan anggota baru, blokir terusan, perlindungan raid
+ce91c6e00	⚙️ Aku pilih sendiri
+e45f19110	✖️ Lewati dulu
+d6c79520c	Bawaan
+e62d3857f	Teks sendiri
+3c5a1bd73	<b>2/3</b> Kirim pesan sambutan ke pendatang baru?
+4a80c8576	Sekarang: <b>⟨0⟩</b>
+f4b2ad895	🚫 Mati
+b8723d469	👋 Bawaan
+5566ef1f3	✏️ Aku tulis teks sendiri
+0a255f736	<b>3/3</b> Perlindungan mana yang harus aktif? Ketuk untuk menyalakan/mematikan.
+b229f24f3	➡️ Lanjut
+39c7bad60	teks bawaan
+05c1aeb32	teks milikmu
+d405d7c75	<b>Ringkasan</b>
+5618672c1	👋 Sambutan: ⟨0⟩
+f2adce74f	Tekan Terapkan untuk menyimpan pengaturan. Kamu bisa mengubah semuanya nanti dengan /settings.
+77676a86d	✅ Terapkan
+eebb82b20	🛡 Ubah perlindungan
+2e80a5fce	Grup ini belum terdaftar. Jadikan bot admin dulu.
+762cfa3fa	⚡ Pengaturan cepat dilakukan di chat pribadi dengan bot:
+32f93f6ae	⚡ Buka pengaturan
+ab8bc5e3f	Pilih grup dulu dengan 🛡 Grup saya, lalu ketik /setup.
+008c8e774	Pengaturan dilewati. Kamu bisa membukanya kapan saja dengan /setup.
+6f6bec44f	✅ Pengaturan disimpan
+5dc655d64	✅ <b>Pengaturan selesai!</b> — ⟨0⟩
+46d73ff37	Pengaturan detail: /settings · Balasan otomatis: /filter di grup
+d9a9eba4a	⚡ Pengaturan cepat diterapkan | ⟨0⟩
+161bbf828	🧩 <b>Cara pakai filter</b>
+8344bd8fb	• Balas sebuah pesan: <code>/filter Hai juga</code> (pemicunya adalah pesan yang kamu balas)
+7e201996f	• Tanpa balasan: <code>/filter halo Hai juga</code>
+cf1db6a05	• Beberapa kata: <code>/filter "selamat malam" Selamat malam juga!</code>
+812fb6d89	• Jika muncul di dalam pesan: <code>/filter *halo* Hai!</code>
+206f91a6d	• Balas dengan stiker/foto/GIF: balas medianya → <code>/filter halo</code>
+b0b395569	• Tombol: di bawah balasan, satu per baris <code>Saluran - https://t.me/channel</code>
+380f07344	Variabel: <code>{user}</code> <code>{first}</code> <code>{group}</code> · Format (tebal, tautan…) dipertahankan
+528d066d4	Daftar: /filters · Hapus: /stop halo · Hapus semua: /stopall
+7315f262e	⚠️ Satu grup maksimal punya ⟨0⟩ filter. Hapus yang lama dengan /stop.
+cf56cd5da	saat muncul di dalam pesan
+0272debab	saat ditulis
+3045102b7	✅ Filter ⟨0⟩: <b>⟨1⟩</b> — aku akan membalas ⟨2⟩.
+67c264f1a	ditambahkan
+c64b0c3ca	🧩 Filter ditambahkan: ⟨0⟩ | ⟨1⟩
+830911851	Tidak ada filter di grup ini. Untuk menambah: /filter
+32a5d5ddb	🧩 <b>Filter</b> (⟨0⟩)
+3b8b66dd5	Untuk menghapus: /stop &lt;pemicu&gt;
+8b3a30608	Penggunaan: /stop <pemicu>
+f2ba0c77b	✅ Filter dihapus.
+77a5db13d	Filter itu tidak ada. Periksa daftarnya dengan /filters.
+b7301e99a	Tidak ada filter di grup ini.
+bd0505102	⚠️ Hapus semua <b>⟨0⟩</b> filter di grup ini?
+8d8252e68	🗑 Ya, hapus semua
+9b6fcea87	↩️ Batal
+272826aad	Dibatalkan.
+cf9d69e94	🗑 ⟨0⟩ filter dihapus.
+13c07c249	🧹 Semua filter dihapus (⟨0⟩) | ⟨1⟩
+0451d6399	🏷 Nama merek
+93077ebd5	Tulis nama yang akan ditampilkan botmu di pesan (mis. Alpha Guard).
+efbbbb435	👋 Teks sambutan
+4e2fd1f48	Tulis teks sambutan yang muncul saat seseorang mengetik /start.
+e840e51a6	🔗 Tautan bantuan
+2236aa076	Tulis tautan grup/saluran bantuan (https://t.me/...). Untuk menghapus: -
+74af46bea	❓ Judul bantuan
+ce0e0d6dc	Tulis judul menu bantuan.
+07075bae9	Pengguna
+8c59b527c	🤖 <b>Persetujuan bot klon</b> #⟨0⟩
+673f5ba81	👤 Orang yang ingin membuat bot: ⟨0⟩ — ID: <code>⟨1⟩</code>
+286285872	🔑 Token bot: <code>⟨0⟩</code>
+140e8742e	🏷 Nama bot: ⟨0⟩ (@⟨1⟩)
+bbde0b439	Token tidak valid atau telah dicabut.
+2f1be69b6	Token ini milik bot lain.
+b8261ca98	⚠️ Bot klonmu @⟨0⟩ dihentikan: ⟨1⟩
+5b74bc345	Dapatkan token baru dari BotFather dan jalankan ulang dengan <b>Ganti token</b> di menu 🤖 Klon.
+15f0441be	token tidak valid (⟨0⟩)
+c079ca840	⏳ <b>@⟨0⟩</b> menunggu persetujuan pemilik bot. Bot akan berjalan setelah disetujui.
+aa2e8a82e	🤖 <b>Bot klon</b>
+f3fc6979c	Buat bot pelindung dengan nama botmu sendiri yang berjalan di mesin ULUS.
+4fbf35472	1) Buat bot dengan /newbot di @BotFather
+632cbf17b	2) Kirim token yang kamu dapat lewat tombol di bawah
+883193ad7	3) Setelah pemilik bot menyetujui, botmu mulai bekerja⟨0⟩
+3a5be4fd4	🔑 Kirim token
+e76ac71f1	🟢 Berjalan
+f8a7fde2a	⚠️ Token tidak valid
+b535c1e0c	🤖 <b>Bot klonmu</b>: @⟨0⟩
+0bc0356ba	Status: ⟨0⟩ · Grup/saluran: ⟨1⟩
+47500a892	🏷 Merek: <b>⟨0⟩</b>
+ca0fe8e9a	🔗 Bantuan: ⟨0⟩
+b07ee01ba	❓ Judul bantuan: ⟨0⟩
+8e9727f2e	👋 Sambutan: ⟨0⟩⟨1⟩
+de54dae36	bawaan
+53f82bc49	⏸ Hentikan
+b8abb05fb	▶️ Jalankan
+60446c88d	↩️ Tarik permintaan
+ded7cc646	🔑 Ganti token
+d3fb29907	🗑 Hapus klon
+367b6aa51	Tindakan klon dilakukan di chat pribadi dengan bot.
+a51f7d30f	Permintaan ini sudah ditangani.
+c862658b2	Permintaan dari versi lama; pengguna harus mengirim token dengan /clone.
+a102e834e	🤖 Sistem klon telah diperbarui: ketik /clone dan kirim token botmu; botmu mulai setelah pemilik bot menyetujui.
+982a0150c	Gagal menjalankan: ⟨0⟩
+447501409	⚠️ Gagal menjalankan: ⟨0⟩
+64fbe849e	⚠️ Bot klonmu tidak bisa dijalankan: ⟨0⟩
+03718599d	Kamu bisa mengirim token baru dengan /clone.
+ba7f6e886	✅ Disetujui, bot berjalan
+705bd8131	❌ Ditolak
+744d07117	✅ <b>Bot klonmu disetujui dan sudah berjalan!</b> @⟨0⟩
+90edeb341	Untuk nama, teks sambutan, dan tautan bantuan: /clone
+172a66fda	❌ Permintaan bot klon untuk @⟨0⟩ ditolak.
+dffc58eb3	Kamu tidak perlu lagi meminta izin: kirim tokennya, botmu mulai setelah pemilik bot menyetujui.
+7269890c3	Hanya pemilik bot yang bisa melakukan ini.
+741c29704	Kamu tidak punya permintaan yang tertunda.
+a353b8903	↩️ Pengguna menarik permintaannya
+cb7da55c2	↩️ Permintaan ditarik
+b30c05510	🔑 Tulis token bot yang kamu dapat dari @BotFather (mis. <code>123456789:ABC...</code>).
+0adaad0bb	Untuk membatalkan: cancel
+a54c0e304	Klon ini bukan milikmu.
+8f8af330e	Tidak valid.
+6a47f34ed	Klon ini telah dihapus.
+21d148b57	🗑 Hapus klon @⟨0⟩? Bot berhenti, pengaturan di grup tetap ada.
+e53f197f7	🗑 Ya, hapus
+cb1a5e233	🗑 Bot klonmu @⟨0⟩ dihapus oleh pemilik bot.
+19e55244e	Tautan harus diawali https://t.me/. Tulis lagi atau ketik cancel.
+6e97fcc27	✅ ⟨0⟩ diperbarui.
+feae94615	❌ Ini tidak terlihat seperti token bot. Kirim token lengkap dari @BotFather.
+19769e756	❌ Ini token bot utama.
+d305390e4	❌ Token tidak valid. Salin token yang benar dari @BotFather.
+82a945d00	❌ Bot ini sudah menjadi klon milik orang lain.
+d190f37f5	❌ Orang lain punya permintaan tertunda untuk bot ini.
+fa9063dd4	❌ Bot tidak bisa dijalankan: ⟨0⟩
+8ffa38acb	✅ <b>Bot klonmu sudah siap!</b> @⟨0⟩
+9b90f4091	Untuk menambahkannya ke grup: https://t.me/⟨0⟩?startgroup=ulus&admin=⟨1⟩
+34ed30a8e	↩️ Permintaan baru dikirim sebagai gantinya
+98545fdcd	✅ Setujui
+b3bf17908	📨 Permintaanmu untuk <b>@⟨0⟩</b> telah dikirim ke pemilik bot.
+988ee3c22	Setelah disetujui, botmu akan berjalan dan aku akan memberitahumu.
+eb51d0e12	Bot ini sudah menjadi klon milik orang lain.
+dfe2324b4	⟨0⟩ @⟨1⟩ — pemilik <code>⟨2⟩</code>
+1cd8c4513	⏳ @⟨0⟩ — diminta oleh <code>⟨1⟩</code>
+92021a063	🤖 <b>Bot klon</b> (⟨0⟩) · Menunggu persetujuan: ⟨1⟩
+21bb22c3f	Belum ada klon.
+32f6170ef	<b>Menunggu persetujuan</b>
+f666e1d93	🗄 Cadangan database · ⟨0⟩ MB (terkompresi ⟨1⟩ MB)
+9cfd9973e	Untuk memulihkan, taruh file .db dari zip ke folder bot dengan nama bot_data.db.
+391c8e6d0	🗄 Cadangan dibuat tetapi terlalu besar untuk Telegram (⟨0⟩ MB): ⟨1⟩
+c3fcc95df	🗄 Membuat cadangan...
+103ec5f85	Obrolan: ⟨0⟩
+0f97d9633	⚠️ Kesalahan bot
+15781d4a0	⚠️ Tombol ini sudah usang atau tidak valid. Buka menu lagi.
+043246756	⚠️ Terjadi kesalahan, tindakan tidak bisa diselesaikan. Silakan coba lagi.
+4e9b13c4d	⛔ Hanya admin yang bisa menggunakan perintah ini.
+af7654ae4	⏳ Daftar admin baru saja disegarkan. Coba lagi dalam ⟨0⟩ dtk.
+7117a9ab8	⚠️ Gagal mengambil daftar admin. Apakah bot admin di grup ini?
+48b81ffc1	🔄 <b>Daftar admin disegarkan</b> — ⟨0⟩ admin
+10701ad0a	➕ Pangkat diberikan: ⟨0⟩
+7eed3b278	➖ Pangkat dicabut (bukan admin lagi): ⟨0⟩
+3ffb1dffa	Catatan sudah terbaru.
+be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
+2a8ec5530	🟢 ULUS dimulai
+82459fdce	Database: <code>⟨0⟩</code> (⟨1⟩ KB)
+d2e59a824	Grup/saluran terdaftar: <b>⟨0⟩</b>
+6c20c0dd0	⚠️ Database terbuka kosong dan dipulihkan dari cadangan terakhir: <code>⟨0⟩</code>
+0e4276ce2	⚠️ Tidak ada obrolan terdaftar. Jika angka ini turun saat bot dimulai ulang, file database mungkin terhapus atau bot berjalan dari folder lain.
+3831f1221	Tidak bisa menjangkau server
+ca576aa9b	Kesalahan ⟨0⟩
+44d8a56f0	Simpan (⟨0⟩)
+8c5f53f0b	🖼 ⟨0⟩ terlampir — centang untuk menghapusnya
+6050fb2fa	Saluran wajib: ⟨0⟩
+2101bb05d	Hapus ⟨0⟩?
+210266e99	Aktif/nonaktif
+ac3d94f38	Pesan (7 hari)
+251aa63e3	Orang aktif
+7782d329c	Bergabung (7 hari)
+f515fefde	Diperingatkan
+b32121bc6	Diban
+4136a9068	📋 Saluran log: ⟨0⟩
+1f589ad54	belum diatur (gunakan /setlog di bot)
+91e55d41e	🌙 Mode malam
+5a572078e	· aktif sekarang
+db433084f	· aktif
+841c11292	Izin yang dipilih dimatikan selama jam-jam ini dan dipulihkan setelahnya (UTC+3).
+587308129	Mulai
+2a2a44bc3	Selesai
+e07763331	Matikan:
+fb5b6de88	Simpan mode malam
+626b1b386	📝 Catatan (⟨0⟩)
+9ba887ab0	Belum ada catatan. Mengetik #nama di grup akan mengirim catatan.
+0ebe5615b	Nama catatan (mis. rules)
+83fff7c73	Isi catatan (format: <b>tebal</b>, tombol: Label - https://tautan)
+0c4734df9	🧩 Filter / balasan otomatis (⟨0⟩/⟨1⟩)
+40d6aee5f	💬 berisi: ⟨0⟩
+25ea7b948	Belum ada filter.
+8e0bb1fb8	Pemicu (cocok di dalam pesan: *kata*)
+db212635d	Balasan (variabel {user} {first} {group}, baris tombol)
+75a77232d	➕ Tambah filter
+ed3622d45	Untuk balasan dengan media (stiker/foto), balas media itu di grup dengan /filter.
+aa7a25249	⏰ Pesan terjadwal (⟨0⟩)
+3eb72af09	Setiap ⟨0⟩ · berikutnya: ⟨1⟩
+240088248	Aktif/nonaktif
+f479b96fd	Pesan terjadwal ini
+158f37bff	Belum ada pesan terjadwal.
+38f7fb835	Pesan (baris tombol dan varian acak %%% didukung)
+67866ebd3	Interval
+039052532	➕ Tambah pesan terjadwal
+ec1ffce3d	🚫 Media terblokir (⟨0⟩)
+39590ef60	Blokir ini
+35fb023cf	Untuk menambah, balas media di grup dengan /blockmedia, atau /blockpack untuk paket stiker.
+2de76a779	👮 Staf (⟨0⟩)
+bf3bc5b16	Untuk memberi/mencabut pangkat gunakan /admin, /senioradmin, /cofounder di grup; untuk izin pribadi gunakan /perms di bot.
+3a5e96d47	Memuat…
+7419f16f9	✅ Disimpan
+69efe9b3e	Tidak ada perubahan
+4c12da56f	Grup yang kamu kelola
+b57672cb0	Kamu tidak mengelola grup apa pun
+03396c6dd	Tidak ditemukan grup tempat bot menjadi admin dan kamu adalah staf.
+274139b9d	Buang perubahan yang belum disimpan?
+67b14047c	Tombol: satu per baris  Label - https://tautan  (berdampingan: &&) · Aturan - rules · Info - popup:teks · Variabel: {user} {first} {group} {count} · Pesan acak: baris %%% di antaranya · Gunakan tag <b> <i> untuk tebal/miring. Tambahkan media lewat bot dengan /setwelcome.
 '''
 
 I18N_PT = r'''
@@ -29371,7 +33560,7 @@ b5116fff1	Você já está participando, boa sorte! 🍀
 b05652dd1	✅ <b>Sorteio encerrado</b>
 4cc381328	🎉 O sorteio terminou! Nenhum participante cumpriu os requisitos.
 8e2d564a7	🎉 <b>O sorteio terminou!</b>⟨0⟩
-5aa86da43	🏆 Vencedor⟨0⟩: ⟨1⟩
+5aa86da43	🏆 Vencedor(es): ⟨1⟩
 e9ade43fd	👥 Participantes: ⟨0⟩
 7438ab083	🏆 Sorteio encerrado: ⟨0⟩ | ⟨1⟩
 1e5f2647b	sem vencedor
@@ -31497,7 +35686,7 @@ b5116fff1	Вы уже участвуете, удачи! 🍀
 b05652dd1	✅ <b>Розыгрыш завершён</b>
 4cc381328	🎉 Розыгрыш завершён! Ни один участник не выполнил условия.
 8e2d564a7	🎉 <b>Розыгрыш завершён!</b>⟨0⟩
-5aa86da43	🏆 Победитель⟨0⟩: ⟨1⟩
+5aa86da43	🏆 Победители: ⟨1⟩
 e9ade43fd	👥 Участники: ⟨0⟩
 7438ab083	🏆 Розыгрыш завершён: ⟨0⟩ | ⟨1⟩
 1e5f2647b	нет победителя
@@ -31989,6 +36178,4241 @@ b57672cb0	Вы не управляете ни одной группой
 03396c6dd	Не найдено групп, где бот админ, а вы в администрации.
 274139b9d	Отменить несохранённые изменения?
 67b14047c	Кнопки: по одной в строке  Текст - https://ссылка  (рядом: &&) · Правила - rules · Инфо - popup:текст · Переменные: {user} {first} {group} {count} · Случайное сообщение: строка %%% между ними · Для жирного/курсива используйте теги <b> <i>. Медиа добавляйте через бота командой /setwelcome.
+'''
+
+I18N_UK = r'''
+a9826a4de	⟨0⟩ Security Bot
+89c80575f	⚡ Основний бот: @⟨0⟩
+d86fae223	✅ Мову встановлено: ⟨0⟩
+972caaca5	🌍 <b>Мова</b>
+0c1e30399	Оберіть мову:
+fea7d950e	✅ Мова групи: ⟨0⟩
+1b6f202bc	🌍 <b>Мова групи</b>
+9ab6017a5	Зараз: ⟨0⟩
+9d13d74f6	Оберіть мову бота для цієї групи:
+448e35ffe	У вас немає прав!
+17665e8c1	🌍 Мова групи: ⟨0⟩ | ⟨1⟩
+4c9e57207	👑 Засновник
+bfa3235c4	🔱 Співзасновник
+ef61a4d09	⭐ Старший адмін
+a5926dc01	🛡 Адмін
+8d0d91abe	⚠️ Попередження
+9a83dd2de	🗑 Видалення повідомлень
+d7d2f6eb2	🔇 Мут
+4acd35f89	👢 Кік
+41605b650	🔨 Бан / розбан
+1a7979b5e	↩️ Зняття попереджень
+5b4929b15	📌 Закріплення
+6880a0676	🧹 Очищення / повільний режим
+1b5d5b3d1	📩 Заявки / апеляції
+6a285730c	📜 Правила / привітання / нотатки
+eab57b3ab	🚨 Екстрене блокування (зняття)
+932bdd7e5	⚙️ Налаштування захисту
+6628cf302	👑 Видача / зняття рангів
+178f46a47	🧩 Фільтри (автовідповіді)
+5d856e480	🏷 Масове згадування (/tag)
+8c664bc3f	🔗 Посилання-запрошення
+5fc826495	🚫 Обмеження / бан
+52e1acc4f	🎙 Голосові чати
+c264fb5af	💬 Керування темами
+5e74fa6f0	📖 Публікація історій
+1e9853465	✏️ Редагування історій
+f56347abf	🗑 Видалення історій
+fc5b6f247	ℹ️ Інформація про групу
+16f35c22f	⭐ Додавання адмінів
+5a2dcf161	Бот не має прав для цього. Зробіть бота адміном з потрібними правами.
+da1585078	Бот не може надати право, якого не має сам.
+5f334b209	Ця людина — адмін у групі; цю дію не можна застосувати до адмінів.
+a34bdfc67	Користувача не знайдено в групі.
+247a273bd	Повідомлення не знайдено (можливо, його видалено).
+342d7a053	Це повідомлення не можна видалити (можливо, воно старше за 48 годин).
+59b207012	Telegram зараз отримує забагато запитів, спробуйте трохи пізніше.
+29072692d	Чат не знайдено. Бот є в цьому чаті?
+9a9bee4a1	Це працює лише в супергрупах.
+e99fefa09	Немає доступу до бота (бота заблоковано або вилучено з чату).
+f6a39420d	Не вдалося зв’язатися з Telegram, спробуйте трохи пізніше.
+fce0709e2	❌ Дію не виконано, спробуйте ще раз.
+c1a2c3bf9	Не можна застосувати це до себе.
+58503ae82	Цю дію не можна застосувати до цього акаунта.
+c93d8e442	⛔ У ⟨0⟩ такий самий або вищий ранг; ви не можете діяти щодо нього.
+7c6c0a917	Ця людина
+980a088c1	⛔ У вас немає прав! (⟨0⟩ або вище)
+f78cc4201	⛔ Для цієї команди потрібно бути справжнім адміном групи.
+1a089160e	⛔ Бот не є адміном у цій групі або йому бракує прав.
+ec502d773	⟨0⟩ год
+1d683512c	⟨0⟩ хв
+e0250a8c0	⟨0⟩ с
+4f52d88ec	Привіт, {user}! Ласкаво просимо до {group}!
+41006f31c	🙏 Дякуємо! Бота додано: ⟨0⟩
+e89ec2f7d	Тип: ⟨0⟩
+484b4f591	Команди: /help
+fbb8f4be4	Бота додано: ⟨0⟩ (⟨1⟩) | власник: ⟨2⟩
+417b3cc01	✅ Бота додано й зареєстровано! Команди: /help, налаштування: /settings.
+189f689b9	🌍 Мова: /setlang
+cde2bd7c8	попередження
+929d8360f	зняття попередження
+3c0ddc51a	мут
+9c030a691	зняття муту
+91787bcf5	вилучення з групи
+d34c44d0e	безстроковий бан
+b131626a5	розбан
+6838cf1a3	видалення
+b707492ec	тимчасовий бан
+6f1a328f6	зняття прав
+4f0282227	скарга
+12c391a8f	кнопка
+b581541a3	чорний список
+b01a6a6e8	голосування
+e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> попереджень
+ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Попередження: ⟨3⟩/⟨4⟩ | ⟨5⟩
+9e23d2151	тимчасовий бан (⟨0⟩)
+953cd28f3	вилучено з групи
+090d91568	📨 Для апеляції можна написати боту в особисті /appeal.
+ddd70b55a	⟨0⟩ ⟨1⟩ отримав ⟨2⟩ попереджень → <b>⟨3⟩</b> (⟨4⟩)⟨5⟩
+f05514a4b	🚫 ⟨0⟩ ⟨1⟩ | Причина: ⟨2⟩ | ⟨3⟩
+33762701b	🗑 ⟨0⟩ → повідомлення ⟨1⟩ видалено | ⟨2⟩
+e83ba4992	🔇 ⟨0⟩ ⟨1⟩ → мут на ⟨2⟩
+4689a9495	👢 ⟨0⟩ ⟨1⟩ → вилучено з групи
+24b70b24b	🚫 ⟨0⟩ ⟨1⟩ → забанено
+f881648dd	🗑 Повідомлення видалено
+a1ce809b5	⚠️ Видалено + попередження
+4d4d20ba3	🔇 Видалено + мут на 1 годину
+3a4a2408d	🚫 Видалено + бан
+184e9ea25	✅ Проігноровано
+1cd1dbdf9	🗑 Видалити
+d193c645a	⚠️ Попередити
+bb7ad37ac	🔇 Мут 1 год
+ebe01fecc	🚫 Бан
+e7e0e2df9	✅ Ігнорувати
+3397853de	Скарга надсилається відповіддю на повідомлення в групі: /report [причина]
+b61b50bf7	Дайте відповідь на повідомлення й напишіть /report, щоб поскаржитися.
+9cf259e34	На адміністрацію скаржитися не можна.
+c5bbdb405	Ви скаржитеся занадто часто, зачекайте трохи.
+bd7e0099e	На це повідомлення вже поскаржилися.
+896d1ca10	🚩 <b>Нова скарга</b> #⟨0⟩
+cec4cf481	Група: <b>⟨0⟩</b>
+c3a6b7566	Поскаржився: ⟨0⟩
+5083aeebb	Порушник: ⟨0⟩ (<code>⟨1⟩</code>)
+9b4b6cd06	<a href="⟨0⟩">Перейти до повідомлення</a>
+679ec2d36	✅ ⟨0⟩, вашу скаргу надіслано адміністрації.
+008e3c181	⚠️ ⟨0⟩, скаргу отримано, але зараз ніхто з адміністрації недоступний.
+ad6b780a2	Скаргу не знайдено.
+04f22133c	Цю скаргу вже опрацьовано: ⟨0⟩
+94cea35e5	↩️ Скасувати попередження
+2446ce8e3	🔊 Зняти мут
+d3d996724	↩️ Попередження знято (⟨0⟩/⟨1⟩)
+2ffab4aa4	🔇 Мут на 1 годину
+969014784	🔊 Мут знято
+96524e022	🚫 Забанено
+c1ef156c4	✅ Розбанено
+7181ac4be	Невірна дія.
+3461c44ea	Для цього потрібно бути адміном групи.
+74042fc88	Бот не є адміном у цій групі або йому бракує прав.
+aec9fe5ec	Не можна застосувати до адміністрації.
+14fea3d87	👋 Привіт, ⟨0⟩!
+b6ba013b6	Щоб писати в групі, дайте відповідь на запитання нижче.
+30a234e49	⏰ Час: ⟨0⟩. За неправильну відповідь або коли час мине, вас буде вилучено з групи.
+5941a96e3	⏰ Час капчі минув → ID:⟨0⟩ вилучено | ⟨1⟩
+47de968f7	Помилка.
+371e8fa90	Це не ваша капча!
+4b056df52	Час капчі минув.
+16a67ec53	✅ Правильно!
+13e7c138f	✅ ⟨0⟩ пройшов перевірку!
+d8c5044b0	✅ Капчу пройдено: ⟨0⟩ | ⟨1⟩
+d4d19c221	❌ Неправильна відповідь!
+be0ff1965	❌ ⟨0⟩ відповів неправильно й вилучений.
+921ae23b1	❌ Капчу не пройдено → ⟨0⟩ вилучено | ⟨1⟩
+a1d75b185	🗑 ⟨0⟩ — повідомлення від імені каналу (⟨1⟩) видалено | ⟨2⟩
+c537f5f16	🆕 ⟨0⟩, нові учасники не можуть надсилати посилання/медіа/пересилання перші ⟨1⟩ хв. (лишилося ~⟨2⟩ хв)
+df471627f	заблокований стікерпак
+d3bfcdff9	заблоковане медіа
+c82923d6d	небезпечний файл (⟨0⟩)
+c83f1da6c	неприйнятний вміст
+5fb084a5f	ШІ: ⟨0⟩
+51da96b93	неприйнятний вміст (⟨0⟩)
+c5baa0aed	Неприйнятне медіа (⟨0⟩)
+acae614af	автоматично: неприйнятні медіа поспіль (підозра на атаку)
+f77a6df47	🚨 Виявлено <b>медіа-атаку</b>, надсилання медіа в групі заблоковано.
+d6fc51018	пост без підпису
+93f2e53e1	🔞 <b>У каналі видалено неприйнятне медіа</b>
+a99d18293	Відправник: ⟨0⟩
+d6c8546a4	Канал: <code>⟨0⟩</code>
+cb902699f	Неприйнятні медіа поспіль у каналі (підозра на спробу заблокувати канал)
+ade12807b	🔒 <b>Блокування медіа</b>: фото, відео, стікери, GIF і файли вимкнено на ⟨0⟩.
+d21e8724d	Причина: ⟨0⟩
+0ca7ff868	🔓 Блокування медіа знято, попередні права відновлено.
+874318f86	🔓 Блокування медіа знято | ⟨0⟩
+4bf6387ff	Використайте цю команду в групі, відповівши на медіа, яке треба заблокувати.
+b38691ea2	Дайте відповідь на фото/відео/GIF/стікер/файл, який треба заблокувати.
+19a0caff5	Дайте відповідь на стікер, щоб заблокувати його пак.
+a6fdf7132	стікерпак <code>⟨0⟩</code>
+478778014	(у всіх групах)
+350c5b7db	🚫 ⟨0⟩ заблоковано. Якщо надішлють знову, буде видалено.
+3506ca524	Це вже заблоковано.
+4d19611fc	🚫 Медіа заблоковано (⟨0⟩) | ⟨1⟩
+63de95c9c	Спершу оберіть групу командою /select!
+0d2990bb6	🔓 Блокування медіа знято.
+5efbe835d	Блокування медіа вже вимкнене.
+bc8817800	🔒 Медіа заблоковано.
+57dd35ab6	Не вдалося заблокувати (можливо, активне блокування від рейду або бракує прав бота).
+6fc9219df	⟨0⟩ д ⟨1⟩ год
+184dd1447	⟨0⟩ год ⟨1⟩ хв
+65f0ede73	⟨0⟩ хв
+c55e9eeb2	✏️ ⟨0⟩, повідомлення, старші за ⟨1⟩ хв, редагувати не можна; ваше відредаговане повідомлення видалено.
+e4ec4ef08	<i>немає запису (повідомлення надіслано до ввімкнення захисту)</i>
+4f135e257	<a href="⟨0⟩">Місце повідомлення</a>
+a81c7ed8d	✏️ <b>Видалено пізно відредаговане повідомлення</b>
+ff6af8a83	Користувач: ⟨0⟩ (<code>⟨1⟩</code>)
+6c94268e3	Надіслано: ⟨0⟩ · змінено через ⟨1⟩
+eba784f45	<b>До:</b>
+817e491aa	<b>Після:</b>
+ba4e72261	Пересилання
+330690bdd	пересилання (#⟨0⟩)
+a00507082	медіа-флуд (⟨0⟩/⟨1⟩ с)
+a77f997a9	флуд (⟨0⟩ повідомлень/⟨1⟩ с)
+74c953a60	🔗 Посилання видалено → ⟨0⟩ | ⟨1⟩
+427c1fec3	надсилання посилань
+794910b1f	Заборонене слово
+8fb66aa89	заборонене слово
+4e5efb06d	повторюваний спам
+c91e153a9	Анти-пересилання зараз: ⟨0⟩
+6d6d358e6	Використання: /antiforward on|off
+117ba2454	УВІМК
+6a2055cc2	Анти-пересилання ⟨0⟩.
+596cfaf0b	Анти-пересилання ⟨0⟩ | ⟨1⟩
+d2102fa46	Анти-медіа зараз: ⟨0⟩
+332b15c14	Використання: /antimedia on|off
+3227848c2	Анти-медіафлуд ⟨0⟩.
+48d9c6287	Анти-медіафлуд ⟨0⟩ | ⟨1⟩
+8cc0eba99	Анти-флуд зараз: ⟨0⟩
+d1a5f38ec	Ліміт: ⟨0⟩ повідомлень / ⟨1⟩ с
+3599fb42c	Використання: /antispam on|off
+64adfe1a4	Змінити ліміт: /antispam on 10 5 (10 повідомлень/5 секунд)
+1a836ee8e	Анти-флуд ⟨0⟩. (Ліміт: ⟨1⟩ повідомлень/⟨2⟩ с)
+27867ef23	Анти-спам ⟨0⟩ | ⟨1⟩
+5a6f48edd	Анти-посилання зараз: ⟨0⟩
+d947593b7	Використання: /antilink on|off
+5ddc225c5	Блокування посилань ⟨0⟩. (На адмінів не діє)
+298cef31c	Анти-посилання ⟨0⟩ | ⟨1⟩
+dc5c98faf	Капча зараз: ⟨0⟩
+0742b23d4	Використання: /captcha on|off
+348974ec8	Капча ⟨0⟩.
+070cf47b7	Капча ⟨0⟩ | ⟨1⟩
+f8303f57c	✅ ⟨0⟩ більше не в адміністрації.
+eb3b60248	🗑 Ранг ⟨0⟩ знято | ⟨1⟩
+36a946671	Користувача не знайдено!
+92274adac	📂 ⟨0⟩ тепер керує папками!
+b7a687056	📂 ⟨0⟩ призначено керівником папок | ⟨1⟩
+3b49b9b50	Причину не вказано
+42ca54745	🚫 ⟨0⟩ отримав ⟨1⟩! Причина: ⟨2⟩
+023576cd7	Вкажіть користувача! Дайте відповідь на його повідомлення або вкажіть ID/username.
+bad97a937	✅ ⟨0⟩ розбанено!
+b83344e83	✅ ⟨0⟩ розбанено | ⟨1⟩
+dee699309	👢 ⟨0⟩ вилучено!
+16d07ca95	👢 ⟨0⟩ вилучено | ⟨1⟩
+299422191	24 години (ліміт адміна)
+b2fbfc457	🔇 ⟨0⟩ отримав мут на ⟨1⟩!
+9247b48e0	🔇 ⟨0⟩ отримав мут на ⟨1⟩ | ⟨2⟩
+b13185722	⟨0⟩ ⟨1⟩: мут знято!
+dd3fea678	⟨0⟩ ⟨1⟩: мут знято | ⟨2⟩
+08ccab800	ручне зняття муту
+f990c822c	Не вдалося зняти мут: ⟨0⟩
+fa5f86984	⟨0⟩ ⟨1⟩: попередження знято (⟨2⟩/⟨3⟩).
+e222d2c43	↩️ ⟨0⟩: попередження знято (⟨1⟩) | ⟨2⟩
+b26226e44	📊 Попередження ⟨0⟩: ⟨1⟩/⟨2⟩
+fcbd59f04	Дайте відповідь на повідомлення й напишіть /pin, щоб закріпити його!
+821dc813a	📌 Повідомлення закріплено!
+f07ba3194	📌 Повідомлення закріплено | ⟨0⟩
+84ce06e7a	✅ Відкріплено!
+7a8e925ad	📍 Відкріплено | ⟨0⟩
+a166505b1	Використання: /slowmode <секунди> (0 = вимк)
+5efa94a44	Приклад: /slowmode 30
+d9e0a5f25	⏩ Повільний режим вимкнено.
+c9f3d97aa	🐢 Повільний режим: ⟨0⟩ с.
+90fc9c4e8	🐢 Повільний режим ⟨0⟩ с | ⟨1⟩
+04ee47e62	Введіть коректну кількість секунд!
+ec7dc1340	Спершу оберіть групу командою /select!
+ef6a75200	Використайте цю команду в групі, яку треба очистити.
+8ab6d8456	Використання: /purge <кількість> або /purge all
+f726b6834	Останні 20 000 повідомлень
+ad1696ee9	Останні ⟨0⟩ повідомлень
+09bed8e26	🧹 Видаляю повідомлення, зачекайте...
+1f937217d	🧹 Очищено: ⟨0⟩.
+f6a3aa1c3	🧹 Очищено: ⟨0⟩ | ⟨1⟩
+ca1480b4e	📋 Список банів порожній.
+3df0209e0	🚫 <b>Список банів</b> (останні 20):
+a2ef54f04	📋 Список мутів порожній.
+f3ad3e028	🔇 <b>Список мутів</b> (останні 20):
+4d02c60e6	лишилося ⟨0⟩ хв
+e9fa5b6c6	минув
+50bd44457	Використання: /antispam on|off
+aaf3e3fa7	Захист від спаму ⟨0⟩!
+032f12948	⚙️ Захист від спаму ⟨0⟩ | ⟨1⟩
+db5c288ba	Використання: /wordban <слово>
+5ce049d2e	Невірний регулярний вираз: ⟨0⟩
+382054e7a	«⟨0⟩» додано до списку заборонених слів!
+a061e639e	«⟨0⟩» вже заборонено!
+c690df9b8	Фільтр заборонених слів увімкнено!
+a04bd920f	Фільтр заборонених слів вимкнено!
+908cb2d50	Використання: /setautoaccept on|off
+ad89cff79	Автоприйняття ⟨0⟩!
+8a77c7461	Використання: /setautoreject on|off
+de72bc915	Автовідхилення ⟨0⟩!
+f4661e0bb	Використання: /setautorejectbot on|off
+4f2789f4b	Відхилення ботів/фейків ⟨0⟩!
+19f41bbbf	Статистики запрошень ще немає!
+8618c4bd5	📈 Статистика запрошень:
+4dff67686	⟨0⟩: ⟨1⟩ учасників
+fae5737f3	🚨 ВИЯВЛЕНО РЕЙД!
+7b14ac650	⟨0⟩ учасників / ⟨1⟩ с
+cf9fdec29	Групу заблоковано на ⟨0⟩ хв. Зняти: /unlockdown
+1124ad26d	🔒 Групу заблоковано на ⟨0⟩ хв: ⟨1⟩
+93ff62fcf	Група вже заблокована.
+0182255e2	🚨 Екстрене блокування: ⟨0⟩
+121e5db73	🔒 Групу заблоковано на ⟨0⟩ хв. Співзасновники й вище можуть зняти блокування командою /unlockdown.
+2aadb84f8	Не вдалося заблокувати (перевірте права бота).
+aff77f945	✅ Блокування від рейду знято автоматично | ⟨0⟩
+8fcabef94	🔒 Зараз ЗАБЛОКОВАНО
+94a774e51	🔓 Відкрито
+376d9283f	🚨 Анти-рейд: ⟨0⟩
+8827355aa	Використання: /antiraid on|off
+f0e5d75da	Змінити ліміт: /antiraid on 15 20 (15 учасників/20 с)
+ecbb4a7da	🚨 Анти-рейд ⟨0⟩.
+4f3192d13	Ліміт: ⟨0⟩ учасників / ⟨1⟩ с
+bdf82e0b3	🚨 Анти-рейд ⟨0⟩ | ⟨1⟩
+cc103ac23	Група не заблокована.
+374c81aa3	✅ Блокування від рейду знято, попередні права групи відновлено.
+2551f6fe1	✅ Блокування від рейду знято вручну | ⟨0⟩
+4918e916d	Помилка: не вдалося зняти блокування (перевірте права бота).
+bce49f901	Не вдалося отримати профіль!
+9131de73e	Користувача не знайдено!
+45e118d05	Звичайний
+0aaf03287	Забанено
+bf84ddcb3	Мут (лишилося ⟨0⟩ год ⟨1⟩ хв)
+08c52b8c6	Мут (лишилося ⟨0⟩ хв)
+c5a6c0399	👤 <b>Профіль користувача</b>
+8359545a8	Ім’я: ⟨0⟩
+0fd8daf31	ID: <code>⟨0⟩</code>
+16d1a3d6f	Статус: ⟨0⟩
+c90e09fec	Попередження: ⟨0⟩/⟨1⟩
+c6a441715	(Останнє: ⟨0⟩)
+f7b55484b	Останні дії:
+245846708	система
+1ebb0f458	Дій модерації немає.
+ea0db6b35	Заборонені слова: ⟨0⟩
+67b2688cb	Заборонених слів немає.
+ab2a94371	Додати: /wordban <слово>
+bc50a233e	Видалити: ⟨0⟩
+ea1ef9198	Видалити всі
+9e6ecd595	Закрити
+d4ff2fcbb	Заборонені слова: ⟨0⟩
+1e892c51e	Усього: ⟨0⟩ слів
+d6c5bc3c9	Для видалення скористайтеся кнопками нижче:
+3e285778b	УВІМК
+86fc112e5	ВИМК
+3b9e05b52	Список слів закрито.
+a9b768614	Усі заборонені слова видалено.
+baa6a8908	Усі заборонені слова видалено | ⟨0⟩
+f3b918935	Заборонене слово видалено: ⟨0⟩ | ⟨1⟩
+09e3ab40d	Усі слова видалено.
+4b153db82	Заборонені слова: УВІМК
+dbddb7434	Надсилання повідомлень
+399307b2e	Надсилання медіа
+17dec3f5f	Надсилання посилань
+a6d462ad9	Надсилання файлів
+b80944077	Зберегти
+b0bd84b1e	Скасувати
+eec2005a5	Спершу оберіть канал командою /select!
+056d48fa9	Нічний режим увімкнено вручну.
+aad062b54	Нічний режим вимкнено вручну.
+511a5144a	Години нічного режиму встановлено:
+cb1460461	Початок: ⟨0⟩:⟨1⟩
+771bcaf96	Кінець: ⟨0⟩:⟨1⟩
+7989dd84a	Налаштувати обмеження: /nightmod
+79514002a	Помилка формату. Використання: /nightmod 23:00 07:00
+204b48fc8	Налаштувати (в особистих)
+42031a2a7	Нічний режим використовується вперше! Напишіть боту в особисті, щоб налаштувати його:
+89f29d42a	Активний
+3de48344f	Неактивний
+de1f5c130	Нічний режим: ⟨0⟩ (⟨1⟩)
+b1d3baa6d	Години: ⟨0⟩:⟨1⟩ - ⟨2⟩:⟨3⟩ (UTC+3)
+b5356dbcd	Оберіть права для обмеження й натисніть «Зберегти»:
+bc2943e26	🌙 Нічний режим почався. Обмеження діють до ⟨0⟩:⟨1⟩ ранку.
+86a8a2d6d	Нічний режим увімкнено | ⟨0⟩
+2a8fea2da	☀️ Нічний режим закінчився. Звичайні права відновлено.
+19d0c7302	Нічний режим закінчився | ⟨0⟩
+5f5e93020	Налаштування нічного режиму скасовано.
+9ca4e6abd	Медіа
+c0ceeb976	Голосові/відеоповідомлення
+d0517071a	Посилання
+02c5387be	Обмеження не обрано
+8c6724096	Нічний режим збережено!
+4c2f064b0	Обмеження: ⟨0⟩
+ec5110d51	Задати години: /nightmod 23:00 07:00
+015f290e6	Нічний режим налаштовано | ⟨0⟩
+a6ff502b6	⟨0⟩ Тимчасовий бан минув, але розбан не вдався: <code>⟨1⟩</code>
+09caa25fa	⟨0⟩ Тимчасовий бан закінчився → ⟨1⟩ розбанено
+45cdd1bd7	🔗 Посилання
+a70e468cd	Видаляються повідомлення з посиланнями, прихованими (вбудованими) посиланнями та кнопками-посиланнями.
+a0c63db58	🔤 Заборонені слова
+09f922f95	Слова зі списку ловляться з урахуванням турецьких літер, регістру та leetspeak.
+58c8ebdab	🔁 Повторюваний спам
+61bbb7e24	Якщо більшість із останніх 10 повідомлень за 60 с однакові — це спам.
+37f36cdb7	🌊 Флуд
+a8ee9b9f5	Більше повідомлень, ніж дозволяє ліміт, за короткий час.
+283d462ac	↪️ Пересилання
+93442a52b	Повідомлення, переслані з інших чатів.
+4592320db	🖼 Медіа-флуд
+b65eef3f3	Більше фото/відео/стікерів, ніж дозволяє ліміт, за короткий час.
+32d0d473e	🔞 Неприйнятні медіа
+cf1a8e3ca	Порно/оголеність (ШІ, якщо встановлено), заблоковані медіа й стікерпаки, небезпечні файли (.apk, .exe…).
+353ad5e39	Видалити
+a79d71fbf	Попередження
+229c67bd8	Мут
+0855009c4	Кік
+7f3fcf8f1	Бан
+bd3c8d60c	Тимчасовий бан
+7c65bba4a	⟨0⟩ повідомлень
+5df501398	⟨0⟩ с
+cf6293e00	⟨0⟩ медіа
+637c7d4eb	⟨0⟩ учасників
+2a687b503	⟨0⟩ людей
+2dd4cbf18	⟨0⟩ дій/год
+d507ef055	Повідомлення
+cc9e030d6	Голосові/відеоповідомлення
+1949df42c	Прев’ю посилань
+01674713d	Файли/музика
+0a4ef3c95	✏️ Напишіть нове привітання або надішліть фото/відео/GIF (підпис стане текстом).
+a5e32e95a	Кнопки: по одній у рядку  Текст - https://посилання  (поруч: через &&)
+1ee44f2e2	Змінні: {user} {first} {username} {group} {count} · Випадково: розділяйте повідомлення рядком %%%
+989ac76ce	Ласкаво просимо, {user}!
+f4b119f84	✏️ Напишіть прощальне повідомлення (можна медіа й кнопки). Змінні: {first} {user} {group}
+3fffcf251	👋 {name} покинув(ла) нас.
+e32be930c	📜 Напишіть правила групи. Форматування (жирний, посилання) і кнопки зберігаються.
+8a546a91a	1) Поважайте одне одного  2) Без реклами
+369899a51	📢 Вкажіть обов’язковий канал: @channel, t.me/channel або ID -100…. Бот має бути там адміном.
+ffb95707b	@channel
+0bf3f943d	⏰ Спершу інтервал, потім повідомлення. Наприклад: 6h Не забудьте прочитати правила!
+b7be418c7	Інтервал: 30m, 6h, 1d · Для медіа пишіть у підписі до фото.
+dafcc65fa	6h Повідомлення
+c1e570e92	🔤 Напишіть слова для заборони (по одному в рядку). Для regex почніть з re:
+2038b8200	слова
+8031790fb	🔗 Напишіть дозволені домени (через пробіл). Наприклад: youtube.com t.me/mychannel
+dd20fa7d1	📝 Напишіть нотатку так: назва вміст
+750db2552	rules Правила групи...
+2f50f0128	🧾 Вкажіть ID лог-каналу/групи (наприклад, -1001234567890). Бот має могти писати туди.
+0a89e21a0	🛟 Вкажіть ID довіреної людини (його можна дізнатися, надіславши боту /id).
+678669669	Вимк
+5e05f56cb	⬅️ Назад
+3425aebce	🛡 <b>Захист</b> — ⟨0⟩
+a9aa38570	Натисніть на захист, щоб увімкнути/вимкнути його й налаштувати покарання та ліміти.
+dfc009e83	⟨0⟩ <b>захист</b> — ⟨1⟩
+196e11b00	Покарання: <b>⟨0⟩</b>
+3b58939e6	(ліміт ⟨0⟩ → ⟨1⟩)
+e882e3937	Наростаючий мут: 10 хв → 30 хв → 5 годин
+10d361785	Захист ⟨0⟩
+24d948e4b	Ліміт
+a92c81c26	🔗 Дозволені посилання ›
+05bd7ca2c	🔤 Список слів ›
+7bb491e04	🚪 <b>Вступ</b> — ⟨0⟩
+a956dd268	• <b>Капча</b>: новий учасник не може писати в групі, доки не розв’яже математичний приклад.
+29aad6032	• <b>Перевірка в особистих</b>: бот ставить запитання в особистих тим, хто подав заявку на вступ; ті, хто відповів правильно, приймаються автоматично. У групі має бути ввімкнено «Схвалення нових учасників», а бот повинен мати право запрошувати.
+d33b884be	Капча (у групі)
+6fe48b7bb	Перевірка в особистих
+34c8b8ee3	Автоприйняття
+747e46068	Автовідхилення
+eb973fe6c	Відхиляти ботів / без username
+371ffa7fa	Мут новим учасникам без username
+22be1b04d	🚨 Анти-рейд ›
+df3d708d0	🆕 Обмеження новачків ›
+119163a69	🚨 <b>Анти-рейд</b> — ⟨0⟩
+3d6f3a6ef	Якщо за заданий час вступить більше учасників, ніж дозволяє ліміт, групу блокують на ⟨0⟩ хв, потім попередні права відновлюються.
+12e3f2f5a	🔒 Заблоковано
+78047dc1b	Анти-рейд
+5ebba95e7	🔓 Розблокувати зараз
+80ea856ce	🆕 <b>Обмеження новачків</b> — ⟨0⟩
+983dcd824	Нові учасники не можуть надсилати посилання, медіа й пересилання протягом заданого часу (повідомлення видаляється, показується сповіщення).
+b55881f2f	⚠️ <b>Попередження</b> — ⟨0⟩
+979ac1fa7	Захисти з покаранням «Попередження» та /warn видають попередження; коли ліміт досягнуто, застосовується вибране покарання.
+cd70c61ed	Зараз: <b>⟨0⟩</b> попереджень → <b>⟨1⟩</b>
+e72447e76	Ліміт попереджень
+a380d0c65	Тривалість покарання
+c601b3f5f	Мут від захисту
+6a05e68f4	🌙 <b>Нічний режим</b> — ⟨0⟩
+9ca9fb409	Статус: <b>⟨0⟩</b>⟨1⟩
+d772b08c3	Години: <b>⟨0⟩:⟨1⟩ – ⟨2⟩:⟨3⟩</b> (UTC+3)
+145d44a73	У ці години вибрані права вимикаються, а потім відновлюються.
+4a4847e71	(зараз активний)
+ed1a5ae4e	Нічний режим
+58910c4c5	Початок ⟨0⟩:⟨1⟩
+8e87dff1c	Кінець ⟨0⟩:⟨1⟩
+586001e9d	🔗 <b>Дозволені посилання</b> — ⟨0⟩
+53a0c084e	Ці домени не підпадають під захист від посилань (зокрема піддомени). Усього: ⟨0⟩
+0aa28d421	Натисніть, щоб видалити.
+c619b874d	➕ Додати
+20540dbc7	<b>Видалити всі заборонені слова?</b>
+b12c1611e	🔤 <b>Заборонені слова</b> — ⟨0⟩
+cbdf733da	Фільтр: <b>⟨0⟩</b> · Усього: ⟨1⟩
+acb2cf3c1	Фільтр слів
+9de026dc8	🧹 Видалити всі
+866ffe59a	📝 <b>Нотатки</b> — ⟨0⟩
+8488244a4	Якщо написати в групі <code>#назва</code>, бот покаже нотатку. Усього: ⟨0⟩
+6e5864d9f	➕ Додати нотатку
+64d1a5476	🧩 <b>Фільтри</b> — ⟨0⟩
+75e34f897	Бот відповідає, коли в групі пишуть ключове слово. Усього: ⟨0⟩
+c8063c80c	Додати в групі: <code>/filter</code> · Натисніть, щоб видалити.
+7cb292fe4	🧾 <b>Лог-канал</b> — ⟨0⟩
+399fb6ff5	Сюди надсилаються всі записи модерації.
+6a7bdfba4	Зараз: <code>⟨0⟩</code>
+e76134e13	Змінити може лише власник групи.
+d92dcb23a	✏️ Вказати лог-канал
+c62c45415	🗑 Прибрати
+512ba4fe4	🚨 Рейд
+07210c024	⚙️ <b>⟨0⟩ — Налаштування групи</b>
+9006cb8f1	🛡 Активні захисти: ⟨0⟩
+16ccea6ec	🚪 Капча: ⟨0⟩ · Перевірка в особистих: ⟨1⟩
+cc096b5a7	⚠️ Попередження: ⟨0⟩ → ⟨1⟩
+06292addb	🌙 Нічний режим: ⟨0⟩
+e5044a295	🛡 Захист
+82a6a709d	🌙 Нічний режим
+2eed1225e	🔗 Посилання
+d38c4e47a	🔤 Слова
+6828b98dc	🧩 Фільтри
+7956a13a3	⏰ Повідомлення за розкладом
+81bddc593	🏷 Згадування
+5961a42e8	✏️ Редагування і скарги
+1ff65156a	🧾 Лог-канал
+f1a57e125	🌐 Мережа груп
+f5c96387f	🛟 Відновлення
+5244ca690	🌍 Мова: ⟨0⟩
+1bd24917c	✖️ Закрити
+e38a49a6f	Налаштування захисту каналу
+f81ca3a77	Це налаштування може змінити лише засновник групи.
+4081e665c	Невірне налаштування
+ce432606a	✅ Увімкнено
+ca037fcc4	❌ Вимкнено
+a006b158d	⚙️ Покарання ⟨0⟩ → ⟨1⟩ | ⟨2⟩
+0ebfd3ac6	Покарання: ⟨0⟩
+286a11648	Покарання за ліміт: ⟨0⟩
+c32110889	Список змінився, оновлено
+cf6b53ca2	🗑 ⟨0⟩ видалено: ⟨1⟩ | ⟨2⟩
+64e48562d	Дозволене посилання
+ed6b18d70	🗑 ⟨0⟩ видалено
+36a8cc3d4	🧹 Усі заборонені слова видалено | ⟨0⟩
+5db717ed8	Усі слова видалено
+0f2ad553f	Фільтр видалено
+3247c21b8	🌙 Нічний режим ⟨0⟩
+672441418	увімкнено
+ba4dc20d1	вимкнено
+d3d694451	Збережено
+95bf688eb	Лог-канал прибрано
+e413c4b9e	Правила видалено
+0f514bbde	✅ Блокування від рейду знято через панель | ⟨0⟩
+8e6a20f22	🔓 Розблоковано
+f5014f259	Не вдалося розблокувати (права бота?)
+7f0e2a142	Групу не знайдено.
+f41c17d41	Щоб користуватися цією панеллю, потрібно бути адміном групи.
+8213d6575	<i>Скасувати: cancel</i>
+1465f36fd	Напишіть відповідь як відповідь на повідомлення, що відкрилося.
+3035a6b30	⏰ Час вийшов, спробуйте знову з панелі.
+18363eae4	Скасовано.
+3a22b8f74	❌ Правила не можуть бути порожніми.
+fa98ef9b6	Привітання
+a9e0c5b00	✏️ ⟨0⟩ оновлено | ⟨1⟩
+074e8897f	✅ ⟨0⟩ оновлено (⟨1⟩). Перевірити можна кнопкою 👁 Попередній перегляд у панелі.
+4f4799ddf	✅ Обов’язковий канал увімкнено: <b>⟨0⟩</b>
+9dc44c973	❌ Напишіть повідомлення після інтервалу. Наприклад: <code>6h Прочитайте правила!</code>
+564247ab5	✅ Повідомлення за розкладом #⟨0⟩: кожні ⟨1⟩.
+390237a11	✅ Додано слів: ⟨0⟩, фільтр слів увімкнено.
+28ebadbf6	❌ Невірний регулярний вираз: ⟨0⟩
+8d642d759	✅ Додано доменів: ⟨0⟩.
+f6b268d0d	❌ Формат: <code>назва вміст</code> (назва: літери, цифри, - або _)
+1b6abf7f2	✅ Нотатку збережено: <code>#⟨0⟩</code>
+d872c76cd	Лог-канал може змінити лише власник групи.
+1731f9a98	❌ Невірний ID. Приклад: <code>-1001234567890</code>
+e84190fc5	✅ Лог-канал ULUS під’єднано: ⟨0⟩
+9d4e14027	❌ Не можу надсилати повідомлення в цей чат. ⟨0⟩
+d8947ff95	✅ Лог-канал встановлено.
+7f9f8fabc	Невідома дія.
+c3ecef83d	с
+e3a725f35	Лише учасники
+fb155ed20	Учасники + адміни
+5e998efe4	Учасники + адміни + старші адміни
+431e199fa	Усі, крім засновника
+8b3606b03	🤖 ШІ-перевірка⟨0⟩
+2abda5f05	(не встановлено)
+af96fe25f	📦 Небезпечні файли (.apk .exe …)
+c977dbc41	🔒 Автоблокування медіа під час атаки
+1c409b726	Тривалість блокування
+e4b73af2e	🚫 Список заблокованих медіа ›
+a5265e3d7	🔓 Зняти блокування медіа
+c1a903ce0	🔒 Заблокувати медіа зараз
+678507459	увімк
+c293fc85c	вимк
+8dd94c76e	не встановлено (на сервері: <code>pip install nudenet</code>)
+043b96df1	🔒 Блокування медіа активне до ⟨0⟩
+059a31b37	ШІ-перевірка: ⟨0⟩
+c77da8b2d	Щоб заблокувати, дайте відповідь на медіа <code>/blockmedia</code> · стікерпак: <code>/blockpack</code>⟨0⟩
+a54dfcd87	🚫 <b>Заблоковані медіа</b> — ⟨0⟩
+b1fe46387	Видаляються, коли те саме медіа надсилають знову. Усього: ⟨0⟩
+2d00f3347	Натисніть, щоб прибрати. Додати: дайте відповідь на медіа <code>/blockmedia</code>
+0c575feaa	✏️ <b>Редагування і 🚩 скарги</b> — ⟨0⟩
+fe3d0969d	• <b>Захист від пізніх правок</b>: повідомлення, змінене пізніше ніж через ⟨0⟩ хв після надсилання, видаляється; стара й нова версії надсилаються в особисті засновнику групи й тому, хто додав бота (вони мають запустити бота в особистих).
+48166d583	• <b>Скарги</b>: учасники відповідають на повідомлення <code>/report</code> або <code>@admin</code>; адміністрація отримує сповіщення з кнопками.
+9a9d43302	👥 Діє на: <b>⟨0⟩</b> (натисніть кнопку, щоб змінити; лише засновник)
+60543a144	Захист від пізніх правок
+2719eae25	👥 Діє на: ⟨0⟩
+8173539b7	Тривалість
+a95a8ac50	Сповіщати засновника/того, хто додав
+337b927c6	Система скарг
+283ea618d	🌍 <b>Мова</b> — ⟨0⟩
+ecfd0b504	Повідомлення, кнопки й сповіщення бота в цій групі будуть обраною мовою. Ваші привітання, правила й нотатки не змінюються.
+b04edf4df	👮 <b>Аудит адмінів</b> — ⟨0⟩
+46926b2fa	• <b>Щоденне зведення</b>: щовечора засновник і той, хто додав бота, отримують, хто скільки зробив банів, мутів, попереджень і видалень.
+9e35dc551	• <b>Ліміт дій</b>: якщо співробітник (не засновник) зробить більше ⟨0⟩ банів/кіків/мутів за 1 годину, його права призупиняються, а ви отримуєте сповіщення з кнопками (його бани можна скасувати одним натиском).
+dbc65734d	• <b>Журнал видалених</b>: повідомлення, видалені через /del і /purge, копіюються в лог-канал. (Telegram не повідомляє ботам про повідомлення, видалені вручну в застосунку.)
+fef769989	Зведення зараз: <code>/audit 7</code> · Історія повідомлення: дайте відповідь на повідомлення <code>/edits</code>
+5d565355a	Призупинені співробітники: ⟨0⟩
+fbe3b7863	Ці налаштування може змінювати лише засновник.
+011f51955	Щоденне зведення по адмінах
+f8f216c2d	Ліміт дій адмінів
+c1017ac8a	Ліміт
+75d76fc04	Копіювати видалені повідомлення в лог-канал
+b91937b6d	🌐 <b>Мережа груп</b> — ⟨0⟩
+e26434728	Ця група в мережі ⟨0⟩ (груп: ⟨1⟩):
+4515b950e	Поки синхронізацію банів увімкнено, забанений в одній групі банитиметься в усіх групах мережі (кіки — ні); зняття бану теж діє скрізь.
+2a41a6019	Синхронізація банів
+7b9394ab7	📋 Скопіювати списки слів і посилань у мережу
+35c1578b6	⚙️ Скопіювати налаштування захисту в мережу
+a0ec7c7bd	➖ Прибрати цю групу з мережі
+db918b20f	Ця група не в мережі. Якщо додати ваші групи в мережу, бани поширюються на всі, а налаштування можна копіювати одним натиском. (Потрібен засновник / співзасновник.)
+e44c5b572	➕ Додати цю групу в мою мережу
+fe6b211f8	⟨0⟩ (адмінів: ⟨1⟩)
+1c979a8ff	поки немає
+9f41d74fa	🛟 <b>Відновлення адмінів</b> — ⟨0⟩
+62477adfc	Список адмінів зберігається кожні 6 годин. Якщо хтось за короткий час зніме права з 3+ адмінів, адміни й довірені особи отримають сповіщення з кнопкою відновлення. Довірені особи можуть відновити адмінів, надіславши боту в особисті <code>/recover</code>.
+092c6482f	Останній знімок: ⟨0⟩
+ba8991412	Довірені особи (⟨0⟩/3) — натисніть, щоб прибрати:
+5729ee3a9	➕ Додати довірену особу
+72e9b014a	Відновлювати автоматично
+cdfef870d	📸 Зберегти зараз
+521787de8	♻️ Відновити ›
+c578b31d8	Знімок не знайдено.
+b5e5e7de1	Невірна мова
+a85ca0330	Змінити може лише засновник групи.
+43ce9c01e	✏️ Область захисту правок: ⟨0⟩ | ⟨1⟩
+446ff86ee	Діє на: ⟨0⟩
+59e922883	🔒 Медіа заблоковано
+dd43607b8	Не вдалося заблокувати (блокування від рейду або права бота)
+650f54e0c	🔓 Блокування медіа знято
+a6220f5d4	Блокування вже вимкнене
+1d4e3c6c4	Блокування знято
+de91565ff	Щоб додати групу в мережу, потрібно бути її засновником.
+6b85bac2e	🌐 Групу додано до мережі ⟨0⟩
+6c4e9120a	Додано до мережі
+b605b46d7	Ця група не входить до мережі
+4f36e2321	Вилучено з мережі
+bd4ac87bb	Це може зробити лише власник мережі.
+f9a34a2ad	Синхронізація банів ⟨0⟩
+78a09a0ea	🌐 Налаштування скопійовано в ⟨0⟩ груп мережі | ⟨1⟩
+eacfa093c	Скопійовано в ⟨0⟩ груп
+c39c747b1	Змінювати налаштування відновлення може лише засновник.
+95e917987	Видалено
+87f3326f9	📸 Збережено
+49c866e1e	Не вдалося зберегти (бот адмін?)
+b13ed05bb	♻️ Відновлено адмінів: ⟨0⟩⟨1⟩
+8670a3a46	, не вдалося: ⟨0⟩
+c3b595125	Додавати довірених осіб може лише засновник.
+32cb829ea	❌ Людину не знайдено. Напишіть її ID (його можна дізнатися, надіславши боту /id).
+89f663ce6	Можна додати не більше 3 довірених осіб.
+dfe9ba864	✅ ⟨0⟩ додано як довірену особу. Ця людина має запустити бота в особистих повідомленнях.
+a4167566b	Спочатку виберіть групу через /select!
+2ba2862f6	група
+62d623326	канал
+3fca554f2	люди
+ffd1ee882	📝 чернетка
+4bf27d98f	⏰ заплановано
+4c10fb3fc	📤 надсилається
+2467aa607	✅ готово
+578b9744b	❌ скасовано
+71db82dfe	Вкажіть час так: -time 20:00
+c3cd977ee	Вкажіть назву шаблону так: /broadcast -save update "повідомлення"
+530791023	немає отримувачів
+9a2c72e2d	🔕 Вимкнути розсилки
+9f242a754	🗳 Голосів поки немає
+37e3719ed	🗳 Голосів: ⟨0⟩: ⟨1⟩
+186e99c6e	✅ <b>Розсилку #⟨0⟩ завершено</b>
+53acfe01d	⏹ <b>Розсилку #⟨0⟩ зупинено</b>
+8fa7a67a9	📊 Оброблено ⟨0⟩/⟨1⟩
+6b12880d0	✅ Доставлено: <b>⟨0⟩</b>
+ddb6da67b	🚫 Заблокували / не запускали бота: ⟨0⟩ (пропускаються в наступних розсилках)
+814224bfc	⚠️ Не вдалося надіслати (бота вилучено / немає прав): ⟨0⟩
+d4d2773cb	📌 Закріплено: ⟨0⟩
+53ffa3f09	👆 Натискання кнопок видно в /broadcasts
+0d709ac7c	🗳 Результати опитування видно в /broadcasts
+dd370224e	Щоб зупинити: /stopbroadcast
+be085c333	📢 <b>Розсилка</b>
+0b7be0b19	<code>/broadcast "повідомлення"</code> — групи + канали
+1e622cf6b	<code>/broadcast -users "повідомлення"</code> — люди, які користуються ботом в особистих
+25a35b0aa	<code>/broadcast -users -channels "повідомлення"</code> — люди + канали (можна поєднувати)
+0b87fef23	<code>/broadcast all "повідомлення"</code> — усім
+bc83a4f15	Параметри: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (останні 7 днів; <code>-active 30</code>) · <code>-test</code> (лише вам) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+1aca894ba	🎯 У попередньому перегляді можна вибрати конкретні групи/канали.
+9fa263da2	🗳 Опитування: <code>/broadcast -poll -users "Питання?
+735ec279d	Варіант 1
+98805337f	Варіант 2"</code> — усі голоси збираються в одному опитуванні
+aaa59ea0d	💾 Шаблон: <code>/broadcast -save назва "повідомлення"</code> → <code>/broadcast -users #назва</code> · /templates
+a3caa1df0	💡 Якщо відповісти на повідомлення (зображення, відео, з кнопками або преміум-емодзі) командою <code>/broadcast -users</code>, воно надсилається як є. У тексті також можна писати рядки кнопок: <code>Канал - https://t.me/channel</code> (натискання рахуються)
+fb071e726	/broadcasts — історія, натискання, результати опитувань · /stopbroadcast — зупинити надсилання
+344eb221b	⚠️ Telegram перетворив преміум-емодзі на звичайні (боти не можуть надсилати преміум-емодзі, просто написавши їх). Рішення: напишіть повідомлення самі та дайте на нього відповідь /broadcast — у скопійованому повідомленні вони збережуться.
+f87763b78	👆 <b>Попередній перегляд розсилки #⟨0⟩</b>
+3790c85e6	🎯 Отримувачі: ⟨0⟩
+d46292455	🔥 Лише активні за останні ⟨0⟩ днів
+019c9cc1b	✅ Вибрані групи/канали: ⟨0⟩
+14d962307	👤 Люди: ті, хто користується ботом в особистих; Telegram не дозволяє писати людям із груп, які ніколи не запускали бота (одна спроба, потім пропуск).
+f7bcd6c82	⏱ Орієнтовний час: ~⟨0⟩ с
+aaca2bf64	⏰ Час надсилання: ⟨0⟩
+4046d6be5	📌 Буде закріплено в групах і каналах
+c3eded236	🔕 Без звуку
+cffb2a880	👆 Натискання кнопок рахуватимуться
+251fac5c6	🗳 Опитування буде переслано; голоси збираються в цьому опитуванні
+ba70fe09b	⏰ Запланувати
+8241e1495	✅ Надіслати
+86f2e67ab	❌ Скасувати
+d53523fb6	Немає кому надсилати.
+2882de09f	🎯 Вибрати групи/канали
+78f17fac4	❌ Закрити
+e6b5975cd	◀️ Назад
+b84641c59	Далі ▶️
+9a4dab900	🔄 Скинути вибір
+6044624ae	✅ Готово
+786000738	🎯 <b>Розсилка #⟨0⟩: виберіть групи/канали</b> (сторінка ⟨1⟩/⟨2⟩)
+8273973d4	Вибрано: <b>⟨0⟩</b> — якщо нічого не вибрано, надсилається всім.
+0b988bbef	Цю команду може використовувати лише власник бота!
+4b64d112c	Для шаблону напишіть повідомлення або дайте відповідь на нього.
+9cc026c97	💾 Шаблон збережено: #⟨0⟩
+12933b18c	Щоб використати: /broadcast -users #⟨0⟩
+dcba9eba6	Шаблону з назвою #⟨0⟩ немає. Список: /templates.
+c3b81b13d	Напишіть опитування так:
+185c6d7a9	/broadcast -poll -users "Питання?
+27ced0bf8	Варіант 2"
+9de509dc5	Не вдалося створити опитування: ⟨0⟩
+e8c8a3987	🧪 Тестове опитування надіслано лише вам.
+f6c39b561	Не вдалося надіслати тест: ⟨0⟩
+3ccbd9c93	🧪 Тестову розсилку надіслано лише вам.
+305ee0f9a	(в особисті)
+cb34b252b	Не вдалося надіслати попередній перегляд: ⟨0⟩
+68aa08ebf	🔕 Розсилки вимкнено. Щоб увімкнути знову: /subscribe
+ead4b09a2	🗑 Видалено
+6fc68153b	Немає доступу або недійсно.
+5027629e8	Цю розсилку вже оброблено.
+1b315a09e	⏰ Розсилку #⟨0⟩ заплановано: ⟨1⟩
+08d8e26cc	Переглянути можна через /broadcasts.
+d236ce6c8	📤 Надсилається розсилка #⟨0⟩…
+e15ad036b	Скасовано
+8c0a53753	❌ Розсилку #⟨0⟩ скасовано.
+32ff8287a	Не заплановано.
+95d0599f3	⏹ Зупинка…
+a96302489	Зараз нічого не надсилається.
+7afa989da	📢 Розсилок поки немає.
+b0b0b34ae	📢 <b>Останні розсилки</b>
+a2148c2a7	🗳 опитування
+771c7f3fb	👆 Натискань: ⟨0⟩⟨1⟩
+8139aea8f	(людей: ⟨0⟩)
+71fc8c6a3	❌ Скасувати #⟨0⟩
+6b91bce73	⏹ Зупинити #⟨0⟩
+55b4c1882	💾 Немає збережених шаблонів.
+4dc8bf919	Щоб зберегти: <code>/broadcast -save назва "повідомлення"</code> або дайте відповідь на повідомлення командою <code>/broadcast -save назва</code>
+a5f43a44d	💾 <b>Шаблони розсилок</b>
+bd5b7fec5	📋 скопійоване повідомлення
+8ebf8c6d8	Використання: <code>/broadcast -users #назва</code>
+d9ecd93d0	⏹ Зупиняю розсилку…
+e6989213d	Зараз жодна розсилка не надсилається.
+1d2937461	🔔 Розсилки увімкнено.
+b75b13003	➕ <b>Мене додали: ⟨0⟩</b>
+862253052	· учасників: ⟨0⟩
+7171ced0d	👤 Додав(ла): ⟨0⟩⟨1⟩
+b0c699f59	🔐 Адмін
+7505ec5cf	⚠️ Ще не адмін (нагадування надійде через 24 години)
+93e256834	➖ <b>Мене вилучили з:</b> ⟨0⟩
+f6cedb404	👤 Вилучив(ла): ⟨0⟩ · <code>⟨1⟩</code>
+545d22c19	⚠️ Я досі не адмін у <b>⟨0⟩</b>, тому захист не працює.
+e7c66ff8b	Налаштування групи → Адміністратори → Додати адміністратора → @⟨0⟩ (достатньо видалення повідомлень і обмеження учасників) або натисніть кнопку нижче.
+519fdb65c	⚡ Зробити мене адміном
+977c42cf0	📈 <b>Тижневий звіт ⟨0⟩</b> (⟨1⟩ – ⟨2⟩)
+075c08a00	👥 Групи: <b>⟨0⟩</b> · 📢 Канали: <b>⟨1⟩</b>
+626db2ea3	➕ Додано: <b>⟨0⟩</b> · ➖ Вилучено: <b>⟨1⟩</b>
+3b300252b	👤 Особисті користувачі: <b>⟨0⟩</b> (цього тижня +⟨1⟩)
+8ebb70df7	💬 Повідомлення: <b>⟨0⟩</b>⟨1⟩ · активних людей: <b>⟨2⟩</b>
+179fe6c75	🚪 Приєдналися до груп: <b>⟨0⟩</b> · вийшли: <b>⟨1⟩</b>
+171919cd0	🆕 <b>Нові чати</b>
+8298e9706	… і ще ⟨0⟩
+7ba765796	🏆 <b>Найактивніші групи</b>
+03a70d760	⟨0⟩. ⟨1⟩ — повідомлень: ⟨2⟩
+57d75c0ab	🛠 Бот на короткому обслуговуванні; скоро повернеться. Захист продовжує працювати.
+fc94758f1	🛠 Режим обслуговування <b>увімкнено</b>⟨0⟩
+588994912	— завершиться о ⟨0⟩
+35ea18ef8	✅ Режим обслуговування вимкнено
+e1a334ce2	(безстроково)
+e7103f4b6	<code>/maintenance 30</code> — 30 хвилин · <code>/maintenance on</code> — безстроково · <code>/maintenance off</code>
+c05840eb1	Додайте <code>-duyur</code> у кінці, щоб надіслати групам коротке повідомлення.
+fe8a047fd	Під час обслуговування команди й кнопки вимкнено для всіх (крім вас); захист від спаму, посилань, флуду та капча продовжують працювати.
+9fd9dff45	✅ Режим обслуговування вимкнено.
+280c2df8e	Режим обслуговування вже вимкнено.
+a476c76e4	✅ Обслуговування завершено, бот повністю працює.
+5a2d5c21d	🛠 Режим обслуговування увімкнено, він автоматично вимкнеться о ⟨0⟩.
+321af0468	🛠 Режим обслуговування увімкнено (безстроково). Щоб вимкнути: /maintenance off
+81851cbcd	Використання: /maintenance 30 · /maintenance on · /maintenance off
+0d8f36bae	Команди й кнопки вимкнено для всіх (крім вас); захист працює.
+0e64031cc	/invite використовується в групі: дає вам особисте посилання-запрошення та рахує людей, яких ви привели.
+882848490	Конкурс запрошень у цій групі вимкнено.
+b5811c1fa	Не вдалося створити посилання-запрошення: потрібне право «запрошувати користувачів».
+c2dee7686	Не вдалося створити посилання-запрошення, спробуйте трохи пізніше.
+24b1d9ce7	🔗 ⟨0⟩, ваше посилання-запрошення:
+1dafe45ec	👥 Ви привели людей: <b>⟨0⟩</b>⟨1⟩
+6f74b2ba9	🏆 Рейтинг: /invites
+060348723	(вийшли: ⟨0⟩)
+cb5bdaa5f	/invites використовується в групі.
+1db2cf152	🏆 Ще ніхто не приєднався за запрошенням. Отримайте своє посилання через /invite!
+4ba6e3c96	🏆 <b>Рейтинг запрошень</b>⟨0⟩
+d7ee0f9c5	(останні 7 днів)
+b71ab530b	⟨0⟩ ⟨1⟩ — запрошено: <b>⟨2⟩</b>
+e309c956d	Для вашого посилання: /invite⟨0⟩
+ff021375b	· за тиждень: /invites 7
+db6ff4fd5	🚫 Заблокувати
+ead127c24	📨 Ваше повідомлення переслано адміністратору бота. Відповідь ви побачите тут.
+b3be121db	✅ Відповідь доставлено.
+6a71974f7	❌ Не вдалося доставити: користувач заблокував бота.
+29d8bcae2	❌ Не вдалося доставити: ⟨0⟩
+a299e6f40	Немає доступу!
+67149866b	без username
+e9d283a8a	ID: ⟨0⟩
+546855b2f	Усього повідомлень: ⟨0⟩
+4caedc905	🚫 Заблоковано: повідомлення цієї людини більше не пересилатимуться.
+aa1be6bef	✅ Розблоковано.
+05fe7a9ae	✅ Розблокувати
+347667dc7	💬 Повідомлення, які ви пишете боту в особисті, пересилаються адміністратору бота; відповідь теж приходить сюди.
+fb6c079d1	💬 Лінія підтримки: <b>⟨0⟩</b>
+29ab6a683	Останні 7 днів: ⟨0⟩ повідомлень, ⟨1⟩ людей
+d3a86e2ed	Особисті повідомлення користувачів боту пересилаються вам; якщо ви <b>відповісте</b> на таке повідомлення, ваша відповідь піде користувачу (ваша особа залишиться прихованою). Щоб заблокувати когось, натисніть 🚫 під повідомленням.
+2e8d13df7	/support off — вимкнути
+b9d5c0506	/support on — увімкнути
+fb9c9edb1	🔨 бан
+69750b260	👢 кік
+ba949e0b3	🔇 мут
+499389526	⚠️ попередження
+2146683b0	🗑 видалення
+29c555d38	✅ розбан
+2adb56b78	🔊 зняття муту
+be630c265	↩️ зняття попередження
+4a1bf66db	вилучено
+804ba7661	видалити
+324073880	🔻 Також знято права адміністратора Telegram.
+cf9b454c2	⚠️ Не вдалося зняти права адміністратора Telegram (можливо, їх надавав не бот); за потреби зніміть їх вручну в налаштуваннях групи. (⟨0⟩)
+b55e087a5	🚨 <b>Перевищено ліміт дій адміна</b> — ⟨0⟩
+427b5c6c1	⟨0⟩ зробив(ла) <b>⟨1⟩</b> банів/кіків/мутів за останню годину (ліміт ⟨2⟩). Права призупинено⟨3⟩.⟨4⟩
+95dbff4c7	(ранг: ⟨0⟩)
+1f08073ce	♻️ Відновити права
+007e62b21	↩️ Скасувати його бани за останні 2 години
+62523d9c0	✅ Гаразд, залишити призупиненим
+edef2b326	Це може зробити лише засновник групи.
+c2ee2c9d8	↩️ Розбанено людей: ⟨0⟩
+91b30283d	↩️ Останні бани ⟨0⟩ скасовано (⟨1⟩) | ⟨2⟩
+9ed54f7b6	Не призупинено (вже вирішено).
+65e104036	(Не вдалося відновити права Telegram: ⟨0⟩)
+fdec34132	♻️ Права відновлено⟨0⟩
+e44b14d39	♻️ Права ⟨0⟩ відновлено | ⟨1⟩
+caddb66f3	✅ Права залишаються знятими
+a9968a219	⛔ ⟨0⟩: права призупинено
+5d7617657	👮 <b>Щоденний звіт адмінів</b> — ⟨0⟩
+053473339	<i>Telegram не повідомляє ботам про повідомлення, видалені вручну в застосунку; у видаленнях враховано лише зроблені через /del і /purge.</i>
+46faeb5b0	Спочатку виберіть групу через /select!
+c1c404194	Ця команда для засновника та співзасновників.
+3960d6a99	За цей період дій персоналу немає.
+42c00ba90	👮 <b>Аудит адмінів</b> — ⟨0⟩ (останні ⟨1⟩ днів)
+5cb08e285	Кількість днів: <code>/audit 7</code>
+3de0d27b9	📩 Звіт аудиту надіслано в особисті.
+57a762312	Не вдалося написати вам в особисті: спочатку надішліть боту /start.
+6accc9fd5	… і ще ⟨0⟩ повідомлень
+37de34f22	🗑 <b>Видалені повідомлення</b>⟨0⟩ | Видалив(ла): ⟨1⟩
+9a1505c99	/del використовується в групі як відповідь на повідомлення, яке треба видалити.
+d223e7b03	Дайте відповідь /del на повідомлення, яке треба видалити.
+9fada83b0	🗑 <b>Повідомлення видалено</b> | Автор: ⟨0⟩ | Видалив(ла): ⟨1⟩
+a1c331d8e	/edits використовується в групі як відповідь на повідомлення.
+5f93a0deb	Дайте відповідь /edits на повідомлення, історію якого хочете переглянути.
+250e055ba	Для цього повідомлення немає історії редагувань (зберігається за останні ⟨0⟩ днів).
+36da7c07e	📝 <b>Історія редагувань</b> — ⟨0⟩ · редагувань: ⟨1⟩
+27ec83d6a	оригінал
+afea26f62	редагування #⟨0⟩
+39562283b	🌐 Глобально забанений користувач приєднався й отримав бан: ⟨0⟩
+b42c13323	🤖 Підозрілий акаунт обмежено: ⟨0⟩ → ⟨1⟩
+3c4fe05e5	👋 ⟨0⟩ приєднується → ⟨1⟩
+aa9673f91	СЬОГОДНІ
+fe5b02de1	ЦЬОГО ТИЖНЯ
+05e451c40	ЦЬОГО МІСЯЦЯ
+a65b592d7	ЗА ВЕСЬ ЧАС
+fa5c481c7	Користувач → Повідомлення
+11a5c6c19	├ Усього активних користувачів: ⟨0⟩
+d8524730d	└ Усього повідомлень: ⟨0⟩
+cd18a00ba	Ви ⟨0⟩ : ⟨1⟩
+8b57b7048	Цю групу не зареєстровано! Якщо ви користуєтеся ботом в особистих, спочатку виберіть групу через /select.
+d2fc8f52c	15 найактивніших людей місяця у вашій групі:
+10710d7e5	📊 Цей рейтинг за поточний місяць.
+0bffc9609	15 найактивніших людей за весь час у вашій групі:
+5552d868e	📊 Рейтинг за весь час.
+9d75c68d7	Статистики повідомлень поки немає!
+54dbc7053	15 найактивніших людей дня у вашій групі:
+86767b480	📊 Цей рейтинг за останню добу.
+25670a03f	15 найактивніших людей тижня у вашій групі:
+17af6b262	📊 Цей рейтинг за останній тиждень.
+43d197ca4	📅 За день
+f70fa8d28	📅 За тиждень
+1b9326b3c	📅 За місяць
+c9c0e3bcd	📊 За весь час
+d4d0010bd	📋 Детальніше
+f939c661d	🌐 Глобально
+674ed30af	👥 Виберіть тип рейтингу для цієї групи.
+0f3a59f6a	Це меню відкрив(ла) ⟨0⟩.
+bbf0e9940	👥 Найактивніші у вашій групі (⟨0⟩):
+62e79a0f9	Активність вашої групи відтоді, як бот став адміном:
+f55378a92	👥 Активні користувачі:
+503794387	💬 Усього повідомлень:
+ef5bd5de0	📊 Усього взаємодій:
+c6c4664dd	Для конкретного користувача використайте /info @user або дайте відповідь на його повідомлення.
+7e811e0d2	👱 Ім’я: ⟨0⟩
+9b0e7b293	🌐 Username: ⟨0⟩
+14ed29970	👥 Кількість ваших груп: ⟨0⟩
+ba33e26dc	💬 Усього повідомлень у ваших групах:
+8cb7f31a3	├📆 За день: ⟨0⟩
+5ee653a06	🔍 Разом у ваших групах:
+0df3dab20	├🃏 Стікери: ⟨0⟩
+e93a634c3	📊 Статистика ⟨0⟩:
+ae2b984ac	💬 Кількість повідомлень:
+3e08d6dfd	┌📆 За день: ⟨0⟩
+037b7c646	├📆 За тиждень: ⟨0⟩
+9f577c2b5	├📆 За місяць: ⟨0⟩
+cf3b5cf8f	└Усього: ⟨0⟩
+e1ed2556f	📊 Деталі взаємодій:
+0327b318b	┌🃏 Стікери: ⟨0⟩
+5ca7902a2	├🀄️ GIF: ⟨0⟩
+b667cf812	├🙃 Емодзі: ⟨0⟩
+68fa09ce3	├📷 Фото: ⟨0⟩
+886e342ec	├🎥 Відео: ⟨0⟩
+a11d703a7	├💾 Файли: ⟨0⟩
+0afb08ea1	├🎙 Голосові: ⟨0⟩
+5199486f9	└📼 Музика: ⟨0⟩
+7d244b585	🏆 Загальне місце: #⟨0⟩
+9394cb52f	Відновити всіх адмінів
+846fa3804	Відновити всіх, крім спамера
+ea0ec5a8c	Підозрюваний: ⟨0⟩
+40ab78429	🚨 <b>РЕЖИМ ЗАХИСТУ КАНАЛУ АКТИВНИЙ</b>
+65bfd4f34	⟨0⟩Канал: <code>⟨1⟩</code>
+d5d022cd9	Усі права адміністраторів знято, крім засновника та адміна, який додав бота.
+11b7596d5	Відновлено адмінів: ⟨0⟩
+19c35e8f0	🌐 Мережевий бан знято: ⟨0⟩ (у всіх групах мережі)
+c2e7013a3	🌐 Мережевий бан: ⟨0⟩ — поширено на інші групи мережі: ⟨1⟩
+9fe755831	записів не знайдено
+d121e65b8	не вдалося отримати дані бота: ⟨0⟩
+463126054	♻️ Відновлення адмінів: відновлено ⟨0⟩⟨1⟩
+90d9a6b20	, не вдалося: ⟨0⟩
+caa60fdc5	🚨 <b>Масове зняття адмінів</b>
+8ba5e6709	Група/канал: <b>⟨0⟩</b>
+5d095f637	⟨0⟩ (<code>⟨1⟩</code>) зняв(ла) права з адмінів (⟨2⟩) протягом 10 хвилин.
+8d21e12ea	Останній справний знімок: ⟨0⟩
+9ba30f2ce	♻️ Відновити адмінів
+a96545d83	♻️ Автоматично відновлено адмінів: ⟨0⟩⟨1⟩
+a556aedb4	(не вдалося: ⟨0⟩)
+ee38d1474	Немає придатного знімка адмінів.
+d94586a2d	Немає групи/каналу, які ви можете відновити. Власник групи має додати вас як «довірену особу» в панелі.
+a186abeb7	Адмінів якої групи/каналу ви хочете відновити?
+358350243	Для цієї групи ще немає знімка адмінів (знімки робляться кожні 6 годин).
+e0f04d2e3	⟨0⟩ · адмінів: ⟨1⟩
+629844d31	<b>⟨0⟩</b> — виберіть знімок для відновлення:
+b5ad3a8e7	Немає прав або знімка.
+0644770db	♻️ Буде відновлено адмінів зі знімка ⟨0⟩:
+700b3ac82	Підтверджуєте?
+1ca35b0e1	✅ Так, відновити
+e6a5e85cd	❌ Скасувати
+805c38798	Відновлення...
+cf63ea900	♻️ Відновлено адмінів: ⟨0⟩.⟨1⟩
+b8058c528	❌ Не вдалося: ⟨0⟩
+e82edc1de	(Бот не може надати права, яких не має сам, і не може змінювати адмінів, призначених кимось іншим.)
+f13124b3b	Список адмінів відновлено (адмінів: ⟨0⟩).
+400c018e5	медіафлуд
+60ff56604	⟨0⟩ повідомлень / ⟨1⟩ с
+97268aded	2+ адміни спамили протягом 30 хв
+d739884a3	⚠️ <b>Виявлено спам від адміна!</b>
+3302869c8	Адмін: ⟨0⟩ (<code>⟨1⟩</code>)
+3cbc92eef	Дія: ⟨0⟩
+3d7963ca4	Режим захисту каналу: неактивний
+72f491ffe	Бан + права знято
+35cf8f7fb	Права знято
+b6331605b	🤖 Додавання бота заблоковано
+ad9ead387	Бот: ⟨0⟩
+a7c242666	Додав(ла): ⟨0⟩
+9b75f55a2	⚠️ Виявлено несанкціоноване призначення адміна!
+e97409070	Призначив(ла): ⟨0⟩ (<code>⟨1⟩</code>)
+c065dbd5f	Призначено: ⟨0⟩ (<code>⟨1⟩</code>)
+17a403bbb	Виявлено масовий бан: ⟨0⟩ (⟨1⟩) банів: ⟨2⟩ / ⟨3⟩ с
+e21052fad	Назва: '⟨0⟩' → '⟨1⟩'
+eb38d7d1c	Опис змінено
+b2209389a	Спрацював захист від клонування каналу!
+85a87d615	Зміни скасовано:
+b79ccad39	📋 <b>Тижневий звіт журналу каналу</b>
+546658b9b	Бан + зняти права
+2c124f337	Лише зняти права
+a5505fdbd	⟨0⟩ Захист від спаму адмінів
+183b4aa2e	Дія при спамі: ⟨0⟩
+5d5673266	⟨0⟩ Медіафлуд адмінів
+652974e14	Дія при медіа: ⟨0⟩
+9123863e2	⟨0⟩ Захист від посилань
+3d1465b74	⟨0⟩ Захист від клонування
+a03517abc	⟨0⟩ Захист від додавання ботів
+b27f8f968	⟨0⟩ Захист від масових банів
+006229c38	👥 Безпечні адміни
+ec411a6b8	💾 Зберегти назву/опис каналу
+a8d6a7aa4	🔙 Закрити
+e0a90af5c	Канал не знайдено!
+9abd1a97e	Ця команда для налаштувань каналу. Для налаштувань групи використовуйте /settings.
+d63cd9886	Збережено: ⟨0⟩
+c3d254196	Список безпечних адмінів:
+ff4ef369c	(Можуть публікувати посилання)
+5243a71a1	Дописи каналу
+f6489e475	адмін каналу
+29bb8c58f	Схвалюю заявки, зачекайте...
+218960722	Заявок на вступ, що очікують, не знайдено.
+1b385aeaa	✅ Схвалено заявок: ⟨0⟩.
+fb8bc6b23	(Не вдалося схвалити заявок: ⟨0⟩; можливо, їхній термін минув або їх відкликали)
+05d63d7c6	Схвалення заявок: схвалено ⟨0⟩ | ⟨1⟩
+9ea0064d2	Вас заблоковано в цьому боті.
+db8a1871b	Використання: /membertag @user <тег> або відповідь + /membertag <тег>
+584a09e9f	Потрібні користувач і тег!
+84aa89869	Тег може містити щонайбільше 32 символи!
+fcd61489e	⛔ Не можна давати тег людині з таким самим або вищим рангом.
+5f53e65d3	⟨0⟩ не адмін! Теги можна давати лише адмінам.
+f4fc9906d	🏷 Тег надано: ⟨0⟩ → ⟨1⟩
+be06d3d2f	Призначати співзасновників може лише засновник.
+0ef49a704	Користувача не знайдено! Використайте ID, @username або відповідь.
+4de20141f	Використання: /⟨0⟩ @user [тег]
+e1b55fb8a	Тег: ⟨0⟩
+b60f7c81a	⟨0⟩ — призначено: ⟨1⟩⟨2⟩
+9adcfd5da	Використання: /block <id> [причина]
+dd3f79560	Недійсний ID!
+b53956227	✅ ⟨0⟩ заблоковано.
+68a3942e7	Використання: /unblock <id>
+7f14d47f5	✅ ⟨0⟩ розблоковано.
+a07c6c04c	Поточний ліміт попереджень: ⟨0⟩
+eeceb0ee6	Використання: /setwarnlimit <2-20>
+68cb7aa9e	Ліміт має бути від 2 до 20!
+7fdd7a44f	Ліміт попереджень встановлено: ⟨0⟩.
+32cb8952a	Список винятків зі спаму порожній.
+804f32102	Додайте через /whitelist @user.
+7ec4b51e6	Список винятків зі спаму:
+c0c03c505	⟨0⟩ вилучено зі списку винятків.
+e6695a6db	⟨0⟩ додано до списку винятків зі спаму.
+9e5f1a353	Приватна група
+e9312bd1b	Капча
+688f939e9	Фільтр слів
+cbabb7d8b	Немає
+28b8f5479	👥 Учасники: ⟨0⟩
+ceb987630	👮 Адміни: ⟨0⟩
+af72a68a6	📈 Статистика
+28086b0d5	├ Усього повідомлень: ⟨0⟩
+01c7b8d8a	├ Активні користувачі: ⟨0⟩
+12279a365	├ Усього банів: ⟨0⟩
+74d4fdeab	├ Усього попереджень: ⟨0⟩
+69516a922	└ Ліміт попереджень: ⟨0⟩
+c77739311	Активний захист: ⟨0⟩
+58b3e5e14	Орел! 🪙
+561c75012	Решка! 🪙
+1a786e9bf	⟨0⟩ Кубик: ⟨1⟩
+e7e394f96	🤖 ⟨0⟩ — Команди власника бота
+f4e511a55	/panel — Групи та статистика вашого бота
+94da61b33	/broadcast — Розсилка в групи, канали та людям (введіть /broadcast, щоб побачити інструкцію)
+5d08c9107	/broadcasts — Історія розсилок, натискання, результати опитувань
+cbbbbd1fd	/templates — Шаблони розсилок
+70215bc5f	/growth — Тижневий звіт про зростання (надходить автоматично щопонеділка)
+7a7fa1e0f	/support — Лінія підтримки (особисті повідомлення пересилаються вам)
+0d05bfd3b	/gban <id|@user> [причина] — Бан у всіх групах вашого бота
+1db86c395	/ungban <id|@user> — Зняти бан
+2eb535697	/gbanlist — Список банів
+eeedac8d1	/select — Вибрати групу
+98b86d999	🤖 Команди власника бота
+6e9bfe3b7	/clones — Керування ботами-клонами (зупинити/запустити/видалити)
+e48ef6b31	/clone — Ваш власний бот-клон
+3f50c5d54	/panel — Панель керування (групи/канали, вилучити бота, 🧹 очищення)
+5e0335772	/perf — Продуктивність: повільні операції, пам’ять, черга
+6d08e2352	/maintenance — Режим обслуговування (команди вимкнено, захист працює)
+f160302c5	/block <id> [причина] — Заблокувати
+b1c36dc93	/unblock <id> — Розблокувати
+647651cb8	/gban <id|@user> [причина] — Бан у всіх групах
+86ee8d200	/ungban <id|@user> — Зняти глобальний бан
+d094b4c43	/gbanlist — Список глобальних банів
+d729d3ba2	/backup — Зробити резервну копію бази даних
+0e556fad9	/gblockmedia — Заблокувати медіа з відповіді в усіх групах
+8af5e8c17	/recover — Відновлення адмінів
+f0032f0c7	/select — Вибрати канал
+97a1889ae	/channelsettings — Налаштування каналу
+def1847f5	⟨0⟩/start — Почати
+f467f5a12	/menu — Показати меню
+579f051c8	/settings — Панель налаштувань вибраної групи з кнопками
+0ecfed5c8	/help — Довідка
+d1d491df3	/select — Під’єднати групу/канал
+a64b799ed	/appeal <пояснення> — Надіслати апеляцію на бан
+3aaf39bd7	/recover — Відновлення адмінів (для довірених осіб)
+e8a9f2564	💬 Повідомлення, які ви пишете боту, пересилаються адміністратору бота; відповідь приходить сюди.
+90b35c202	/clone — Створити бота-клона з власною назвою
+53ff31717	👤 Команди користувача
+a6ac25fa6	📊 Статистика та профіль
+7c1cddd9b	/profile — Переглянути свій профіль
+4794e486d	/daily — Денний рейтинг повідомлень
+9304026c3	/weekly — Тижневий рейтинг
+0f2144ac5	/monthly — Місячний рейтинг
+dab273f01	/alltime — Рейтинг за весь час
+ffca95898	/top — Меню рейтингу з кнопками
+f6859df4f	/info @user — Статистика користувача
+f739f3e69	/chatinfo — Інформація про групу
+96d41dfbc	/rules — Правила групи
+cf6de9a2b	/afk [причина] — Режим AFK (тим, хто вас згадує, буде повідомлено; знімається, коли ви напишете)
+427ccde79	/votemute — Почати голосування за мут людини, якій ви відповіли
+f2f9f9eaf	/notag — Вийти зі списку /tag (напишіть ще раз, щоб повернутися)
+6de9402ed	/invite — Ваше особисте посилання-запрошення (рахуються люди, яких ви привели) · /invites — рейтинг
+82789607f	📝 Нотатки
+f9f2a17b9	/notes — Збережені нотатки
+46ba4fefd	#нотатка — Отримати нотатку (приклад: #rules)
+a37fbde9a	/get <назва> — Отримати нотатку
+5ff3c9cb2	🎰 Розваги
+b0d9549b8	/coin — Підкинути монетку
+3ab74dacf	/dice — Кинути кубик
+304dfe62b	ℹ️ Інше
+b4031dc89	/help — Це меню
+6467c9dbe	/id — Показати ID
+0af5bde71	/appeal <пояснення> — Апеляція на бан (в особисті боту)
+aff60c67d	/report [причина] або @admin — Поскаржитися персоналу на повідомлення, на яке ви відповіли
+15575b067	👮 Команди персоналу — ваш ранг: ⟨0⟩
+d955391ce	Порядок рангів: 👑 Засновник > 🔱 Співзасновник > ⭐ Старший адмін > 🛡 Адмін
+cb1ecf135	🛡 Адмін і вище
+ba31c6e75	/warn @user [причина] — Попередити
+9db2b48b7	/mute @user [час] — Мут (Адміни: щонайбільше 24 години)
+0d7e990d0	/unmute @user — Зняти мут
+258592394	/kick @user — Вилучити з групи
+40e58c981	/warns · /banlist · /mutelist — Списки
+07722765d	/giveaway · /endgiveaway — Розіграш
+faabdc38a	/filter — Автовідповідь (напр. привіт → Вітаю; можна медіа та кнопки)
+0e48d2662	/filters · /stop <слово> · /stopall — Список фільтрів / видалення
+a295c1d2b	/tag <повідомлення> · /stoptag — Згадати учасників порціями / зупинити
+43f5db5d3	/record @user — Історія покарань і старі імена в усіх групах бота (надсилається в особисті)
+4268b44a9	/giveaway 1d 3 Приз | channel=@channel messages=20 days=7 — Розіграш з умовами та терміном
+f9892b61b	/myrank — Ваш ранг і права
+10ead6ab1	⭐ Старший адмін і вище
+667e625bc	/ban @user [час] [причина] · /unban — Бан
+387e5f34e	/unwarn @user — Зняти 1 попередження
+48c85c764	/purge <кількість/all> · /slowmode <сек> — Очищення, повільний режим
+2454c2b92	/pin · /unpin — Закріплення
+d0ffce66f	/lockdown [хв] · /lockmedia [хв] — Екстрене блокування
+f6b07290c	/approveall — Схвалити заявки на вступ
+f252c350e	/setrules · /setwelcome · /setgoodbye · /save · /clear — Правила, привітання, прощання, нотатки
+7bf273598	(підтримуються медіа, кнопки, форматування та випадкові повідомлення; для довідки введіть /setwelcome)
+8c7cbbe68	/welcome · /goodbye · /resetwelcome — Попередній перегляд / скинути до стандартного
+df2e5eccc	/schedule 6h <повідомлення> · /schedules — Повідомлення за розкладом (повторювані)
+de546f6e8	🔱 Співзасновник і вище
+d18538a2d	/settings — Панель налаштувань з кнопками (усі налаштування захисту)
+00043ba1c	/setup — Швидке налаштування (шаблон + привітання + захист)
+bfe1425f8	/forcesub @channel — Щоб писати, користувачі мають підписатися на канал (вимкнути: /forcesub off)
+886d570db	/unlockdown · /unlockmedia — Зняти блокування
+5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
+443a00692	/setwarnlimit · /setwarnaction · /captchatime
+3d2493394	/blockmedia · /blockpack — Блокувати медіа/набори
+20abda0cf	/admin (/addadmin) · /senioradmin @user [тег] — Надати ранг
+3c7389596	/remove @user — Зняти ранг
+a83e94dc8	/perms — Панель особистих прав (в особисті боту)
+13accc070	/membertag @user <тег> — Тег адміна
+775ec46f0	/reload — Оновити список адмінів із Telegram (права, надані вручну/іншим ботом)
+9a654a567	👑 Лише засновник
+f0d85c250	/cofounder @user — Зробити співзасновником
+aed09d232	/setlog — Канал журналу · Мережа груп · Резервне відновлення адмінів
+81fcecc0c	📊 Інформація
+99e6db648	/stats · /chatinfo · /leaderboard · /staff
+a475e9c96	Формат часу: 30m, 2h, 7d
+78f33d7b8	Адмін Telegram
+5a0e84cda	⚙️ Панель налаштувань
+f910032f2	🌍 Мова: /setlang⟨0⟩
+215259316	⚙️ Налаштування
+96fccfef2	🛡 Мої групи
+5e167ed13	📊 Статистика
+4ab530c07	❓ Довідка
+3f15c0b6a	🤖 Бот-клон
+a2c4fcfa1	🔗 Вибрати групу
+ed11ea7cd	📢 Вибрати канал
+d7f837819	Виберіть у меню або введіть команду…
+2ac5318f5	➕ Додати в групу
+7357057be	📢 Додати в канал
+2dadb70db	Меню нижче 👇
+71aa20a4d	Спочатку виберіть групу: натисніть 🛡 Мої групи або 🔗 Вибрати групу.
+3224664d6	Бот не є адміном у цьому чаті. Додайте туди бота як адміна й виберіть знову.
+78ad7212f	У вас немає прав у цьому чаті.
+2216a64f4	✅ Вибрано: <b>⟨0⟩</b>
+e107177fc	Меню довідки
+9e88862d9	Правила групи
+07efa78b4	Збережені нотатки
+cf90a04f1	Ваш профіль і попередження
+b79df54d5	Рейтинг активності
+a0d54db08	Статистика користувача
+c3da965fe	Інформація про групу
+aa6b818af	Показати ID
+c23bc7fa5	Кинути кубик
+cbd34c9f1	Підкинути монетку
+1a6e6af53	Поскаржитися персоналу на повідомлення
+61e89c9ef	Режим AFK
+c51b37c71	Вийти зі списку згадувань
+d1076c2fa	Мова групи
+03811f00b	Голосування за мут (відповідь на повідомлення)
+ef4e5e596	Ваше особисте посилання-запрошення
+1db922722	Рейтинг запрошень
+53d58e1ac	Панель налаштувань з кнопками
+0c4051b76	Оновити список адмінів
+c55aa4167	Попередити
+cec03bba0	Зняти 1 попередження
+263cc2188	Переглянути попередження
+76f0023be	Зняти мут
+9d1a81717	Розбанити
+6118dce5a	Вилучити з групи
+18bbd14ee	Масове видалення повідомлень
+2d7017ef2	Закріпити повідомлення
+d7722a3e3	Відкріпити
+a263e4e53	Повільний режим
+9da046535	Список банів
+6d6c46eda	Список мутів
+a84a2a1e7	Зберегти нотатку
+385c7d8ec	Видалити нотатку
+a60cb06d0	Швидке налаштування
+d2dd24bcc	Додати автовідповідь
+364057e43	Список фільтрів
+5d24c4032	Видалити фільтр
+e46d6d528	Привітальне повідомлення (медіа/кнопки)
+2c1419a05	Прощальне повідомлення
+27f1ba342	Написати правила
+3d5b58779	Додати повідомлення за розкладом
+943458e1e	Повідомлення за розкладом
+2331d765c	Згадати учасників
+b0d7d4f3d	Зупинити згадування
+e912877cd	Обов’язковий канал
+29cc4c872	Історія користувача
+8871a3c02	Почати розіграш
+dfae805ce	Завершити розіграш
+1945bd345	Екстрено: заблокувати групу
+c0559b5cc	Розблокувати групу
+422c89bec	Ваш ранг і права
+fa7d4e18f	Список персоналу
+84be9db5d	Статистика групи
+3a085165d	Заблокувати медіа з відповіді
+414c8153f	Заблокувати набір стікерів
+c3e7837f2	Заборонити надсилання медіа
+956c0ce19	Зняти блокування медіа
+4e382259e	Запуск і меню
+1c4ce1da4	Показати меню
+7e27a3b5a	Вибрати групу/канал
+dc6cac394	Налаштування вибраної групи
+e78fa8e35	Надіслати апеляцію на бан
+eaba0a794	Довідка
+cbad220d3	Відновлення адмінів (довірені особи)
+fcea72bad	Швидке налаштування вибраної групи
+495825a5e	Вебпанель (усі налаштування на одній сторінці)
+9674953cf	Вимкнути розсилки бота
+99ab93b21	Мова
+333895635	Написати адміну (лінія підтримки)
+0d0187ac4	Групи та статистика вашого бота
+8938961a5	Розсилки в групи, канали, людям
+be4f2dea9	Історія розсилок
+0c8b2de83	Шаблони розсилок
+ecced9e02	Тижневий звіт про зростання
+52b5b2176	Увімкнути/вимкнути лінію підтримки
+32791cc9a	Бан у групах вашого бота
+a7b61f397	Керування ботами-клонами
+205162f9b	Статистика продуктивності
+5d22ead7d	Панель керування
+84c0cbd02	Глобальний бан
+68cd0b7eb	Зняти глобальний бан
+a38b6848f	Список глобальних банів
+45a767875	Заблокувати користувача/чат
+4902bf286	Розблокувати
+cfc719f1d	Резервна копія бази даних
+efdd2ee59	Режим обслуговування
+bf65fdcd0	Заблокувати медіа в усіх групах
+385efb5c0	⚡ Основний бот: @⟨0⟩
+8f13119d3	⟨0⟩ — бот захисту груп і каналів: спам, посилання, флуд, рейди та капча.
+63edd3296	🛡 ⟨0⟩ Security Bot
+7ebe2ab6b	Захищає вашу групу й канал від спаму, посилань, флуду, рейдів і фейкових акаунтів. Усі налаштування — у панелі з кнопками.
+287dec170	Щоб почати: /start⟨0⟩
+1a42073da	⚙️ Панель
+81daf5632	Вашу заявку на вступ до <b>⟨0⟩</b> отримано. Дайте відповідь на запитання, щоб її схвалили:
+784db6bac	⏰ Час: ⟨0⟩
+90d0b5f0a	🔐 Надіслано особисту перевірку: ⟨0⟩ | ⟨1⟩
+49349d70e	Час цієї перевірки минув.
+6af257079	Заявка більше не дійсна (можливо, її вже оброблено).
+d7eff8c3b	✅ Перевірку пройдено! Вас прийнято до <b>⟨0⟩</b>.
+69af7d417	✅ Особисту перевірку пройдено, прийнято: ⟨0⟩ | ⟨1⟩
+99c1bac07	❌ Неправильна відповідь. Вашу заявку на вступ до <b>⟨0⟩</b> відхилено; ви можете надіслати нову.
+86e28712b	❌ Особисту перевірку не пройдено, відхилено: ⟨0⟩ | ⟨1⟩
+9dbf30953	⏰ Час вийшов, вашу заявку на вступ відхилено. Ви можете надіслати нову.
+2ec5e8129	⏰ Час особистої перевірки минув → ID:⟨0⟩ відхилено | ⟨1⟩
+12ae98fff	⚠️ Виявлено флуд у каналі! Дописів за 10 секунд: ⟨0⟩
+f271bb123	🌐 Відхилено заявку на вступ від глобально забаненого користувача: ⟨0⟩
+7b944f9a5	❌ Бота/фейк відхилено: ⟨0⟩ → ⟨1⟩
+d5d491f80	✅ Автоматично прийнято: ⟨0⟩ → ⟨1⟩
+5f7e623cd	❌ Автоматично відхилено: ⟨0⟩ → ⟨1⟩
+f8cddb848	📩 Нова заявка: ⟨0⟩ → ⟨1⟩
+a984efcca	Ви не можете діяти щодо цієї людини.
+30a92b565	⛔ Для керування рангами потрібен ранг ⟨0⟩ або вищий.
+f57eaa44e	⛔ Не можна редагувати людину з таким самим або вищим рангом.
+c8857eea2	⛔ Ранг ⟨0⟩ може надати лише вищий ранг.
+fd71ebc88	Користувача не знайдено.
+fa5ded262	❌ Бот не може призначати адмінів!
+889786c65	❌ Користувача не знайдено в групі!
+3c0a7e1f2	⚙️ Права
+e9e94dc59	У цієї людини немає рангу. Спочатку надайте ранг через /admin або /senioradmin.
+627b90668	⚠️ ⟨0⟩ (у бота немає)
+ae8f6f509	📡 Права Telegram
+033d23563	🤖 Права бота
+3d3a3d682	→ 📡 Права Telegram
+8bff101a7	→ 🤖 Права бота
+daddb4f0e	❌ Зняти ранг
+12ec1558f	✅ Закрити
+8f4a3cad6	👤 <b>Редагування прав:</b> ⟨0⟩
+2a138f61a	Ранг: <b>⟨0⟩</b>
+9d0d28c34	✅ увімк · ❌ вимк · 🔒 недостатній ранг
+bc2ec6c27	<i>Зміни застосовуються одразу. Кнопки рангів змінюють ранг.</i>
+4dd50d885	Недійсна кнопка.
+2f00bbdcd	Це право вище за ранг цієї людини.
+da5fcba10	Недійсний ранг.
+8ba8423be	Уже ⟨0⟩.
+aac33021a	⟨0⟩ — призначено: ⟨1⟩ | ⟨2⟩
+d37ea2c16	Ранг: ⟨0⟩
+222dfbc00	Ранг знято.
+f97fd51ad	✅ Ранг ⟨0⟩ знято.
+570da29a3	У вас немає прав.
+c119667e9	✅ Панель прав закрито. Зміни збережено.
+cf9f2e455	⟨0⟩ не входить до персоналу цієї групи.
+d4df62038	🔒 Це право вище за ваш ранг або його немає в бота.
+ca3e89467	Немає персоналу, якого ви можете редагувати. Щоб надати ранг, напишіть у групі /admin @людина.
+9befd0808	👑 <b>Керування правами</b>
+6fcfd3b55	Виберіть людину для редагування:
+770d8a43d	Налаштування нічного режиму
+0d3da9061	Виберіть права для обмеження й натисніть «Зберегти»:
+3014d10c7	Щоб змінити години: /nightmod 23:00 07:00
+8b386c8fe	Помилка налаштування нічного режиму.
+441634b34	🛡 ⟨0⟩ активний! Налаштування — /settings, команди — /help.
+f9f826fff	🛡 <b>⟨0⟩ Security Bot</b>
+a299d1e4f	Захист від спаму, посилань, флуду, рейдів і капча для ваших груп і каналів.
+b40285a71	1️⃣ Додайте бота у свою групу з потрібними правами кнопкою нижче.
+15b8ba9ba	2️⃣ Виберіть групу в меню нижче й керуйте всім через ⚙️ Налаштування.
+eae59de08	💬 Підтримка
+81e22b47b	Недійсне посилання прав.
+5af6c10c1	Групу зареєстровано! Тепер ви можете вибрати її в особистих через 🛡 Мої групи.
+425ac7c01	ID групи: ⟨0⟩
+60a03153e	Не вдалося зареєструвати: спочатку зробіть бота адміном у цій групі.
+08cdd8869	Цю групу зареєстровано (ID: ⟨0⟩)
+7b80705e1	Напишіть /select в особисті, щоб перейти до панелі керування.
+c6668e444	Ваших зареєстрованих груп/каналів не знайдено.
+489f886fe	Виберіть свій чат кнопкою 🔗 Вибрати групу / 📢 Вибрати канал нижче: якщо бот там адмін, його буде розпізнано автоматично. Якщо бота ще не додано, спершу скористайтеся кнопкою «Додати в групу».
+529f5b296	Виберіть канал/групу для керування:
+3b561f5ba	✅ Вибрано: ⟨0⟩
+e537ee79f	Тепер ви можете використовувати команди в особистих.
+5da9ca5b4	Ваш ID: <code>⟨0⟩</code>
+758b4fa2f	ID людини, якій ви відповіли: <code>⟨0⟩</code>
+a52056450	Приклад:
+8db290527	Канал не знайдено!
+d7db3c4cf	Поточний журнал: ⟨0⟩
+354f04cc0	Використання: /setlog -1001234567890
+9cc790504	✅ Канал журналу оновлено: ⟨0⟩
+f40d6696a	ПЕРСОНАЛ ГРУПИ
+511c4973a	Усього персоналу: ⟨0⟩
+284837aa3	Використання: /gban <id|@user> [причина] (або відповідь на повідомлення)
+e2d4f8ab8	Цю людину не можна забанити.
+01c3bd4a0	у всіх ботах
+cb8da44a3	у групах ⟨0⟩
+49aed1394	🌐 Баню ⟨0⟩ ⟨1⟩...
+73497703d	🌐 ⟨0⟩ забанено ⟨1⟩.
+a960dfa59	✅ Чатів: ⟨0⟩ | ❌ ⟨1⟩ (немає прав/не учасник)
+ffc42c25d	Використання: /ungban <id|@user>
+ad983fea1	✅ ⟨0⟩: ⟨1⟩бан знято.
+63de87994	Список банів порожній.
+d65a4bee5	Список глобальних банів
+c58c96fc0	Бан-лист ⟨0⟩
+6d34fa6d2	🌐 <b>⟨0⟩</b> (останні 50):
+15db0d20b	Зараз: ⟨0⟩ (⟨1⟩)
+08771c47b	Використання:
+9ebd56f1c	✅ Покарання при досягненні ліміту попереджень: ⟨0⟩⟨1⟩
+bd06580b1	Обмеження для нових учасників: ⟨0⟩
+d8eaa4a1a	Використання: /newbie <хвилини> або /newbie off
+4986c7002	Введіть кількість хвилин від 0 до 1440 або напишіть off.
+7e4bdbce0	✅ Обмеження для нових учасників вимкнено.
+d5a3095ed	✅ Нові учасники не можуть надсилати посилання/медіа/пересилання перші ⟨0⟩ хв.
+d4c80a6a7	🔗 Список винятків для посилань:
+f3425da9b	/allowlink add youtube.com
+71399725d	/allowlink del youtube.com
+99d71c223	(можна додавати й шляхи на кшталт t.me/mychannel)
+d555eadad	(порожньо)
+4bcfe1994	✅ ⟨0⟩ додано до списку винятків для посилань.
+e6dffb4e9	✅ ⟨0⟩ вилучено зі списку.
+c22e23f31	Використання: /captchatime 2m (від 30s до 60min)
+b4b2c0b74	✅ Час капчі: ⟨0⟩
+42cf26778	Щоб подати апеляцію, напишіть мені в особисті: /appeal <пояснення>
+ef023696b	Використання: /appeal <чому ваш бан слід зняти?>
+294f98c41	У вас немає зареєстрованого бану.
+78158a307	Для якої групи ваша апеляція?
+0072d91b7	Для цієї групи можна подавати апеляцію раз на 24 години.
+0799f76c1	✅ Зняти бан
+1358a154b	❌ Відхилити
+6d20aaa15	📨 <b>Апеляція на бан</b> #⟨0⟩
+1040c08fa	Група: <code>⟨0⟩</code>
+fae78e9bb	Причина бану: ⟨0⟩
+76700df28	✅ Вашу апеляцію надіслано адмінам. Про результат ви дізнаєтеся тут.
+53667435f	Час вийшов, напишіть /appeal ще раз.
+6486efe3d	Надсилання...
+6c9744f83	Апеляцію не знайдено.
+e2457d551	Цю апеляцію вже розглянуто: ⟨0⟩
+07b34dcdd	✅ Вашу апеляцію прийнято, бан знято. Ви можете знову приєднатися до групи.
+ed103ceb6	❌ Вашу апеляцію відхилено.
+f7480a2b3	<b>Результат:</b> ⟨0⟩ — ⟨1⟩
+b497d1353	✅ Прийнято
+6c25e020d	❌ Відхилено
+97239bc70	📨 Апеляція #⟨0⟩ ⟨1⟩ | ⟨2⟩
+7a80eefec	🖼 без медіа
+573052e01	🔘 ⟨0⟩ кнопок
+b81be0f7f	🎲 ⟨0⟩ варіантів
+d542cb1c4	💎 точна копія
+03cb45a36	Фото
+bc17c1f01	Відео
+638bbfe15	Файл
+867b291d2	Музика
+e8bff35ea	Голосове
+2e9d0e77a	Стікер
+966648de4	Відеоповідомлення
+7d472b473	год
+f4a9f3249	Ця кнопка більше не дійсна.
+30dc00c2e	Це посилання більше не дійсне.
+c9910a305	Цієї нотатки більше не існує.
+0e89955b2	👋 {name} залишає нас. Усього найкращого!
+e41edf275	📜 <b>Правила ⟨0⟩</b>
+3f1696378	<b>Форматування:</b> повідомлення зберігається саме так, як ви пишете його в Telegram (жирний, курсив, посилання, спойлери, цитати).
+06c164645	<b>Медіа:</b> дайте відповідь на фото/відео/GIF/стікер і напишіть команду.
+6a1a1a0ad	<b>Кнопки</b> (кожен рядок — це ряд, поруч через <code>&amp;&amp;</code>):
+a1c3d2c0b	<code>Наш канал - https://t.me/channel &amp;&amp; Підтримка - @support</code>
+3424e60cc	<code>Прочитати правила - rules</code> · <code>Інфо - popup:Текст</code> · <code>Нотатка - #назва</code>
+dd3608634	Колір: у кінці рядка <code>#green</code> <code>#red</code> <code>#blue</code> · Стиль Rose: <code>[Канал](buttonurl://t.me/channel)</code>
+90f26740a	<b>Змінні:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
+23adc295f	<b>Випадково:</b> розділяйте кілька повідомлень рядком, що містить лише <code>%%%</code>.
+7d75ab43e	Це повідомлення не можна використовувати в каналах.
+93a792a44	Привітання
+06ba336bf	Прощання
+ff0fe91d4	Правила
+86eca05aa	✏️ <b>Повідомлення: ⟨0⟩</b>
+0d20c41d6	Використання: <code>/⟨0⟩ текст</code> або відповідь на повідомлення/медіа: <code>/⟨1⟩</code>
+ee9b02bb7	💎 Преміум-емодзі зберігаються: повідомлення копіюється точно. Не видаляйте вихідне повідомлення (якщо його видалити, буде надіслано зі звичайними емодзі).
+d54d1a799	✅ Повідомлення «⟨0⟩» збережено (⟨1⟩).⟨2⟩
+32bc1141c	Попередній перегляд:
+a4fd88326	✏️ Повідомлення «⟨0⟩» оновлено | ⟨1⟩
+f2ecba035	У цій групі ще не встановлено правил.
+f6d49a8a4	Додати їх можна через /setrules.
+3dadf54ab	Повідомлення «⟨0⟩»: ⟨1⟩ · ⟨2⟩
+42b967a7b	Змінити: /set⟨0⟩
+6d2d95e97	👋 Привітання
+46af570c5	🚪 Прощання
+6413cb724	✅ Привітальне повідомлення скинуто до стандартного.
+14324da2a	Формат інтервалу: <code>30m</code>, <code>6h</code>, <code>1d</code>
+a44cbb972	Інтервал має бути щонайменше 10 хвилин і щонайбільше 7 днів.
+7e69525ad	У групі може бути щонайбільше ⟨0⟩ повідомлень за розкладом.
+ee86ab412	⏰ <b>Повідомлення за розкладом</b>
+8dada6c44	Використання: <code>/schedule 6h Не забудьте прочитати правила!</code>
+82c791f2c	або відповідь на повідомлення/медіа: <code>/schedule 6h</code>
+7939ca797	Список і видалення: /schedules
+62c97be15	✅ Повідомлення за розкладом #⟨0⟩: надсилатиметься кожні ⟨1⟩ (перше через ⟨2⟩). Список: /schedules
+bd18601d1	⏰ Додано повідомлення за розкладом (кожні ⟨0⟩) | ⟨1⟩
+e2d35adb1	⟨0⟩ <b>#⟨1⟩</b> кожні ⟨2⟩ · наступне ⟨3⟩
+76c241937	🧹 Видаляти попереднє
+b35d597c9	📌 Залишати попереднє
+225f856c3	⏰ <b>Повідомлення за розкладом</b>
+207dc0f12	Щоб додати: <code>/schedule 6h повідомлення</code> (підтримуються медіа/кнопки)
+351e8911a	Поки немає.
+242c0f02c	Не знайдено
+ec93a493c	⏸ Зупинено
+e388dd558	▶️ Запущено
+d08a36466	➕ Нове повідомлення за розкладом
+25cda8fe6	🚪 <b>Прощальне повідомлення</b> — ⟨0⟩
+b61184fea	Стан: <b>⟨0⟩</b> · ⟨1⟩
+0eec2952d	Надсилається лише тим, хто виходить сам (не вилучений/не забанений). Час автовидалення такий самий, як у привітання.
+b0037f2fb	👋 <b>Привітання</b> — ⟨0⟩
+611ef08d1	Привітання: <b>⟨0⟩</b> · ⟨1⟩
+a4530174c	📜 Правила: ⟨0⟩ · 🚪 Прощання: ⟨1⟩ · ⏰ Повідомлення за розкладом: ⟨2⟩
+d0b1d849f	Для медіа, кнопок і змінних натисніть ✏️ Редагувати (або напишіть /setwelcome у групі, щоб побачити довідку).
+2b7ced272	Увімк
+e5b4e786e	є
+68b8326a2	немає
+2bae1a721	✏️ Редагувати
+894e0e55f	👁 Попередній перегляд
+099ae3d9c	🖼 Прибрати медіа
+8bb5bb494	↩️ Скинути до стандартного
+adcf7aa93	🧹 Видаляти старе
+1eaf255d1	👥 Одне повідомлення на кількох
+7ef1d92b8	⏱ Автовидалення
+e0454a0ce	📩 Надсилати в особисті
+060b7f669	📜 Написати правила
+ee89e73e1	👁 Правила
+b6669596d	🚪 Прощальне повідомлення ›
+0c2dc5967	⏰ Повідомлення за розкладом ›
+9a8a538db	Чорний список: ⟨0⟩
+0eed14a22	Правил немає
+a6aea5676	👁 Попередній перегляд надіслано
+eb9f11f93	↩️ Скинуто до стандартного
+14af210b4	🖼 Медіа прибрано
+f615cd8f5	⏹ Згадування зупинено
+ce76be77d	✅ Згадування завершено
+98452c88d	⟨0⟩: згадано ⟨1⟩/⟨2⟩ людей.
+7f535520c	/tag використовується в групі.
+59b9ad51d	⏳ У цій групі вже йде згадування. Щоб зупинити: /stoptag
+46a8f403f	⏳ Між згадуваннями є перерва, щоб група не перетворилася на спам. Спробуйте знову через ⟨0⟩ хв.
+02343ede4	Нікого не знайдено для згадування. (Бот знає учасників, які писали або приєдналися в групі.)
+29099e290	🏷 Згадування почалося (учасників: <b>⟨0⟩</b>), по ⟨1⟩ у повідомленні · приблизно ⟨3⟩ хв
+5a101718d	Щоб зупинити: /stoptag
+f64e607e0	⏹ Зупинити
+87e8dab7e	🏷 /tag запущено (людей: ⟨0⟩) | ⟨1⟩
+93e9f8e23	Зараз згадування не йде.
+de3fd2d6f	⏹ Зупиняю згадування…
+6e637aa42	⏹ Зупинка
+a0fd2c146	Згадування вже завершилося.
+60c103470	Напишіть це в групі, де не хочете, щоб вас згадували.
+170599775	🔔 Ви знову в списку /tag.
+3812eb431	🔕 Вас більше не згадуватимуть через /tag у цій групі. Щоб скасувати, напишіть /notag ще раз.
+21946f144	⚠️ Не вдається перевірити обов’язковий канал: бот є адміном у каналі? (налаштуйте знову через /forcesub)
+8e87bf498	Підписатися на канал
+cbb50c7c3	✅ Я підписався(лася)
+0ca6d0da1	📢 ⟨0⟩, щоб писати в цій групі, спочатку підпишіться на канал <b>⟨1⟩</b>.
+c0ec4b2f3	Ця кнопка не для вас.
+aaed7d345	✅ Дякуємо, тепер ви можете писати!
+bd2685273	Ви ще не підписалися на канал. Спершу підпишіться кнопкою 📢, потім натисніть знову.
+1886b3d17	Вкажіть канал як <code>@username</code>, <code>t.me/channel</code> або ID <code>-100…</code>.
+f02d79616	Канал не знайдено або бота немає в каналі. ⟨0⟩
+87bee0af3	Це не канал.
+4171be67d	Спочатку додайте бота в канал як <b>адміна</b> (потрібно, щоб бачити учасників).
+9d38f82c5	Увімк — <b>⟨0⟩</b>
+4adcca7b1	📢 <b>Обов’язковий канал</b>: ⟨0⟩
+a3407edfd	Встановити: <code>/forcesub @channel</code>
+95acb52af	Вимкнути: <code>/forcesub off</code>
+045928d81	Бот має бути адміном у каналі. Адміни та власник бота — виняток.
+fe929a5d7	📢 Обов’язковий канал вимкнено.
+53a5e40c2	Повідомлення тих, хто не підписаний на канал, видаляються, і показується кнопка підписки.
+cef984319	📢 Обов’язковий канал: ⟨0⟩ | ⟨1⟩
+d48d5b5ae	недовго
+05260e946	⟨0⟩ дн.
+b04fc7f5d	щойно
+21aaa5a62	вже ⟨0⟩ хв
+7448bebe4	вже ⟨0⟩ год
+5ba98ca40	вже ⟨0⟩ дн.
+ad5b41977	💤 ⟨0⟩ тепер AFK⟨1⟩
+44c5de771	👋 ⟨0⟩ повернувся(лася) (був(ла) AFK ⟨1⟩).
+e117178d7	💤 ⟨0⟩ зараз AFK (⟨1⟩)⟨2⟩
+44140939f	📢 <b>Обов’язковий канал</b> — ⟨0⟩
+e5b1aac1e	Стан: <b>⟨0⟩</b>
+0716f7bc2	Канал: ⟨0⟩
+0d5b480e5	Повідомлення учасників, які не підписані на канал, видаляються, і з’являється сповіщення з кнопками «📢 Підписатися на канал / ✅ Я підписався(лася)». Адміни — виняток. Бот має бути адміном у каналі.
+7d73e8088	не встановлено
+6ba5f155e	✏️ Встановити канал
+c9606c43c	🏷 <b>Налаштування згадувань</b> — ⟨0⟩
+203ce8b22	<code>/tag повідомлення</code> згадує учасників порціями. <code>/stoptag</code> зупиняє, учасники можуть вийти зі списку через <code>/notag</code>.
+b86bf2507	У повідомленні: <b>⟨0⟩ людей</b> · Стиль: <b>⟨1⟩</b> · Кого: <b>⟨2⟩</b>
+5090a9e78	Емодзі
+d2abd1ed8	Ім’я
+1da63df5e	активні за останні 7 днів
+4b30ca4e3	усі
+4e45e032a	Люди
+4dd25e398	⟨0⟩За іменем
+c39394400	⟨0⟩Емодзі
+b48e5cb08	Лише активні за останні 7 днів
+b1d807974	Сповіщати
+ca39fe0f8	забанений в інших групах бота: ⟨0⟩
+9872ca74d	є у спам-списку CAS
+9396a2730	🚩 ⟨0⟩ у чорному списку (⟨1⟩) → <b>забанено</b>.
+545b1c5c1	🚩 ⟨0⟩ у чорному списку (⟨1⟩) → <b>мут</b>. Адміни можуть зняти обмеження.
+07441d924	🚩 Увага: ⟨0⟩ ⟨1⟩.
+45358021b	✏️ Зміна імені: ⟨0⟩ (ID <code>⟨1⟩</code>)
+281b2747a	Старе: ⟨0⟩
+059547382	Нове: ⟨0⟩
+a2c2bec19	📋 <b>Історія</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
+0786218b9	🏷 Старі імена: ⟨0⟩
+14c5bccb9	🚩 Спільний чорний список: ⟨0⟩
+38fd7e621	<b>забанений у групах: ⟨0⟩</b>
+15ab6d34d	чистий
+04a2454bb	🌐 CAS: ⟨0⟩
+66b71c0f8	⚠️ у списку
+5a25bd323	📊 Останні ⟨0⟩ дн.: ⚠️ ⟨1⟩ попереджень · 🔇 ⟨2⟩ мутів · 👢 ⟨3⟩ кіків · 🚫 ⟨4⟩ банів
+5f914853f	Зареєстрованих покарань немає.
+05d9f273c	Використання: /record @user, /record ID або /record у відповідь на повідомлення
+f3ac03616	📩 Історію надіслано в особисті.
+5d8b9aade	📩 Щоб я надіслав історію в особисті, спочатку напишіть мені /start в особистих.
+2e3efd222	🤖 Перейти до бота
+859b5bb09	🔇 Мут (⟨0⟩/⟨1⟩)
+4d8231ce2	❌ Скасувати (адмін)
+39229bf11	/votemute використовується в групі як відповідь на повідомлення.
+6a2b8f19c	Голосування за мут у цій групі вимкнено.
+61afc3c7f	Дайте відповідь /votemute на повідомлення людини, яку хочете замутити.
+89cfeb825	Для цієї людини не можна почати голосування.
+77053150c	Нові учасники не можуть починати голосування (ви маєте бути в групі щонайменше 1 день).
+ebb86ddce	Ви нещодавно вже починали голосування, зачекайте трохи.
+2848c7501	Для цієї людини вже йде голосування.
+97509d3a2	🗳 <b>Голосування за мут</b> для ⟨0⟩ (⟨1⟩)
+49efb6ab2	Почав(ла): ⟨0⟩ · потрібно голосів: ⟨1⟩ · протягом ⟨2⟩ хв
+dc6640321	Це голосування завершилося.
+608b293ec	Голосування скасовано
+0fdae78cf	❌ Голосування скасував(ла) ⟨0⟩.
+a0e2f43f9	Не можна голосувати за себе.
+ffff3ff40	Нові учасники не можуть голосувати (ви маєте бути в групі щонайменше 1 день).
+fe7fa73cc	Ви вже проголосували.
+e0e085981	✅ Ваш голос зараховано
+73e49db75	Не вдалося дати мут (права бота?)
+aa6350471	🔇 Мут
+75f1001f2	🔇 ⟨0⟩ отримує мут на ⟨2⟩ за результатами голосування (голосів: ⟨1⟩).
+8555c063c	🗳 Голосування: ⟨0⟩ отримує мут на ⟨2⟩ (голосів: ⟨1⟩) | ⟨3⟩
+18fb9aaaa	🧑‍⚖️ <b>Захист спільноти</b> — ⟨0⟩
+f1deffa09	🚩 <b>Спільний чорний список:</b> коли сюди приєднується хтось, забанений в іншій групі бота, застосовується вибрана дія.
+43a185211	🌐 <b>CAS:</b> також виявляються акаунти зі світового спам-списку.
+6e4660beb	✏️ <b>Відстеження імен:</b> зміни імені/username записуються в канал журналу (історія — у /record).
+adabf49fe	🗳 <b>Голосування за мут:</b> учасники можуть проголосувати через /votemute за повідомленням, щоб тимчасово замутити когось (нові учасники не можуть голосувати, не діє на персонал).
+b800b8e5f	🚩 Спільний чорний список
+97bceca81	✏️ Відстеження імен
+c5772d4e7	🗳 Голосування
+f12c4aec5	Потрібно голосів
+662158acd	Мут
+5c4935039	🎁 <b>Розіграш</b>⟨0⟩
+0dad0ba32	🏆 Кількість переможців: <b>⟨0⟩</b>
+7c606f70b	⏰ Завершення: <b>⟨0⟩</b>
+92b031d27	📢 бути учасником каналу ⟨0⟩
+1a822445f	💬 щонайменше ⟨0⟩ повідомлень у групі (за останні ⟨1⟩ днів)
+d9e82561c	📅 бути в групі щонайменше ⟨0⟩ днів
+d0610eddb	🛡 справжній акаунт із фото профілю або username
+208622235	📋 <b>Умови</b>
+99c8d7297	👥 Учасники: <b>⟨0⟩</b>
+cadb40104	🎁 Взяти участь (⟨0⟩)
+5ccfb1128	Канал
+eb533cc4f	У цій групі вже йде розіграш. Щоб завершити: /endgiveaway
+10870143e	Тривалість має бути від 1 хвилини до 30 днів.
+9c50f1ba5	❌ Умова каналу: ⟨0⟩
+ec58b461d	✅ Розіграш розпочато.⟨0⟩
+9d6e7b1e0	Приклад з умовами: /giveaway 1d 3 Приз | channel=@channel messages=20 days=7
+8a942b576	Щоб завершити: /endgiveaway [кількість переможців]
+05fd915f2	🎉 ⟨0⟩ розпочав(ла) розіграш: ⟨1⟩ | ⟨2⟩
+30f5e7aae	Боти не можуть брати участь.
+f03d1a2cb	Спочатку приєднайтеся до групи.
+b5417cc27	Не вдалося перевірити ваше членство в групі.
+004bfc204	Акаунти без фото профілю або username не можуть брати участь (захист від фейків).
+39a47e334	Спочатку приєднайтеся до ⟨0⟩.
+99797f0e4	Потрібно щонайменше ⟨0⟩ повідомлень у групі (зараз ⟨1⟩).
+f21f9c94c	Ви маєте бути в групі щонайменше ⟨0⟩ днів.
+ff2167b09	Цей розіграш завершено.
+b5116fff1	Ви вже берете участь, успіхів! 🍀
+5c88f09bc	🎉 Ви взяли участь у розіграші, успіхів!
+b05652dd1	✅ <b>Розіграш завершено</b>
+4cc381328	🎉 Розіграш завершено! Жоден учасник не відповідав умовам.
+8e2d564a7	🎉 <b>Розіграш завершено!</b>⟨0⟩
+5aa86da43	🏆 Переможці: ⟨1⟩
+e9ade43fd	👥 Учасники: ⟨0⟩
+7438ab083	🏆 Розіграш завершено: ⟨0⟩ | ⟨1⟩
+1e5f2647b	без переможця
+12a0187af	Немає активного розіграшу.
+9de1a5b57	✅ Розіграш завершено.
+ff647517b	Повідомлення за днями — останні 30 днів
+34673a626	Повідомлення за годинами (час Туреччини, 30 днів)
+fa46923fb	Приєдналися / вийшли — останні 30 днів
+0edbd3fce	Приєдналися (⟨0⟩)
+03822ea5b	Вийшли (⟨0⟩)
+5b09123ba	Найактивніші учасники — останні 7 днів
+8faf5f37f	Даних поки немає
+c68b2a090	💬 Повідомлення: 7 днів <b>⟨0⟩</b> · 30 днів <b>⟨1⟩</b> · активних учасників (7 днів): <b>⟨2⟩</b>
+efd6992e0	👥 За 30 днів приєдналися <b>⟨0⟩</b> · вийшли <b>⟨1⟩</b>
+980151f9d	🛡 Усього: 🚫 ⟨0⟩ банів · 🔇 ⟨1⟩ мутів · 👢 ⟨2⟩ кіків · 🔁 ⟨3⟩ спаму · 🙋 ⟨4⟩ заявок
+8b3ad8463	⟨0⟩ — статистика
+afd536817	Покарання
+74a1b4f70	🌊 Флуд: ліміт повідомлень
+7d5fdce06	🌊 Флуд: часове вікно
+6eec7f346	🖼 Медіафлуд: ліміт медіа
+188dc2ac4	🖼 Медіафлуд: часове вікно
+4cb84b51a	🔇 Тривалість муту
+3b723e30f	🕊 Люди без перевірки на спам
+62af570a8	Один ID користувача в рядку. Захист від спаму, флуду та посилань на цих людей не діє.
+97559aa34	🛡 Захист
+eaecb6e7c	🔤 Списки слів і посилань
+50e7fc41b	Заборонені слова
+5d70efcb4	Одне слово в рядку. Для regex почніть з re:
+a59a817c8	Дозволені домени
+98ae8882f	Один домен у рядку (напр. youtube.com).
+17dfd3589	🚪 Вступ
+47bc3cee8	Час капчі
+31a22d269	📩 Особиста перевірка для заявок на вступ
+51640d5b4	Рейд: ліміт учасників
+33500eff3	Рейд: часове вікно
+bcd337aa1	🐣 Обмеження для нових учасників
+b7e0a1cb1	Мут для користувачів без username
+3fe9d6820	✅ Автоматично приймати заявки на вступ
+876437b88	❌ Автоматично відхиляти заявки на вступ
+94dd4d1bd	🤖 Відхиляти ботів / користувачів без username
+b582c2d59	🖼 Неприйнятні медіа
+ca770c605	🤖 AI-перевірка на 18+ вміст
+737b0637b	Перевіряються фото, стікери та GIF (на сервері має бути встановлено nudenet).
+1903d3d63	📦 Видаляти небезпечні файли
+9c0ff36ee	файли на кшталт .apk .exe .bat .scr
+c79ee4fbb	Якщо за короткий час надходить багато неприйнятних медіа, медіа групи тимчасово блокуються.
+b43510a81	✏️ Редагування та скарги
+e97c80f7b	✏️ Захист від пізнього редагування
+7f9f3195d	Повідомлення, відредаговане через деякий час після надсилання, видаляється; стара й нова версії надсилаються засновнику.
+5e74ca845	👥 Застосовується до
+ddd26077d	Невибрані ранги — виняток. Змінити це може лише засновник.
+66613016d	Ліміт часу на редагування
+e0d3940a6	📨 Сповіщати засновника / того, хто додав
+9b1e938f3	🚩 Система скарг (/report, @admin)
+44d53d26e	⚠️ Попередження
+70d607de5	Ліміт попереджень
+a8dd080ee	Коли досягнуто ліміту
+453982208	Тривалість тимчасового покарання
+bfbfead91	👋 Привітання
+e8a88eb95	🧹 Видаляти старе, коли приєднується новий
+5c2fbdfa8	👥 Одне повідомлення при масовому вступі
+90de79bd5	🚪 Прощальне повідомлення
+0f39f1096	📜 Правила
+f9c17c1f0	🏷 Згадування та канал
+4f7b4fd4f	/tag: у повідомленні
+4aa6ce6cc	Стиль /tag
+6b93199e3	За іменем
+aa42b8748	Емодзі
+1d365363e	📢 Обов’язковий канал
+7b7afd285	Встановіть канал через /forcesub @channel.
+87bb0ff1a	🔗 Конкурс запрошень
+1c0fda956	Учасники отримують своє посилання через /invite, рейтинг — через /invites.
+c8d05f85f	🧑‍⚖️ Захист спільноти
+33af72703	Коли приєднується хтось, забанений в іншій групі бота.
+25347c8be	Дія для чорного списку
+f7e588100	🌐 Спам-список CAS
+4a02f552b	✏️ Відстеження зміни імені
+32a52c44c	🗳 Голосування за мут
+9b96d57aa	Тривалість муту за голосуванням
+d51893a35	🌍 Мова
+8d6c8a4a5	Мова бота в цій групі
+45ac69c17	Повідомлення, кнопки та сповіщення бота будуть цією мовою. Написаний вами вміст не змінюється.
+a53ce8e7e	👮 Аудит адмінів
+d06ffe7b8	📋 Щоденний звіт адмінів
+79c2f9928	Щовечора: хто скільки зробив банів, мутів, попереджень і видалень (засновнику та тому, хто додав бота).
+c1b823489	🚨 Ліміт дій адміна
+b05a27d38	Якщо співробітник, який не є засновником, за 1 годину зробить більше банів/кіків/мутів, ніж дозволяє ліміт, його права призупиняються.
+2a6b6f7f9	Ліміт на годину
+99f28dbae	🗑 Копіювати видалені повідомлення в канал журналу
+704d44996	Видалені через /del і /purge. Telegram не повідомляє ботам про ручні видалення.
+bf952a57c	🛟 Відновлення адмінів
+c4395cbb9	Довірені особи (щонайбільше 3)
+94f3d0e2c	Один ID користувача в рядку. Якщо адмінів масово знімуть, ці люди зможуть надіслати боту /recover.
+44ada5469	♻️ Автоматично відновлювати після масового зняття
+fe85b70c6	#green
+485f81ade	#red
+9cfcbc726	Недійсний вибір
+4094a1250	Задовго: ⟨0⟩…
+3994c99a9	Недійсний ID: ⟨0⟩ (лише цифри)
+5055a2323	Максимум людей: ⟨0⟩
+abe802098	Недійсно
+43936b588	Повідомлення не може бути порожнім
+45313b745	Невідоме поле
+98d2db628	Кожні 30 хвилин
+15ff62ef8	Щогодини
+3ff28dc87	Кожні 2 години
+b7b8f6424	Кожні 3 години
+b5416f932	Кожні 6 годин
+d74bcca07	Кожні 12 годин
+e07f13000	Раз на день
+f1868872f	Кожні 3 дні
+b09892476	Раз на тиждень
+fe3e896af	📦 Набір стікерів: ⟨0⟩
+cce0f0bc2	У вас немає прав
+b91959e41	Формат часу має бути HH:MM
+6ed0b041b	🌙 Нічний режим збережено
+04f474277	Назва нотатки: літери, цифри, - або _ (щонайбільше 32)
+064f4b29e	Вміст нотатки не може бути порожнім
+a918fc143	📝 #⟨0⟩ збережено
+8af22b61d	🗑 Нотатку видалено
+bdf64f16d	Нотатку не знайдено
+2550a4e51	Недійсний тригер (щонайбільше 100 символів; *слово* — збіг усередині повідомлення)
+65d904f46	Відповідь не може бути порожньою
+543b45aca	Фільтрів може бути щонайбільше ⟨0⟩
+75dac4689	🧩 Фільтр ⟨0⟩: ⟨1⟩
+833cd7a4f	оновлено
+8421922af	🗑 Фільтр видалено
+d52273a24	Фільтр не знайдено
+737953689	Недійсний інтервал
+8f07eb02e	⏰ Додано повідомлення за розкладом
+4a5a1fa05	✅ Оновлено
+e10b8c2a9	🗑 Блокування знято
+e750a9371	Невідома дія
+233235be6	Невідоме налаштування
+64198f47f	Спочатку встановіть канал через /forcesub @channel
+794ac0486	🖥 Змінено через вебпанель: ⟨0⟩ | ⟨1⟩
+c5340e8d3	Не вдалося перевірити сесію. Відкрийте панель у Telegram.
+650c37e3f	Групу не знайдено
+ed8d9ddd6	Ви не адмін у цій групі (або бот не зміг зв’язатися з Telegram).
+d1d4f67c2	Бот на обслуговуванні, спробуйте трохи пізніше.
+e2d7c5c97	Потрібен POST
+33edae1a5	Запит завеликий
+bcde64b8a	Недійсний запит
+0429402e5	Недійсне посилання
+ed8c751c4	Непідтримуваний запит
+a5bfc246e	Помилка сервера
+6b75a37b8	🖥 Відкрити вебпанель
+b76f92e63	Вебпанель для цього бота не ввімкнено (WEBAPP_URL у .env порожній).
+61267ecf8	🖥 Вебпанель відкривається в особистому чаті з ботом:
+1503ed392	🖥 Відкрити в особистих
+f6dcc8f07	🖥 <b>Вебпанель</b>
+ffdbfe849	Усі налаштування на одній сторінці: захист, захист від редагування, неприйнятні медіа, вступ, привітання, списки, нічний режим, нотатки, фільтри, повідомлення за розкладом, заблоковані медіа, персонал і статистика групи. Зміни доходять до бота за кілька секунд.
+72019bbac	основний
+62ca31689	⟨0⟩: ⟨1⟩ в очікуванні⟨2⟩
+3f8811338	, ⟨0⟩ виконується
+e5136258e	⚡ <b>Продуктивність</b> — аптайм ⟨0⟩
+be1d477f1	💬 Оброблено оновлень: <b>⟨0⟩</b> · черга: ⟨1⟩
+fdd4f90c1	🧠 Пам’ять: <b>⟨0⟩ МБ</b> (пік ⟨1⟩ МБ) · CPU: ⟨2⟩ с
+3da2a45ed	🧠 CPU: ⟨0⟩ с
+3d0951b3b	🗄 База даних: ⟨0⟩ МБ · пакетних записів: ⟨1⟩, рядків: ⟨2⟩ · в очікуванні: ⟨3⟩
+22a8d336d	⏱ Затримка циклу: серед. ⟨0⟩ · макс. ⟨1⟩ (понад 100 мс = якась операція гальмує бота)
+7f78c41d0	👥 Групи: ⟨0⟩ · Канали: ⟨1⟩ · Клони: ⟨2⟩
+a860ce1ad	🐢 <b>Найповільніші (у середньому)</b>
+6ea19cdf0	⟨0⟩. <code>⟨1⟩</code> — серед. ⟨2⟩ · макс. ⟨3⟩ · ⟨4⟩ разів
+b46e47f18	⏳ <b>Найбільше загального часу</b>
+5d3700941	⟨0⟩. <code>⟨1⟩</code> — усього ⟨2⟩ · ⟨3⟩ разів
+3e186b7ac	🔄 Оновити
+0b681bc34	🧹 Скинути
+9db9059a2	🔙 Панель
+7866cfd7a	🧹 Вимірювання скинуто
+8ed3799c7	🔄 Оновлено
+e8f595afe	🪦 Бота вилучено / недоступний
+fbd3f68b8	⚠️ Бот не адмін
+7950587b4	🕳 Порожньо (≤⟨0⟩ учасників)
+c7417acd3	💤 Тиша вже ⟨0⟩ днів
+b2d73a5b7	🤖 <b>Панель ⟨0⟩ Security Bot</b>
+6dcd06cc1	📊 Статистика:
+2934c79d8	├ Усього груп: ⟨0⟩
+e11665156	├ Усього каналів: ⟨0⟩
+98ee4dccc	├ Усього користувачів: ⟨0⟩
+2cdc2cc48	└ Особисті користувачі: ⟨0⟩
+f93b0152d	📢 Канали
+774aa2184	👥 Групи
+de09056f1	🧹 Очищення
+d03041124	📊 Статистика
+9782862bd	🚫 Заблоковані
+c5249c21a	⚡ Продуктивність
+9e1bd9726	Канали
+009c2e489	Групи
+43dd9b917	⟨0⟩ <b>⟨1⟩</b> (⟨2⟩) — стор. ⟨3⟩/⟨4⟩
+1e4e3b199	Натисніть назву: інфо · 🚪: вилучити бота
+7035c59fd	📢 Немає зареєстрованих каналів.
+a6492303c	👥 Немає зареєстрованих груп.
+e5b94ef1a	🔙 Назад
+8b1164c1a	🔙 Назад до списку
+6abf2b290	Для цього чату немає запису (видалено).
+deacf11c1	✅ адмін
+19ae8c1fe	✅ власник
+c5de3cdae	⚠️ учасник (не адмін)
+6d25c19b2	❌ не в групі
+9f9a5ad1c	❌ вилучено
+84ba3029b	👥 Учасники: ⟨0⟩ · 🤖 Бот: ⟨1⟩
+c86df7e48	📅 Зареєстровано: ⟨0⟩⟨1⟩
+079fe4cc3	💬 Останнє повідомлення: ⟨0⟩ · ⟨1⟩ повідомлень за 7 днів
+33a131ec1	🛡 Активний захист: ⟨0⟩
+c215ada82	· Додав(ла): ⟨0⟩
+cac2ce338	ніколи
+d4f5955f6	🚪 Вилучити бота
+84297554a	🗑 Видалити запис
+5b1da6456	📋 Застосувати її налаштування до інших груп
+f9c565e5d	🧹 <b>Сканування для очищення</b> — перевірено чатів: ⟨0⟩
+9309c9a8c	🗑 Видалити записи
+f9dc0c92a	🚪 Вийти + видалити
+3939c3aa3	📋 Показати
+4fd13b5b2	✅ Нічого очищати.
+71017a253	Примітка: «Вийти + видалити» вилучає бота з цих чатів і стирає їхні налаштування.
+78c3f116c	🔄 Сканувати знову
+f73473dc3	Ця команда працює лише в особистих!
+42c9a2045	📋 Застосувати налаштування <b>⟨0⟩</b> до інших груп (<b>⟨1⟩</b>)?
+3e1a4c661	Копіюються: налаштування захисту, покарання, капча, нічний режим, ліміт попереджень тощо.
+ac2c708cc	Не копіюються: повідомлення привітання/прощання/правил, обов’язковий канал, блокування, власні списки групи.
+46d884196	<b>+ списки</b>: також додаються заборонені слова та списки дозволених посилань (наявні не видаляються).
+cc53a5889	✅ Застосувати + списки
+4bbf7625d	У вихідної групи немає запису.
+8b18be741	✅ Застосовано до груп: ⟨0⟩
+a27027da6	📋 Налаштування цієї групи застосовано до груп: ⟨0⟩ | ⟨1⟩
+584db30d0	🚪 Вилучити бота з <b>⟨0⟩</b>?
+5cb08b81f	• <b>Зберегти налаштування</b>: якщо бота знову додадуть, налаштування повернуться.
+c988453c1	• <b>Видалити й запис</b>: налаштування, ранги та статистику буде видалено.
+29f10e48b	🚪 Вийти, зберегти налаштування
+874976382	🗑 Вийти й видалити запис
+1a6229583	Не вдалося вийти: ⟨0⟩
+c8614638e	✅ Вийшов⟨0⟩
+588b8a501	і запис видалено
+4dd5e9778	Сканування…
+f127b4d7a	🧹 Сканую чати (⟨0⟩), це може зайняти час…
+c04373159	Сканування застаріло, проскануйте знову.
+f3c33c83f	🔙 Назад до сканування
+1a3a3e54d	видалити записи
+84c117afe	вийти й видалити записи
+1f67427da	⚠️ ⟨0⟩: <b>⟨1⟩</b> чатів — ⟨2⟩? Це не можна скасувати.
+eb3f9ab14	✅ Так
+33889c985	Обробка…
+5ac06101c	✅ Очищено чатів: ⟨0⟩⟨1⟩
+73500e336	Лише для власника основного бота.
+6a8179ecc	Список заблокованих доступний лише власнику основного бота.
+7ec9c6536	🚫 <b>Заблоковані</b>
+2f8268ac0	Ніхто не заблокований.
+13f3c860d	📊 <b>Статистика бота</b>
+25fdf74b3	├ Усього записів повідомлень: ⟨0⟩
+31d1735c8	└ Усього банів: ⟨0⟩
+511d1c70c	Використання: /save <назва> <текст>  (або відповіддю на повідомлення: /save <назва>)
+b9050868c	Вміст нотатки не може бути порожнім.
+fe73e61b7	✅ Нотатку збережено: #⟨0⟩
+e2c814129	Використання: /get <назва>
+6d1ba3c3a	Такої нотатки немає. Список: /notes.
+fdb9a02af	Немає збережених нотаток. Додайте через /save.
+da2bf5ed4	📝 <b>Нотатки</b>
+755923919	Щоб переглянути, напишіть у групі #назва.
+80841e69d	Використання: /clear <назва>
+41afe3456	✅ Нотатку видалено.
+bd44e9b93	Такої нотатки немає.
+c74724c97	🔗 Блокування посилань
+a6085267b	🧩 Капча
+a2e8d7dd3	↪️ Блокування пересилань
+65984a6d2	🚨 Захист від рейдів
+64de715c0	🐣 Обмеження для нових учасників (60 хв)
+da5934c57	🔤 Фільтр слів
+90879408f	🟢 Легкий
+b042dc5d1	🟡 Звичайний
+79b39bda7	🔴 Суворий
+58c29a09a	⚡ <b>Швидке налаштування</b> — ⟨0⟩
+bf650f464	<b>1/3</b> Виберіть набір захисту. Кожен параметр можна змінити потім.
+51a1926be	🟢 <b>Легкий</b>: посилання + флуд
+14630f04b	🟡 <b>Звичайний</b>: + повторюваний спам, капча, неприйнятні медіа
+b89411ab4	🔴 <b>Суворий</b>: + обмеження для нових учасників, блокування пересилань, захист від рейдів
+ce91c6e00	⚙️ Виберу сам(а)
+e45f19110	✖️ Поки пропустити
+d6c79520c	Стандартне
+e62d3857f	Мій текст
+3c5a1bd73	<b>2/3</b> Надсилати новачкам привітальне повідомлення?
+4a80c8576	Зараз: <b>⟨0⟩</b>
+f4b2ad895	🚫 Вимк
+b8723d469	👋 Стандартне
+5566ef1f3	✏️ Напишу свій текст
+0a255f736	<b>3/3</b> Який захист увімкнути? Натисніть, щоб увімкнути/вимкнути.
+b229f24f3	➡️ Далі
+39c7bad60	стандартний текст
+05c1aeb32	ваш текст
+d405d7c75	<b>Підсумок</b>
+5618672c1	👋 Привітання: ⟨0⟩
+f2adce74f	Натисніть «Застосувати», щоб зберегти налаштування. Усе можна змінити пізніше через /settings.
+77676a86d	✅ Застосувати
+eebb82b20	🛡 Змінити захист
+2e80a5fce	Цю групу не зареєстровано. Спочатку зробіть бота адміном.
+762cfa3fa	⚡ Швидке налаштування виконується в особистому чаті з ботом:
+32f93f6ae	⚡ Відкрити налаштування
+ab8bc5e3f	Спочатку виберіть групу через 🛡 Мої групи, потім напишіть /setup.
+008c8e774	Налаштування пропущено. Відкрити його можна будь-коли через /setup.
+6f6bec44f	✅ Налаштування збережено
+5dc655d64	✅ <b>Налаштування завершено!</b> — ⟨0⟩
+46d73ff37	Детальні налаштування: /settings · Автовідповіді: /filter у групі
+d9a9eba4a	⚡ Швидке налаштування застосовано | ⟨0⟩
+161bbf828	🧩 <b>Як користуватися фільтрами</b>
+8344bd8fb	• Відповіддю на повідомлення: <code>/filter Вітаю</code> (тригер — повідомлення, на яке ви відповіли)
+7e201996f	• Без відповіді: <code>/filter привіт Вітаю</code>
+cf1db6a05	• Кілька слів: <code>/filter "на добраніч" І вам на добраніч!</code>
+812fb6d89	• Якщо трапляється всередині повідомлення: <code>/filter *привіт* Привіт!</code>
+206f91a6d	• Відповідь стікером/фото/GIF: дайте відповідь на медіа → <code>/filter привіт</code>
+b0b395569	• Кнопки: під відповіддю, по одній у рядку <code>Канал - https://t.me/channel</code>
+380f07344	Змінні: <code>{user}</code> <code>{first}</code> <code>{group}</code> · Форматування (жирний, посилання…) зберігається
+528d066d4	Список: /filters · Видалити: /stop привіт · Видалити все: /stopall
+7315f262e	⚠️ У групі може бути щонайбільше ⟨0⟩ фільтрів. Видаліть старі через /stop.
+cf56cd5da	коли трапляється в повідомленні
+0272debab	коли його пишуть
+3045102b7	✅ Фільтр ⟨0⟩: <b>⟨1⟩</b> — відповідатиму, ⟨2⟩.
+67c264f1a	додано
+c64b0c3ca	🧩 Фільтр додано: ⟨0⟩ | ⟨1⟩
+830911851	У цій групі немає фільтрів. Щоб додати: /filter
+32a5d5ddb	🧩 <b>Фільтри</b> (⟨0⟩)
+3b8b66dd5	Щоб видалити: /stop &lt;тригер&gt;
+8b3a30608	Використання: /stop <тригер>
+f2ba0c77b	✅ Фільтр видалено.
+77a5db13d	Такого фільтра немає. Перевірте список через /filters.
+b7301e99a	У цій групі немає фільтрів.
+bd0505102	⚠️ Видалити всі фільтри цієї групи (<b>⟨0⟩</b>)?
+8d8252e68	🗑 Так, видалити все
+9b6fcea87	↩️ Скасувати
+272826aad	Скасовано.
+cf9d69e94	🗑 Видалено фільтрів: ⟨0⟩.
+13c07c249	🧹 Усі фільтри видалено (⟨0⟩) | ⟨1⟩
+0451d6399	🏷 Назва бренду
+93077ebd5	Напишіть ім’я, яке ваш бот показуватиме в повідомленнях (напр. Alpha Guard).
+efbbbb435	👋 Текст привітання
+4e2fd1f48	Напишіть текст привітання, який показується, коли хтось вводить /start.
+e840e51a6	🔗 Посилання підтримки
+2236aa076	Напишіть посилання на групу/канал підтримки (https://t.me/...). Щоб прибрати: -
+74af46bea	❓ Заголовок довідки
+ce0e0d6dc	Напишіть заголовок меню довідки.
+07075bae9	Користувач
+8c59b527c	🤖 <b>Схвалення бота-клона</b> #⟨0⟩
+673f5ba81	👤 Хто хоче створити бота: ⟨0⟩ — ID: <code>⟨1⟩</code>
+286285872	🔑 Токен бота: <code>⟨0⟩</code>
+140e8742e	🏷 Назва бота: ⟨0⟩ (@⟨1⟩)
+bbde0b439	Токен недійсний або відкликаний.
+2f1be69b6	Токен належить іншому боту.
+b8261ca98	⚠️ Вашого бота-клона @⟨0⟩ зупинено: ⟨1⟩
+5b74bc345	Отримайте новий токен у BotFather і перезапустіть бота кнопкою <b>Змінити токен</b> у меню 🤖 Клон.
+15f0441be	недійсний токен (⟨0⟩)
+c079ca840	⏳ <b>@⟨0⟩</b> очікує схвалення власника бота. Запуститься після схвалення.
+aa2e8a82e	🤖 <b>Бот-клон</b>
+f3fc6979c	Створіть бота захисту з власною назвою, який працює на рушії ULUS.
+4fbf35472	1) Створіть бота командою /newbot у @BotFather
+632cbf17b	2) Надішліть отриманий токен кнопкою нижче
+883193ad7	3) Коли власник бота схвалить, ваш бот почне працювати⟨0⟩
+3a5be4fd4	🔑 Надіслати токен
+e76ac71f1	🟢 Працює
+f8a7fde2a	⚠️ Недійсний токен
+b535c1e0c	🤖 <b>Ваш бот-клон</b>: @⟨0⟩
+0bc0356ba	Стан: ⟨0⟩ · Групи/канали: ⟨1⟩
+47500a892	🏷 Бренд: <b>⟨0⟩</b>
+ca0fe8e9a	🔗 Підтримка: ⟨0⟩
+b07ee01ba	❓ Заголовок довідки: ⟨0⟩
+8e9727f2e	👋 Привітання: ⟨0⟩⟨1⟩
+de54dae36	стандартне
+53f82bc49	⏸ Зупинити
+b8abb05fb	▶️ Запустити
+60446c88d	↩️ Відкликати заявку
+ded7cc646	🔑 Змінити токен
+d3fb29907	🗑 Видалити клон
+367b6aa51	Дії з клоном виконуються в особистому чаті з ботом.
+a51f7d30f	Цю заявку вже оброблено.
+c862658b2	Заявка зі старої версії; користувач має надіслати токен через /clone.
+a102e834e	🤖 Систему клонів оновлено: напишіть /clone і надішліть токен свого бота; бот запуститься після схвалення власника бота.
+982a0150c	Не вдалося запустити: ⟨0⟩
+447501409	⚠️ Не вдалося запустити: ⟨0⟩
+64fbe849e	⚠️ Не вдалося запустити вашого бота-клона: ⟨0⟩
+03718599d	Новий токен можна надіслати через /clone.
+ba7f6e886	✅ Схвалено, бота запущено
+705bd8131	❌ Відхилено
+744d07117	✅ <b>Вашого бота-клона схвалено й запущено!</b> @⟨0⟩
+90edeb341	Для назви, тексту привітання й посилання підтримки: /clone
+172a66fda	❌ Вашу заявку на бота-клона @⟨0⟩ відхилено.
+dffc58eb3	Більше не потрібно просити дозволу: надішліть токен, бот запуститься після схвалення власника.
+7269890c3	Це може зробити лише власник бота.
+741c29704	У вас немає заявки, що очікує.
+a353b8903	↩️ Користувач відкликав заявку
+cb7da55c2	↩️ Заявку відкликано
+b30c05510	🔑 Напишіть токен бота, отриманий від @BotFather (напр. <code>123456789:ABC...</code>).
+0adaad0bb	Щоб скасувати: cancel
+a54c0e304	Цей клон не ваш.
+8f8af330e	Недійсно.
+6a47f34ed	Цей клон видалено.
+21d148b57	🗑 Видалити клон @⟨0⟩? Бот зупиниться, налаштування в групах залишаться.
+e53f197f7	🗑 Так, видалити
+cb1a5e233	🗑 Вашого бота-клона @⟨0⟩ видалив власник бота.
+19e55244e	Посилання має починатися з https://t.me/. Напишіть ще раз або cancel.
+6e97fcc27	✅ ⟨0⟩ оновлено.
+feae94615	❌ Це не схоже на токен бота. Надішліть повний токен від @BotFather.
+19769e756	❌ Це токен основного бота.
+d305390e4	❌ Недійсний токен. Скопіюйте правильний токен з @BotFather.
+82a945d00	❌ Цей бот уже є чиїмось клоном.
+d190f37f5	❌ На цього бота вже є чужа заявка, що очікує.
+fa9063dd4	❌ Не вдалося запустити бота: ⟨0⟩
+8ffa38acb	✅ <b>Ваш бот-клон готовий!</b> @⟨0⟩
+9b90f4091	Щоб додати в групу: https://t.me/⟨0⟩?startgroup=ulus&admin=⟨1⟩
+34ed30a8e	↩️ Натомість надіслано нову заявку
+98545fdcd	✅ Схвалити
+b3bf17908	📨 Вашу заявку на <b>@⟨0⟩</b> надіслано власнику бота.
+988ee3c22	Після схвалення ваш бот запуститься, і я вам повідомлю.
+eb51d0e12	Цей бот уже є чиїмось клоном.
+dfe2324b4	⟨0⟩ @⟨1⟩ — власник <code>⟨2⟩</code>
+1cd8c4513	⏳ @⟨0⟩ — заявник <code>⟨1⟩</code>
+92021a063	🤖 <b>Боти-клони</b> (⟨0⟩) · Очікують схвалення: ⟨1⟩
+21bb22c3f	Клонів поки немає.
+32f6170ef	<b>Очікують схвалення</b>
+f666e1d93	🗄 Резервна копія бази даних · ⟨0⟩ МБ (стиснуто ⟨1⟩ МБ)
+9cfd9973e	Щоб відновити, покладіть .db-файл з архіву в папку бота під назвою bot_data.db.
+391c8e6d0	🗄 Резервну копію створено, але вона не вміщується в Telegram (⟨0⟩ МБ): ⟨1⟩
+c3fcc95df	🗄 Створюю резервну копію...
+103ec5f85	Чат: ⟨0⟩
+0f97d9633	⚠️ Помилка бота
+15781d4a0	⚠️ Ця кнопка застаріла або недійсна. Відкрийте меню знову.
+043246756	⚠️ Щось пішло не так, дію не вдалося виконати. Спробуйте ще раз.
+4e9b13c4d	⛔ Цією командою можуть користуватися лише адміни.
+af7654ae4	⏳ Список адмінів щойно оновлено. Спробуйте знову через ⟨0⟩ с.
+7117a9ab8	⚠️ Не вдалося отримати список адмінів. Бот є адміном у цій групі?
+48b81ffc1	🔄 <b>Список адмінів оновлено</b> — адмінів: ⟨0⟩
+10701ad0a	➕ Надано ранг: ⟨0⟩
+7eed3b278	➖ Ранг знято (більше не адмін): ⟨0⟩
+3ffb1dffa	Записи вже актуальні.
+be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
+2a8ec5530	🟢 ULUS запущено
+82459fdce	База даних: <code>⟨0⟩</code> (⟨1⟩ КБ)
+d2e59a824	Зареєстровані групи/канали: <b>⟨0⟩</b>
+6c20c0dd0	⚠️ База даних відкрилася порожньою й була відновлена з останньої резервної копії: <code>⟨0⟩</code>
+0e4276ce2	⚠️ Немає зареєстрованих чатів. Якщо це число падає після перезапуску бота, файл бази даних міг бути видалений або бот працює з іншої папки.
+3831f1221	Не вдалося зв’язатися із сервером
+ca576aa9b	Помилка ⟨0⟩
+44d8a56f0	Зберегти (⟨0⟩)
+8c5f53f0b	🖼 Прикріплено: ⟨0⟩ — позначте, щоб прибрати
+6050fb2fa	Обов’язковий канал: ⟨0⟩
+2101bb05d	Видалити ⟨0⟩?
+210266e99	Увімк/вимк
+ac3d94f38	Повідомлення (7 днів)
+251aa63e3	Активні люди
+7782d329c	Приєдналися (7 днів)
+f515fefde	Попереджені
+b32121bc6	Забанені
+4136a9068	📋 Канал журналу: ⟨0⟩
+1f589ad54	не встановлено (використайте /setlog у боті)
+91e55d41e	🌙 Нічний режим
+5a572078e	· активний зараз
+db433084f	· увімк
+841c11292	Вибрані права вимикаються в ці години й відновлюються після них (UTC+3).
+587308129	Початок
+2a2a44bc3	Кінець
+e07763331	Вимкнути:
+fb5b6de88	Зберегти нічний режим
+626b1b386	📝 Нотатки (⟨0⟩)
+9ba887ab0	Нотаток поки немає. Якщо написати #назва в групі, бот надішле нотатку.
+0ebe5615b	Назва нотатки (напр. rules)
+83fff7c73	Вміст нотатки (форматування: <b>жирний</b>, кнопки: Текст - https://посилання)
+0c4734df9	🧩 Фільтри / автовідповіді (⟨0⟩/⟨1⟩)
+40d6aee5f	💬 містить: ⟨0⟩
+25ea7b948	Фільтрів поки немає.
+8e0bb1fb8	Тригер (збіг усередині повідомлення: *слово*)
+db212635d	Відповідь (змінні {user} {first} {group}, рядки кнопок)
+75a77232d	➕ Додати фільтр
+ed3622d45	Для відповіді з медіа (стікер/фото) дайте відповідь на медіа в групі командою /filter.
+aa7a25249	⏰ Повідомлення за розкладом (⟨0⟩)
+3eb72af09	Кожні ⟨0⟩ · наступне: ⟨1⟩
+240088248	Увімк/вимк
+f479b96fd	Це повідомлення за розкладом
+158f37bff	Повідомлень за розкладом поки немає.
+38f7fb835	Повідомлення (підтримуються рядки кнопок і випадкові варіанти через %%%)
+67866ebd3	Інтервал
+039052532	➕ Додати повідомлення за розкладом
+ec1ffce3d	🚫 Заблоковані медіа (⟨0⟩)
+39590ef60	Це блокування
+35fb023cf	Щоб додати, дайте відповідь на медіа в групі командою /blockmedia або /blockpack для набору стікерів.
+2de76a779	👮 Персонал (⟨0⟩)
+bf3bc5b16	Щоб надати/зняти ранг, використовуйте в групі /admin, /senioradmin, /cofounder; для особистих прав — /perms у боті.
+3a5e96d47	Завантаження…
+7419f16f9	✅ Збережено
+69efe9b3e	Змін немає
+4c12da56f	Групи, якими ви керуєте
+b57672cb0	Ви не керуєте жодною групою
+03396c6dd	Не знайдено групи, де бот є адміном, а ви — персоналом.
+274139b9d	Скасувати незбережені зміни?
+67b14047c	Кнопки: по одній у рядку  Текст - https://посилання  (поруч: &&) · Правила - rules · Інфо - popup:текст · Змінні: {user} {first} {group} {count} · Випадкове повідомлення: рядок %%% між ними · Для жирного/курсиву використовуйте теги <b> <i>. Медіа додавайте через бота командою /setwelcome.
+'''
+
+I18N_UZ = r'''
+a9826a4de	⟨0⟩ Security Bot
+89c80575f	⚡ Asosiy bot: @⟨0⟩
+d86fae223	✅ Til o‘rnatildi: ⟨0⟩
+972caaca5	🌍 <b>Til</b>
+0c1e30399	Tilingizni tanlang:
+fea7d950e	✅ Guruh tili: ⟨0⟩
+1b6f202bc	🌍 <b>Guruh tili</b>
+9ab6017a5	Hozir: ⟨0⟩
+9d13d74f6	Bu guruh uchun bot tilini tanlang:
+448e35ffe	Sizda ruxsat yo‘q!
+17665e8c1	🌍 Guruh tili: ⟨0⟩ | ⟨1⟩
+4c9e57207	👑 Asoschi
+bfa3235c4	🔱 Hammuassis
+ef61a4d09	⭐ Katta admin
+8d0d91abe	⚠️ Ogohlantirish
+9a83dd2de	🗑 Xabarlarni o‘chirish
+d7d2f6eb2	🔇 Ovozsiz qilish
+4acd35f89	👢 Chiqarib yuborish
+41605b650	🔨 Ban / bandan chiqarish
+1a7979b5e	↩️ Ogohlantirishlarni olib tashlash
+5b4929b15	📌 Qadash
+6880a0676	🧹 Tozalash / sekin rejim
+1b5d5b3d1	📩 Qo‘shilish so‘rovlari / e’tirozlar
+6a285730c	📜 Qoidalar / xush kelibsiz / eslatmalar
+eab57b3ab	🚨 Favqulodda qulf (ochish)
+932bdd7e5	⚙️ Himoya sozlamalari
+6628cf302	👑 Unvon berish / olish
+178f46a47	🧩 Filtrlar (avtojavoblar)
+5d856e480	🏷 Ommaviy belgilash (/tag)
+8c664bc3f	🔗 Taklif havolasi
+5fc826495	🚫 Cheklash / ban
+52e1acc4f	🎙 Ovozli chatlar
+c264fb5af	💬 Mavzularni boshqarish
+5e74fa6f0	📖 Hikoya joylash
+1e9853465	✏️ Hikoyani tahrirlash
+f56347abf	🗑 Hikoyani o‘chirish
+fc5b6f247	ℹ️ Guruh ma’lumoti
+16f35c22f	⭐ Admin qo‘shish
+5a2dcf161	Bot buning uchun ruxsatga ega emas. Botni kerakli huquqlar bilan admin qiling.
+da1585078	Bot o‘zida yo‘q huquqni boshqaga bera olmaydi.
+5f334b209	Bu odam guruhda admin; bu amalni adminlarga qo‘llab bo‘lmaydi.
+a34bdfc67	Foydalanuvchi guruhda topilmadi.
+247a273bd	Xabar topilmadi (o‘chirilgan bo‘lishi mumkin).
+342d7a053	Bu xabarni o‘chirib bo‘lmaydi (48 soatdan eski bo‘lishi mumkin).
+59b207012	Telegram hozir juda ko‘p so‘rov qabul qilmoqda, birozdan keyin qayta urinib ko‘ring.
+29072692d	Chat topilmadi. Bot o‘sha chatdami?
+9a9bee4a1	Bu faqat superguruhlarda ishlaydi.
+e99fefa09	Botga kirish yo‘q (bot bloklangan yoki chatdan chiqarilgan).
+f6a39420d	Telegramga ulanib bo‘lmadi, birozdan keyin qayta urinib ko‘ring.
+fce0709e2	❌ Amal bajarilmadi, qayta urinib ko‘ring.
+c1a2c3bf9	Buni o‘zingizga qila olmaysiz.
+58503ae82	Bu amalni bu akkauntga qo‘llab bo‘lmaydi.
+c93d8e442	⛔ ⟨0⟩ ning unvoni siznikiga teng yoki yuqori; unga nisbatan amal qila olmaysiz.
+7c6c0a917	Bu odam
+980a088c1	⛔ Sizda ruxsat yo‘q! (⟨0⟩ yoki yuqori)
+f78cc4201	⛔ Bu buyruq uchun guruhda haqiqiy admin bo‘lishingiz kerak.
+1a089160e	⛔ Bot bu guruhda admin emas yoki ruxsatlari yetarli emas.
+ec502d773	⟨0⟩ soat
+1d683512c	⟨0⟩ daqiqa
+e0250a8c0	⟨0⟩ soniya
+4f52d88ec	Salom {user}, {group} guruhiga xush kelibsiz!
+41006f31c	🙏 Rahmat! Bot qo‘shildi: ⟨0⟩
+e89ec2f7d	Turi: ⟨0⟩
+484b4f591	Buyruqlar uchun /help yozing.
+fbb8f4be4	Bot qo‘shildi: ⟨0⟩ (⟨1⟩) | egasi: ⟨2⟩
+417b3cc01	✅ Bot qo‘shildi va ro‘yxatga olindi! Buyruqlar: /help, sozlamalar: /settings.
+189f689b9	🌍 Til: /setlang
+cde2bd7c8	ogohlantirish
+929d8360f	ogohlantirishni bekor qilish
+3c0ddc51a	ovozsiz qilish
+9c030a691	ovozini qaytarish
+91787bcf5	guruhdan chiqarish
+d34c44d0e	doimiy ban
+b131626a5	bandan chiqarish
+6838cf1a3	o‘chirish
+b707492ec	vaqtinchalik ban
+6f1a328f6	huquqlarni olish
+4f0282227	shikoyat
+12c391a8f	tugma
+b581541a3	qora ro‘yxat
+b01a6a6e8	ovoz berish
+e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> ogohlantirish
+ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Ogohlantirish: ⟨3⟩/⟨4⟩ | ⟨5⟩
+9e23d2151	vaqtinchalik ban (⟨0⟩)
+953cd28f3	guruhdan chiqarildi
+090d91568	📨 E’tiroz uchun botga shaxsiy xabarda /appeal yozishi mumkin.
+ddd70b55a	⟨0⟩ ⟨1⟩ ⟨2⟩ ta ogohlantirishga yetdi → <b>⟨3⟩</b> (⟨4⟩)⟨5⟩
+f05514a4b	🚫 ⟨0⟩ ⟨1⟩ | Sabab: ⟨2⟩ | ⟨3⟩
+33762701b	🗑 ⟨0⟩ → ⟨1⟩ xabari o‘chirildi | ⟨2⟩
+e83ba4992	🔇 ⟨0⟩ ⟨1⟩ → ⟨2⟩ ga ovozsiz qilindi
+4689a9495	👢 ⟨0⟩ ⟨1⟩ → guruhdan chiqarildi
+24b70b24b	🚫 ⟨0⟩ ⟨1⟩ → ban qilindi
+f881648dd	🗑 Xabar o‘chirildi
+a1ce809b5	⚠️ O‘chirildi + ogohlantirildi
+4d4d20ba3	🔇 O‘chirildi + 1 soatga ovozsiz
+3a4a2408d	🚫 O‘chirildi + ban
+184e9ea25	✅ E’tiborsiz qoldirildi
+1cd1dbdf9	🗑 O‘chirish
+d193c645a	⚠️ Ogohlantirish
+bb7ad37ac	🔇 1 soat ovozsiz
+ebe01fecc	🚫 Ban
+e7e0e2df9	✅ E’tiborsiz qoldirish
+3397853de	Shikoyat guruhdagi xabarga javob berib yuboriladi: /report [sabab]
+b61b50bf7	Xabarga javob berib /report yozing.
+9cf259e34	Adminlar ustidan shikoyat qilib bo‘lmaydi.
+c5bbdb405	Juda tez-tez shikoyat qilyapsiz, biroz kuting.
+bd7e0099e	Bu xabar ustidan allaqachon shikoyat qilingan.
+896d1ca10	🚩 <b>Yangi shikoyat</b> #⟨0⟩
+cec4cf481	Guruh: <b>⟨0⟩</b>
+c3a6b7566	Shikoyatchi: ⟨0⟩
+5083aeebb	Shikoyat qilingan: ⟨0⟩ (<code>⟨1⟩</code>)
+9b4b6cd06	<a href="⟨0⟩">Xabarga o‘tish</a>
+679ec2d36	✅ ⟨0⟩, shikoyatingiz adminlarga yuborildi.
+008e3c181	⚠️ ⟨0⟩, shikoyat qabul qilindi, lekin hozir hech bir admin bilan bog‘lanib bo‘lmadi.
+ad6b780a2	Shikoyat topilmadi.
+04f22133c	Bu shikoyat allaqachon ko‘rib chiqilgan: ⟨0⟩
+94cea35e5	↩️ Ogohlantirishni bekor qilish
+2446ce8e3	🔊 Ovozni qaytarish
+d3d996724	↩️ Ogohlantirish olindi (⟨0⟩/⟨1⟩)
+2ffab4aa4	🔇 1 soatga ovozsiz qilindi
+969014784	🔊 Ovoz qaytarildi
+96524e022	🚫 Ban qilindi
+c1ef156c4	✅ Bandan chiqarildi
+7181ac4be	Noto‘g‘ri amal.
+3461c44ea	Buning uchun guruhda admin bo‘lishingiz kerak.
+74042fc88	Bot bu guruhda admin emas yoki ruxsatlari yetarli emas.
+aec9fe5ec	Adminlarga qo‘llab bo‘lmaydi.
+14fea3d87	👋 Salom ⟨0⟩!
+b6ba013b6	Guruhda yozish uchun quyidagi savolga javob bering.
+30a234e49	⏰ Vaqt: ⟨0⟩. Noto‘g‘ri javob yoki vaqt tugasa, guruhdan chiqarilasiz.
+5941a96e3	⏰ Kapcha vaqti tugadi → ID:⟨0⟩ chiqarildi | ⟨1⟩
+47de968f7	Xato.
+371e8fa90	Bu kapcha sizniki emas!
+4b056df52	Kapcha muddati tugagan.
+16a67ec53	✅ To‘g‘ri!
+13e7c138f	✅ ⟨0⟩ tasdiqlandi!
+d8c5044b0	✅ Kapchadan o‘tdi: ⟨0⟩ | ⟨1⟩
+d4d19c221	❌ Noto‘g‘ri javob!
+be0ff1965	❌ ⟨0⟩ noto‘g‘ri javob berdi va chiqarildi.
+921ae23b1	❌ Kapchadan o‘tmadi → ⟨0⟩ chiqarildi | ⟨1⟩
+a1d75b185	🗑 ⟨0⟩ — kanal nomidan (⟨1⟩) yuborilgan xabar o‘chirildi | ⟨2⟩
+c537f5f16	🆕 ⟨0⟩, yangi a’zolar dastlabki ⟨1⟩ daqiqada havola/media/forward yubora olmaydi. (~⟨2⟩ daqiqa qoldi)
+df471627f	bloklangan stiker to‘plami
+d3bfcdff9	bloklangan media
+c82923d6d	xavfli fayl (⟨0⟩)
+c83f1da6c	nomaqbul kontent
+5fb084a5f	SI: ⟨0⟩
+51da96b93	nomaqbul kontent (⟨0⟩)
+c5baa0aed	Nomaqbul media (⟨0⟩)
+acae614af	avtomatik: ketma-ket nomaqbul media (hujum gumoni)
+f77a6df47	🚨 <b>Media hujumi</b> aniqlandi, guruhda media yuborish qulflandi.
+d6fc51018	imzosiz post
+93f2e53e1	🔞 <b>Kanalda nomaqbul media o‘chirildi</b>
+a99d18293	Yuboruvchi: ⟨0⟩
+d6c8546a4	Kanal: <code>⟨0⟩</code>
+cb902699f	Kanalda ketma-ket nomaqbul media (kanalni bloklatish urinishi gumoni)
+ade12807b	🔒 <b>Media qulfi</b>: rasm, video, stiker, GIF va fayllar ⟨0⟩ davomida o‘chirildi.
+d21e8724d	Sabab: ⟨0⟩
+0ca7ff868	🔓 Media qulfi olindi, avvalgi ruxsatlar tiklandi.
+874318f86	🔓 Media qulfi olindi | ⟨0⟩
+4bf6387ff	Bu buyruqni guruhda bloklamoqchi bo‘lgan mediaga javob berib ishlating.
+b38691ea2	Bloklamoqchi bo‘lgan rasm/video/GIF/stiker/faylga javob bering.
+19a0caff5	To‘plamini bloklash uchun stikerga javob bering.
+a6fdf7132	stiker to‘plami <code>⟨0⟩</code>
+478778014	(barcha guruhlarda)
+350c5b7db	🚫 ⟨0⟩ bloklandi. Qayta yuborilsa o‘chiriladi.
+3506ca524	Bu allaqachon bloklangan.
+4d19611fc	🚫 Media bloklandi (⟨0⟩) | ⟨1⟩
+63de95c9c	Avval /select bilan guruh tanlang!
+0d2990bb6	🔓 Media qulfi olindi.
+5efbe835d	Media qulfi allaqachon o‘chiq.
+bc8817800	🔒 Media qulflandi.
+57dd35ab6	Qulflab bo‘lmadi (reyd qulfi faol bo‘lishi yoki botda ruxsat yo‘qligi mumkin).
+6fc9219df	⟨0⟩ k ⟨1⟩ s
+184dd1447	⟨0⟩ s ⟨1⟩ daq
+65f0ede73	⟨0⟩ daq
+c55e9eeb2	✏️ ⟨0⟩, ⟨1⟩ daqiqadan eski xabarlarni tahrirlab bo‘lmaydi; tahrirlangan xabaringiz o‘chirildi.
+e4ec4ef08	<i>yozuv yo‘q (xabar himoya yoqilishidan oldin yuborilgan)</i>
+4f135e257	<a href="⟨0⟩">Xabar joyi</a>
+a81c7ed8d	✏️ <b>Kech tahrirlangan xabar o‘chirildi</b>
+ff6af8a83	Foydalanuvchi: ⟨0⟩ (<code>⟨1⟩</code>)
+6c94268e3	Yuborilgan: ⟨0⟩ · ⟨1⟩ keyin tahrirlangan
+eba784f45	<b>Oldin:</b>
+817e491aa	<b>Keyin:</b>
+330690bdd	forward (#⟨0⟩)
+a00507082	media flood (⟨0⟩/⟨1⟩ s)
+a77f997a9	flood (⟨0⟩ xabar/⟨1⟩ s)
+74c953a60	🔗 Havola o‘chirildi → ⟨0⟩ | ⟨1⟩
+427c1fec3	havola yuborish
+794910b1f	Taqiqlangan so‘z
+8fb66aa89	taqiqlangan so‘z
+4e5efb06d	takroriy spam
+c91e153a9	Anti-forward hozir: ⟨0⟩
+6d6d358e6	Foydalanish: /antiforward on|off
+117ba2454	YOQIQ
+6a2055cc2	Anti-forward ⟨0⟩.
+596cfaf0b	Anti-forward ⟨0⟩ | ⟨1⟩
+d2102fa46	Anti-media hozir: ⟨0⟩
+332b15c14	Foydalanish: /antimedia on|off
+3227848c2	Anti-media flood ⟨0⟩.
+48d9c6287	Anti-media flood ⟨0⟩ | ⟨1⟩
+8cc0eba99	Anti-flood hozir: ⟨0⟩
+d1a5f38ec	Limit: ⟨0⟩ xabar / ⟨1⟩ soniya
+3599fb42c	Foydalanish: /antispam on|off
+64adfe1a4	Limitni o‘zgartirish: /antispam on 10 5 (10 xabar/5 soniya)
+1a836ee8e	Anti-flood ⟨0⟩. (Limit: ⟨1⟩ xabar/⟨2⟩ s)
+27867ef23	Anti-spam ⟨0⟩ | ⟨1⟩
+5a6f48edd	Anti-havola hozir: ⟨0⟩
+d947593b7	Foydalanish: /antilink on|off
+5ddc225c5	Havolalarni bloklash ⟨0⟩. (Adminlar mustasno)
+298cef31c	Anti-havola ⟨0⟩ | ⟨1⟩
+dc5c98faf	Kapcha hozir: ⟨0⟩
+0742b23d4	Foydalanish: /captcha on|off
+348974ec8	Kapcha ⟨0⟩.
+070cf47b7	Kapcha ⟨0⟩ | ⟨1⟩
+f8303f57c	✅ ⟨0⟩ endi ma’muriyatda emas.
+eb3b60248	🗑 ⟨0⟩ ning unvoni olindi | ⟨1⟩
+36a946671	Foydalanuvchi topilmadi!
+92274adac	📂 ⟨0⟩ endi papka boshqaruvchisi!
+b7a687056	📂 ⟨0⟩ papka boshqaruvchisi etib tayinlandi | ⟨1⟩
+3b49b9b50	Sabab ko‘rsatilmagan
+42ca54745	🚫 ⟨0⟩ ⟨1⟩ oldi! Sabab: ⟨2⟩
+023576cd7	Foydalanuvchini ko‘rsating! Uning xabariga javob bering yoki ID/username yozing.
+bad97a937	✅ ⟨0⟩ bandan chiqarildi!
+b83344e83	✅ ⟨0⟩ bandan chiqarildi | ⟨1⟩
+dee699309	👢 ⟨0⟩ chiqarib yuborildi!
+16d07ca95	👢 ⟨0⟩ chiqarib yuborildi | ⟨1⟩
+299422191	24 soat (admin limiti)
+b2fbfc457	🔇 ⟨0⟩ ⟨1⟩ ga ovozsiz qilindi!
+9247b48e0	🔇 ⟨0⟩ ⟨1⟩ ga ovozsiz qilindi | ⟨2⟩
+b13185722	⟨0⟩ ⟨1⟩: ovoz qaytarildi!
+dd3fea678	⟨0⟩ ⟨1⟩: ovoz qaytarildi | ⟨2⟩
+08ccab800	qo‘lda ovoz qaytarish
+f990c822c	Ovozni qaytarib bo‘lmadi: ⟨0⟩
+fa5f86984	⟨0⟩ ⟨1⟩: ogohlantirish olindi (⟨2⟩/⟨3⟩).
+e222d2c43	↩️ ⟨0⟩: ogohlantirish olindi (⟨1⟩) | ⟨2⟩
+b26226e44	📊 ⟨0⟩ ogohlantirishlari: ⟨1⟩/⟨2⟩
+fcbd59f04	Xabarga javob berib, qadash uchun /pin yozing!
+821dc813a	📌 Xabar qadaldi!
+f07ba3194	📌 Xabar qadaldi | ⟨0⟩
+84ce06e7a	✅ Qadash olindi!
+7a8e925ad	📍 Qadash olindi | ⟨0⟩
+a166505b1	Foydalanish: /slowmode <soniya> (0 = o‘chiq)
+5efa94a44	Misol: /slowmode 30
+d9e0a5f25	⏩ Sekin rejim o‘chirildi.
+c9f3d97aa	🐢 Sekin rejim: ⟨0⟩ soniya.
+90fc9c4e8	🐢 Sekin rejim ⟨0⟩ s | ⟨1⟩
+04ee47e62	To‘g‘ri soniya sonini kiriting!
+ec7dc1340	Avval /select bilan guruh tanlang!
+ef6a75200	Bu buyruqni tozalamoqchi bo‘lgan guruh ichida ishlating.
+8ab6d8456	Foydalanish: /purge <soni> yoki /purge all
+f726b6834	Oxirgi 20 000 xabar
+ad1696ee9	Oxirgi ⟨0⟩ xabar
+09bed8e26	🧹 Xabarlar o‘chirilmoqda, kuting...
+1f937217d	🧹 Tozalandi: ⟨0⟩.
+f6a3aa1c3	🧹 Tozalandi: ⟨0⟩ | ⟨1⟩
+ca1480b4e	📋 Ban ro‘yxati bo‘sh.
+3df0209e0	🚫 <b>Ban ro‘yxati</b> (oxirgi 20):
+a2ef54f04	📋 Ovozsizlar ro‘yxati bo‘sh.
+f3ad3e028	🔇 <b>Ovozsizlar ro‘yxati</b> (oxirgi 20):
+4d02c60e6	⟨0⟩ daq qoldi
+e9fa5b6c6	muddati o‘tgan
+50bd44457	Foydalanish: /antispam on|off
+aaf3e3fa7	Spam himoyasi ⟨0⟩!
+032f12948	⚙️ Spam himoyasi ⟨0⟩ | ⟨1⟩
+db5c288ba	Foydalanish: /wordban <so‘z>
+5ce049d2e	Noto‘g‘ri regex: ⟨0⟩
+382054e7a	'⟨0⟩' taqiqlangan so‘zlar ro‘yxatiga qo‘shildi!
+a061e639e	'⟨0⟩' allaqachon taqiqlangan!
+c690df9b8	Taqiqlangan so‘zlar tizimi yoqildi!
+a04bd920f	Taqiqlangan so‘zlar tizimi o‘chirildi!
+908cb2d50	Foydalanish: /setautoaccept on|off
+ad89cff79	Avto-qabul ⟨0⟩!
+8a77c7461	Foydalanish: /setautoreject on|off
+de72bc915	Avto-rad ⟨0⟩!
+f4661e0bb	Foydalanish: /setautorejectbot on|off
+4f2789f4b	Bot/soxta akkauntlarni rad etish ⟨0⟩!
+19f41bbbf	Hali taklif statistikasi yo‘q!
+8618c4bd5	📈 Taklif statistikasi:
+4dff67686	⟨0⟩: ⟨1⟩ a’zo
+fae5737f3	🚨 REYD ANIQLANDI!
+7b14ac650	⟨0⟩ a’zo / ⟨1⟩ soniya
+cf9fdec29	Guruh ⟨0⟩ daqiqaga qulflandi. Ochish: /unlockdown
+1124ad26d	🔒 Guruh ⟨0⟩ daqiqaga qulflandi: ⟨1⟩
+93ff62fcf	Guruh allaqachon qulflangan.
+0182255e2	🚨 Favqulodda qulf: ⟨0⟩
+121e5db73	🔒 Guruh ⟨0⟩ daqiqaga qulflandi. Hammuassis va undan yuqorilar /unlockdown bilan ochishi mumkin.
+2aadb84f8	Qulflab bo‘lmadi (bot ruxsatlarini tekshiring).
+aff77f945	✅ Reyd qulfi avtomatik olindi | ⟨0⟩
+8fcabef94	🔒 Hozir QULFLANGAN
+94a774e51	🔓 Ochiq
+376d9283f	🚨 Anti-reyd: ⟨0⟩
+8827355aa	Foydalanish: /antiraid on|off
+f0e5d75da	Limitni o‘zgartirish: /antiraid on 15 20 (15 a’zo/20 s)
+ecbb4a7da	🚨 Anti-reyd ⟨0⟩.
+4f3192d13	Limit: ⟨0⟩ a’zo / ⟨1⟩ soniya
+bdf82e0b3	🚨 Anti-reyd ⟨0⟩ | ⟨1⟩
+cc103ac23	Guruh qulflanmagan.
+374c81aa3	✅ Reyd qulfi olindi, guruhning avvalgi ruxsatlari qaytdi.
+2551f6fe1	✅ Reyd qulfi qo‘lda olindi | ⟨0⟩
+4918e916d	Xato: qulfni ochib bo‘lmadi (bot ruxsatlarini tekshiring).
+bce49f901	Profilni olib bo‘lmadi!
+9131de73e	Foydalanuvchi topilmadi!
+45e118d05	Oddiy
+0aaf03287	Banlangan
+bf84ddcb3	Ovozsiz (⟨0⟩ s ⟨1⟩ daq qoldi)
+08c52b8c6	Ovozsiz (⟨0⟩ daq qoldi)
+c5a6c0399	👤 <b>Foydalanuvchi profili</b>
+8359545a8	Ism: ⟨0⟩
+0fd8daf31	ID: <code>⟨0⟩</code>
+16d1a3d6f	Holat: ⟨0⟩
+c90e09fec	Ogohlantirishlar: ⟨0⟩/⟨1⟩
+c6a441715	(Oxirgi: ⟨0⟩)
+f7b55484b	So‘nggi amallar:
+245846708	tizim
+1ebb0f458	Moderatsiya amallari yo‘q.
+ea0db6b35	Taqiqlangan so‘zlar: ⟨0⟩
+67b2688cb	Taqiqlangan so‘zlar yo‘q.
+ab2a94371	Qo‘shish: /wordban <so‘z>
+bc50a233e	O‘chirish: ⟨0⟩
+ea1ef9198	Hammasini o‘chirish
+9e6ecd595	Yopish
+d4ff2fcbb	Taqiqlangan so‘zlar: ⟨0⟩
+1e892c51e	Jami: ⟨0⟩ so‘z
+d6c5bc3c9	O‘chirish uchun pastdagi tugmalardan foydalaning:
+3e285778b	YOQIQ
+86fc112e5	O‘CHIQ
+3b9e05b52	So‘zlar ro‘yxati yopildi.
+a9b768614	Barcha taqiqlangan so‘zlar o‘chirildi.
+baa6a8908	Barcha taqiqlangan so‘zlar o‘chirildi | ⟨0⟩
+f3b918935	Taqiqlangan so‘z o‘chirildi: ⟨0⟩ | ⟨1⟩
+09e3ab40d	Barcha so‘zlar o‘chirildi.
+4b153db82	Taqiqlangan so‘zlar: YOQIQ
+dbddb7434	Xabar yuborish
+399307b2e	Media yuborish
+17dec3f5f	Havola yuborish
+a6d462ad9	Fayl yuborish
+b80944077	Saqlash
+b0bd84b1e	Bekor qilish
+eec2005a5	Avval /select bilan kanal tanlang!
+056d48fa9	Tungi rejim qo‘lda yoqildi.
+aad062b54	Tungi rejim qo‘lda o‘chirildi.
+511a5144a	Tungi rejim soatlari belgilandi:
+cb1460461	Boshlanishi: ⟨0⟩:⟨1⟩
+771bcaf96	Tugashi: ⟨0⟩:⟨1⟩
+7989dd84a	Cheklovlarni sozlash: /nightmod
+79514002a	Format xatosi. Foydalanish: /nightmod 23:00 07:00
+204b48fc8	Sozlash (shaxsiy)
+42031a2a7	Tungi rejim birinchi marta ishlatilmoqda! Sozlash uchun botga shaxsiy xabar yozing:
+89f29d42a	Faol
+3de48344f	Nofaol
+de1f5c130	Tungi rejim: ⟨0⟩ (⟨1⟩)
+b1d3baa6d	Soatlar: ⟨0⟩:⟨1⟩ - ⟨2⟩:⟨3⟩ (UTC+3)
+b5356dbcd	Cheklanadigan ruxsatlarni tanlang va Saqlash tugmasini bosing:
+bc2943e26	🌙 Tungi rejim boshlandi. Cheklovlar ertalab soat ⟨0⟩:⟨1⟩ gacha amal qiladi.
+86a8a2d6d	Tungi rejim yoqildi | ⟨0⟩
+2a8fea2da	☀️ Tungi rejim tugadi. Odatiy ruxsatlar tiklandi.
+19d0c7302	Tungi rejim tugadi | ⟨0⟩
+5f5e93020	Tungi rejim sozlamasi bekor qilindi.
+9ca4e6abd	Media
+c0ceeb976	Ovozli/video xabarlar
+d0517071a	Havola
+02c5387be	Hech qanday cheklov tanlanmadi
+8c6724096	Tungi rejim saqlandi!
+4c2f064b0	Cheklovlar: ⟨0⟩
+ec5110d51	Soatlarni sozlash: /nightmod 23:00 07:00
+015f290e6	Tungi rejim sozlandi | ⟨0⟩
+a6ff502b6	⟨0⟩ Vaqtinchalik ban tugadi, lekin bandan chiqarib bo‘lmadi: <code>⟨1⟩</code>
+09caa25fa	⟨0⟩ Vaqtinchalik ban tugadi → ⟨1⟩ bandan chiqarildi
+45cdd1bd7	🔗 Havola
+a70e468cd	Havola, yashirin (ichki) havola va havola tugmalari bor xabarlar o‘chiriladi.
+a0c63db58	🔤 Taqiqlangan so‘z
+09f922f95	Ro‘yxatdagi so‘zlar turk harflari, katta/kichik harf va leetspeak bilan ham aniqlanadi.
+58c8ebdab	🔁 Takroriy spam
+61bbb7e24	60 s ichidagi oxirgi 10 xabarning ko‘pi bir xil bo‘lsa, bu spam.
+a8ee9b9f5	Qisqa vaqtda limitdan ko‘p xabar.
+93442a52b	Boshqa chatlardan forward qilingan xabarlar.
+4592320db	🖼 Media flood
+b65eef3f3	Qisqa vaqtda limitdan ko‘p rasm/video/stiker.
+32d0d473e	🔞 Nomaqbul media
+cf1a8e3ca	Porno/yalang‘ochlik (SI o‘rnatilgan bo‘lsa), bloklangan media va stiker to‘plamlari, xavfli fayllar (.apk, .exe…).
+353ad5e39	O‘chirish
+a79d71fbf	Ogohlantirish
+229c67bd8	Ovozsiz qilish
+0855009c4	Chiqarib yuborish
+7f3fcf8f1	Ban
+bd3c8d60c	Vaqtinchalik ban
+7c65bba4a	⟨0⟩ xabar
+5df501398	⟨0⟩ s
+cf6293e00	⟨0⟩ media
+637c7d4eb	⟨0⟩ a’zo
+2a687b503	⟨0⟩ kishi
+2dd4cbf18	⟨0⟩ amal/soat
+d507ef055	Xabarlar
+cc9e030d6	Ovozli/video xabarlar
+1949df42c	Havola ko‘rinishi
+01674713d	Fayl/musiqa
+0a4ef3c95	✏️ Yangi xush kelibsiz xabarini yozing yoki rasm/video/GIF yuboring (izohi xabar bo‘ladi).
+a5e32e95a	Tugmalar: har qatorda bitta  Matn - https://havola  (yonma-yon: && bilan)
+1ee44f2e2	O‘zgaruvchilar: {user} {first} {username} {group} {count} · Tasodifiy: xabarlarni %%% qatori bilan ajrating
+989ac76ce	Xush kelibsiz, {user}!
+f4b119f84	✏️ Xayrlashuv xabarini yozing (media va tugmalar ham bo‘ladi). O‘zgaruvchilar: {first} {user} {group}
+3fffcf251	👋 {name} bizni tark etdi.
+e32be930c	📜 Guruh qoidalarini yozing. Formatlash (qalin, havola) va tugmalar saqlanadi.
+8a546a91a	1) Hurmat qiling  2) Reklama yo‘q
+369899a51	📢 Majburiy kanalni yozing: @channel, t.me/channel yoki -100… ID. Bot u yerda admin bo‘lishi kerak.
+ffb95707b	@channel
+0bf3f943d	⏰ Avval oraliqni, keyin xabarni yozing. Masalan: 6h Qoidalarni o‘qishni unutmang!
+b7be418c7	Oraliq: 30m, 6h, 1d · Media uchun rasm izohiga yozing.
+dafcc65fa	6h Xabar
+c1e570e92	🔤 Taqiqlanadigan so‘zlarni yozing (har qatorda bitta). Regex uchun boshiga re: qo‘ying
+2038b8200	so‘zlar
+8031790fb	🔗 Ruxsat etiladigan domenlarni yozing (bo‘sh joy bilan ajrating). Masalan: youtube.com t.me/mychannel
+dd20fa7d1	📝 Eslatmani shunday yozing: nom matn
+750db2552	rules Guruh qoidalari...
+2f50f0128	🧾 Log kanal/guruh ID’sini yozing (masalan -1001234567890). Bot u yerga yoza olishi kerak.
+0a89e21a0	🛟 Ishonchli odamning ID’sini yozing (u botga /id yuborib bilib oladi).
+678669669	O‘chiq
+5e05f56cb	⬅️ Orqaga
+3425aebce	🛡 <b>Himoya</b> — ⟨0⟩
+a9aa38570	Himoyani yoqish/o‘chirish, jazo va limitlarini sozlash uchun ustiga bosing.
+dfc009e83	⟨0⟩ <b>himoyasi</b> — ⟨1⟩
+196e11b00	Jazo: <b>⟨0⟩</b>
+3b58939e6	(limit ⟨0⟩ → ⟨1⟩)
+e882e3937	Ortib boruvchi ovozsizlik: 10 daq → 30 daq → 5 soat
+10d361785	Himoya ⟨0⟩
+a92c81c26	🔗 Ruxsat etilgan havolalar ›
+05bd7ca2c	🔤 So‘zlar ro‘yxati ›
+7bb491e04	🚪 <b>Qo‘shilish</b> — ⟨0⟩
+a956dd268	• <b>Kapcha</b>: yangi a’zo matematik savolni yechmaguncha guruhda yoza olmaydi.
+29aad6032	• <b>Shaxsiy tekshiruv</b>: bot qo‘shilish so‘rovi yuborganlarga shaxsiy xabarda savol beradi; to‘g‘ri javob berganlar avtomatik qabul qilinadi. Guruhda «Yangi a’zolarni tasdiqlash» yoqilgan va botda taklif qilish ruxsati bo‘lishi kerak.
+d33b884be	Kapcha (guruhda)
+6fe48b7bb	Shaxsiy tekshiruv
+34c8b8ee3	Avto-qabul
+747e46068	Avto-rad
+eb973fe6c	Botlar / username’siz foydalanuvchilarni rad etish
+371ffa7fa	Username’siz yangi a’zolarni ovozsiz qilish
+22be1b04d	🚨 Anti-reyd ›
+df3d708d0	🆕 Yangi a’zo cheklovi ›
+119163a69	🚨 <b>Anti-reyd</b> — ⟨0⟩
+3d6f3a6ef	Belgilangan vaqt ichida limitdan ko‘p a’zo qo‘shilsa, guruh ⟨0⟩ daqiqaga qulflanadi, so‘ng avvalgi ruxsatlar tiklanadi.
+12e3f2f5a	🔒 Qulflangan
+78047dc1b	Anti-reyd
+5ebba95e7	🔓 Hozir ochish
+80ea856ce	🆕 <b>Yangi a’zo cheklovi</b> — ⟨0⟩
+983dcd824	Yangi a’zolar belgilangan vaqt davomida havola, media yoki forward yubora olmaydi (xabar o‘chiriladi va ogohlantirish ko‘rsatiladi).
+b55881f2f	⚠️ <b>Ogohlantirishlar</b> — ⟨0⟩
+979ac1fa7	«Ogohlantirish» jazoli himoyalar va /warn ogohlantirish beradi; limitga yetilganda tanlangan jazo qo‘llanadi.
+cd70c61ed	Hozir: <b>⟨0⟩</b> ogohlantirish → <b>⟨1⟩</b>
+e72447e76	Ogohlantirish limiti
+a380d0c65	Jazo muddati
+c601b3f5f	Himoya ovozsizligi
+6a05e68f4	🌙 <b>Tungi rejim</b> — ⟨0⟩
+9ca9fb409	Holat: <b>⟨0⟩</b>⟨1⟩
+d772b08c3	Soatlar: <b>⟨0⟩:⟨1⟩ – ⟨2⟩:⟨3⟩</b> (UTC+3)
+145d44a73	Tanlangan ruxsatlar shu soatlarda o‘chiriladi va keyin tiklanadi.
+4a4847e71	(hozir faol)
+ed1a5ae4e	Tungi rejim
+58910c4c5	Boshlanishi ⟨0⟩:⟨1⟩
+8e87dff1c	Tugashi ⟨0⟩:⟨1⟩
+586001e9d	🔗 <b>Ruxsat etilgan havolalar</b> — ⟨0⟩
+53a0c084e	Bu domenlar havola himoyasidan mustasno (subdomenlar bilan). Jami: ⟨0⟩
+0aa28d421	O‘chirish uchun bosing.
+c619b874d	➕ Qo‘shish
+20540dbc7	<b>Barcha taqiqlangan so‘zlar o‘chirilsinmi?</b>
+b12c1611e	🔤 <b>Taqiqlangan so‘zlar</b> — ⟨0⟩
+cbdf733da	Filtr: <b>⟨0⟩</b> · Jami: ⟨1⟩
+acb2cf3c1	So‘z filtri
+9de026dc8	🧹 Hammasini o‘chirish
+866ffe59a	📝 <b>Eslatmalar</b> — ⟨0⟩
+8488244a4	Guruhda <code>#nom</code> yozilsa, eslatma ko‘rsatiladi. Jami: ⟨0⟩
+6e5864d9f	➕ Eslatma qo‘shish
+64d1a5476	🧩 <b>Filtrlar</b> — ⟨0⟩
+75e34f897	Guruhda kalit so‘z yozilsa, bot javob beradi. Jami: ⟨0⟩
+c8063c80c	Qo‘shish uchun guruhda: <code>/filter</code> · O‘chirish uchun bosing.
+7cb292fe4	🧾 <b>Log kanali</b> — ⟨0⟩
+399fb6ff5	Barcha moderatsiya yozuvlari shu yerga yuboriladi.
+6a7bdfba4	Hozir: <code>⟨0⟩</code>
+e76134e13	Faqat guruh egasi o‘zgartira oladi.
+d92dcb23a	✏️ Log kanalini belgilash
+c62c45415	🗑 Olib tashlash
+512ba4fe4	🚨 Reyd
+07210c024	⚙️ <b>⟨0⟩ — Guruh sozlamalari</b>
+9006cb8f1	🛡 Faol himoyalar: ⟨0⟩
+16ccea6ec	🚪 Kapcha: ⟨0⟩ · Shaxsiy tekshiruv: ⟨1⟩
+cc096b5a7	⚠️ Ogohlantirishlar: ⟨0⟩ → ⟨1⟩
+06292addb	🌙 Tungi rejim: ⟨0⟩
+e5044a295	🛡 Himoya
+82a6a709d	🌙 Tungi rejim
+2eed1225e	🔗 Havolalar
+d38c4e47a	🔤 So‘zlar
+6828b98dc	🧩 Filtrlar
+7956a13a3	⏰ Rejalashtirilgan xabar
+81bddc593	🏷 Belgilash
+5961a42e8	✏️ Tahrirlar va shikoyatlar
+1ff65156a	🧾 Log kanali
+f1a57e125	🌐 Guruhlar tarmog‘i
+f5c96387f	🛟 Tiklash
+5244ca690	🌍 Til: ⟨0⟩
+1bd24917c	✖️ Yopish
+e38a49a6f	Kanal himoyasi sozlamalari
+f81ca3a77	Bu sozlamani faqat guruh asoschisi o‘zgartira oladi.
+4081e665c	Noto‘g‘ri sozlama
+ce432606a	✅ Yoqildi
+ca037fcc4	❌ O‘chirildi
+a006b158d	⚙️ ⟨0⟩ jazosi → ⟨1⟩ | ⟨2⟩
+0ebfd3ac6	Jazo: ⟨0⟩
+286a11648	Limit jazosi: ⟨0⟩
+c32110889	Ro‘yxat o‘zgardi, yangilandi
+cf6b53ca2	🗑 ⟨0⟩ o‘chirildi: ⟨1⟩ | ⟨2⟩
+64e48562d	Ruxsat etilgan havola
+ed6b18d70	🗑 ⟨0⟩ o‘chirildi
+36a8cc3d4	🧹 Barcha taqiqlangan so‘zlar o‘chirildi | ⟨0⟩
+5db717ed8	Barcha so‘zlar o‘chirildi
+0f2ad553f	Filtr o‘chirildi
+3247c21b8	🌙 Tungi rejim ⟨0⟩
+672441418	yoqildi
+ba4dc20d1	o‘chirildi
+d3d694451	Saqlandi
+95bf688eb	Log kanali olib tashlandi
+e413c4b9e	Qoidalar o‘chirildi
+0f514bbde	✅ Reyd qulfi paneldan olindi | ⟨0⟩
+8e6a20f22	🔓 Ochildi
+f5014f259	Ochib bo‘lmadi (bot ruxsatlari?)
+7f0e2a142	Guruh topilmadi.
+f41c17d41	Bu paneldan foydalanish uchun guruhda admin bo‘lishingiz kerak.
+8213d6575	<i>Bekor qilish: cancel</i>
+1465f36fd	Javobingizni ochilgan xabarga javob qilib yozing.
+3035a6b30	⏰ Vaqt tugadi, paneldan qayta urinib ko‘ring.
+18363eae4	Bekor qilindi.
+3a22b8f74	❌ Qoidalar bo‘sh bo‘lishi mumkin emas.
+fa98ef9b6	Xush kelibsiz xabari
+a9e0c5b00	✏️ ⟨0⟩ yangilandi | ⟨1⟩
+074e8897f	✅ ⟨0⟩ yangilandi (⟨1⟩). Paneldagi 👁 Oldindan ko‘rish bilan tekshirishingiz mumkin.
+4f4799ddf	✅ Majburiy kanal yoqildi: <b>⟨0⟩</b>
+9dc44c973	❌ Xabarni oraliqdan keyin yozing. Masalan: <code>6h Qoidalarni o‘qing!</code>
+564247ab5	✅ Rejalashtirilgan xabar #⟨0⟩: har ⟨1⟩.
+390237a11	✅ ⟨0⟩ so‘z qo‘shildi, so‘z filtri yoqildi.
+28ebadbf6	❌ Noto‘g‘ri regex: ⟨0⟩
+8d642d759	✅ ⟨0⟩ domen qo‘shildi.
+f6b268d0d	❌ Format: <code>nom matn</code> (nom: harf, raqam, - yoki _)
+1b6abf7f2	✅ Eslatma saqlandi: <code>#⟨0⟩</code>
+d872c76cd	Log kanalini faqat guruh egasi o‘zgartira oladi.
+1731f9a98	❌ Noto‘g‘ri ID. Misol: <code>-1001234567890</code>
+e84190fc5	✅ ULUS log kanali ulandi: ⟨0⟩
+9d4e14027	❌ Bu chatga xabar yubora olmayman. ⟨0⟩
+d8947ff95	✅ Log kanali belgilandi.
+7f9f8fabc	Noma’lum amal.
+c3ecef83d	s
+e3a725f35	Faqat a’zolar
+fb155ed20	A’zolar + adminlar
+5e998efe4	A’zolar + adminlar + katta adminlar
+431e199fa	Asoschidan boshqa hamma
+8b3606b03	🤖 SI tekshiruvi⟨0⟩
+2abda5f05	(o‘rnatilmagan)
+af96fe25f	📦 Xavfli fayllar (.apk .exe …)
+c977dbc41	🔒 Hujum paytida avtomatik media qulfi
+1c409b726	Qulf muddati
+e4b73af2e	🚫 Bloklangan media ro‘yxati ›
+a5265e3d7	🔓 Media qulfini olish
+c1a903ce0	🔒 Mediani hozir qulflash
+678507459	yoqiq
+c293fc85c	o‘chiq
+8dd94c76e	o‘rnatilmagan (serverda: <code>pip install nudenet</code>)
+043b96df1	🔒 Media qulfi ⟨0⟩ gacha faol
+059a31b37	SI tekshiruvi: ⟨0⟩
+c77da8b2d	Bloklash uchun mediaga <code>/blockmedia</code> bilan javob bering · stiker to‘plami: <code>/blockpack</code>⟨0⟩
+a54dfcd87	🚫 <b>Bloklangan media</b> — ⟨0⟩
+b1fe46387	Xuddi shu media qayta yuborilsa o‘chiriladi. Jami: ⟨0⟩
+2d00f3347	Olib tashlash uchun bosing. Qo‘shish: mediaga <code>/blockmedia</code> bilan javob bering
+0c575feaa	✏️ <b>Tahrirlar va 🚩 shikoyatlar</b> — ⟨0⟩
+fe3d0969d	• <b>Kech tahrir himoyasi</b>: yuborilgandan ⟨0⟩ daqiqadan keyin tahrirlangan xabar o‘chiriladi; eski va yangi variantlar guruh asoschisiga va botni qo‘shgan odamga shaxsiy xabarda yuboriladi (ular botni shaxsiy chatda ishga tushirgan bo‘lishi kerak).
+48166d583	• <b>Shikoyatlar</b>: a’zolar xabarga <code>/report</code> yoki <code>@admin</code> bilan javob beradi; adminlar tugmali bildirishnoma oladi.
+9a9d43302	👥 Kimga qo‘llanadi: <b>⟨0⟩</b> (o‘zgartirish uchun tugmani bosing; faqat asoschi)
+60543a144	Kech tahrir himoyasi
+2719eae25	👥 Kimga qo‘llanadi: ⟨0⟩
+8173539b7	Muddat
+a95a8ac50	Asoschi/qo‘shgan odamga xabar berish
+337b927c6	Shikoyat tizimi
+283ea618d	🌍 <b>Til</b> — ⟨0⟩
+ecfd0b504	Botning bu guruhdagi xabarlari, tugmalari va ogohlantirishlari tanlangan tilda bo‘ladi. Siz yozgan xush kelibsiz, qoidalar va eslatmalar o‘zgarmaydi.
+b04edf4df	👮 <b>Adminlar auditi</b> — ⟨0⟩
+46926b2fa	• <b>Kundalik xulosa</b>: har kechqurun asoschi va botni qo‘shgan odam kim nechta ban, ovozsizlik, ogohlantirish va o‘chirish qilganini oladi.
+9e35dc551	• <b>Amal limiti</b>: asoschi bo‘lmagan admin 1 soatda ⟨0⟩ tadan ko‘p ban/chiqarish/ovozsizlik qilsa, huquqlari to‘xtatiladi va sizga tugmali xabar keladi (banlarini bir bosishda bekor qilish mumkin).
+dbc65734d	• <b>O‘chirilgan xabarlar jurnali</b>: /del va /purge bilan o‘chirilgan xabarlar log kanaliga nusxalanadi. (Telegram ilovada qo‘lda o‘chirilgan xabarlar haqida botlarga xabar bermaydi.)
+fef769989	Darhol xulosa: <code>/audit 7</code> · Xabar tarixi: xabarga <code>/edits</code> bilan javob bering
+5d565355a	To‘xtatilgan adminlar: ⟨0⟩
+fbe3b7863	Bu sozlamalarni faqat asoschi o‘zgartira oladi.
+011f51955	Kundalik admin xulosasi
+f8f216c2d	Admin amal limiti
+c1017ac8a	Limit
+75d76fc04	O‘chirilgan xabarlarni log kanaliga nusxalash
+b91937b6d	🌐 <b>Guruhlar tarmog‘i</b> — ⟨0⟩
+e26434728	Bu guruh ⟨0⟩ tarmog‘ida (⟨1⟩ guruh):
+4515b950e	Ban sinxronizatsiyasi yoqilgan ekan, bir guruhda ban olgan odam tarmoqdagi barcha guruhlarda ban qilinadi (chiqarish emas); ban olinganda hamma joyda olinadi.
+2a41a6019	Ban sinxronizatsiyasi
+7b9394ab7	📋 So‘z va havola ro‘yxatlarini tarmoqqa nusxalash
+35c1578b6	⚙️ Himoya sozlamalarini tarmoqqa nusxalash
+a0ec7c7bd	➖ Bu guruhni tarmoqdan chiqarish
+db918b20f	Bu guruh tarmoqda emas. Boshqaradigan guruhlaringizni tarmog‘ingizga qo‘shsangiz, banlar hammasiga tarqaladi va sozlamalarni bir bosishda nusxalashingiz mumkin. (Asoschi / hammuassis kerak.)
+e44c5b572	➕ Bu guruhni tarmog‘imga qo‘shish
+fe6b211f8	⟨0⟩ (⟨1⟩ ta admin)
+1c979a8ff	hali yo‘q
+9f41d74fa	🛟 <b>Adminlarni tiklash</b> — ⟨0⟩
+62477adfc	Adminlar ro‘yxati har 6 soatda saqlanadi. Kimdir qisqa vaqtda 3+ adminning huquqlarini olsa, adminlar va ishonchli odamlar tiklash tugmali ogohlantirish oladi. Ishonchli odamlar botga shaxsiy xabarda <code>/recover</code> yuborib adminlarni tiklashi mumkin.
+092c6482f	Oxirgi nusxa: ⟨0⟩
+ba8991412	Ishonchli odamlar (⟨0⟩/3) — olib tashlash uchun bosing:
+5729ee3a9	➕ Ishonchli odam qo‘shish
+72e9b014a	Avtomatik tiklash
+cdfef870d	📸 Hozir saqlash
+521787de8	♻️ Tiklash ›
+c578b31d8	Nusxa topilmadi.
+b5e5e7de1	Noto‘g‘ri til
+a85ca0330	Buni faqat guruh asoschisi o‘zgartira oladi.
+43ce9c01e	✏️ Tahrir himoyasi doirasi: ⟨0⟩ | ⟨1⟩
+446ff86ee	Kimga qo‘llanadi: ⟨0⟩
+59e922883	🔒 Media qulflandi
+dd43607b8	Qulflab bo‘lmadi (reyd qulfi yoki bot ruxsatlari)
+650f54e0c	🔓 Media qulfi olindi
+a6220f5d4	Qulf allaqachon o‘chiq
+1d4e3c6c4	Blok olib tashlandi
+de91565ff	Tarmoqqa qo‘shish uchun shu guruh asoschisi bo‘lishingiz kerak.
+6b85bac2e	🌐 Guruh ⟨0⟩ tarmog‘iga qo‘shildi
+6c4e9120a	Tarmoqqa qo‘shildi
+b605b46d7	Bu guruh tarmoqda emas
+4f36e2321	Tarmoqdan chiqarildi
+bd4ac87bb	Buni faqat tarmoq egasi qila oladi.
+f9a34a2ad	Ban sinxronizatsiyasi ⟨0⟩
+78a09a0ea	🌐 Sozlamalar tarmoqdagi ⟨0⟩ guruhga nusxalandi | ⟨1⟩
+eacfa093c	⟨0⟩ guruhga nusxalandi
+c39c747b1	Tiklash sozlamalarini faqat asoschi o‘zgartira oladi.
+95e917987	Olib tashlandi
+87f3326f9	📸 Saqlandi
+49c866e1e	Saqlab bo‘lmadi (bot adminmi?)
+b13ed05bb	♻️ ⟨0⟩ admin tiklandi⟨1⟩
+8670a3a46	, ⟨0⟩ ta xato
+c3b595125	Ishonchli odamni faqat asoschi qo‘sha oladi.
+32cb829ea	❌ Odam topilmadi. Uning foydalanuvchi ID’sini yozing (u botga /id yuborib bilib oladi).
+89f663ce6	Ko‘pi bilan 3 ta ishonchli odam qo‘shish mumkin.
+dfe9ba864	✅ ⟨0⟩ ishonchli odam sifatida qo‘shildi. U botni shaxsiy chatda ishga tushirgan bo‘lishi kerak.
+a4167566b	Avval /select bilan guruh tanlang!
+2ba2862f6	guruh
+3fca554f2	odamlar
+ffd1ee882	📝 qoralama
+4bf27d98f	⏰ rejalashtirilgan
+4c10fb3fc	📤 yuborilmoqda
+2467aa607	✅ tayyor
+578b9744b	❌ bekor qilindi
+71db82dfe	Vaqtni shunday yozing: -time 20:00
+c3cd977ee	Shablon nomini shunday yozing: /broadcast -save yangilanish "xabar"
+530791023	qabul qiluvchi yo‘q
+9a2c72e2d	🔕 E’lonlarni o‘chirish
+9f242a754	🗳 Hali ovoz yo‘q
+37e3719ed	🗳 ⟨0⟩ ovoz: ⟨1⟩
+186e99c6e	✅ <b>E’lon #⟨0⟩ yakunlandi</b>
+53acfe01d	⏹ <b>E’lon #⟨0⟩ to‘xtatildi</b>
+8fa7a67a9	📊 ⟨0⟩/⟨1⟩ ishlandi
+6b12880d0	✅ Yetkazildi: <b>⟨0⟩</b>
+ddb6da67b	🚫 Botni bloklagan / ishga tushirmagan: ⟨0⟩ (keyingi e’lonlarda o‘tkazib yuboriladi)
+814224bfc	⚠️ Yuborib bo‘lmadi (bot chiqarilgan / ruxsat yo‘q): ⟨0⟩
+d4d2773cb	📌 Qadalgan: ⟨0⟩
+53ffa3f09	👆 Tugma bosishlari /broadcasts da ko‘rinadi
+0d709ac7c	🗳 So‘rovnoma natijalari /broadcasts da ko‘rinadi
+dd370224e	To‘xtatish: /stopbroadcast
+be085c333	📢 <b>E’lon</b>
+0b7be0b19	<code>/broadcast "xabar"</code> — guruhlar + kanallar
+1e622cf6b	<code>/broadcast -users "xabar"</code> — botdan shaxsiy foydalanadiganlar
+25a35b0aa	<code>/broadcast -users -channels "xabar"</code> — odamlar + kanallar (birlashtirish mumkin)
+0b87fef23	<code>/broadcast all "xabar"</code> — hammaga
+bc83a4f15	Parametrlar: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (oxirgi 7 kun; <code>-active 30</code>) · <code>-test</code> (faqat sizga) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+1aca894ba	🎯 Oldindan ko‘rishda aniq guruh/kanallarni tanlashingiz mumkin.
+9fa263da2	🗳 So‘rovnoma: <code>/broadcast -poll -users "Savol?
+735ec279d	Variant 1
+98805337f	Variant 2"</code> — barcha ovozlar bitta so‘rovnomada yig‘iladi
+aaa59ea0d	💾 Shablon: <code>/broadcast -save nom "xabar"</code> → <code>/broadcast -users #nom</code> · /templates
+a3caa1df0	💡 Agar xabarga (rasm, video, tugmali yoki premium emojili) <code>/broadcast -users</code> bilan javob bersangiz, o‘sha xabar o‘zgarishsiz yuboriladi. Matnda tugma qatorlarini ham yozish mumkin: <code>Kanal - https://t.me/channel</code> (bosishlar sanaladi)
+fb071e726	/broadcasts — tarix, bosishlar, so‘rovnoma natijalari · /stopbroadcast — yuborishni to‘xtatish
+344eb221b	⚠️ Telegram premium emojilarni oddiy emojiga aylantirdi (botlar premium emojini yozib yubora olmaydi). Yechim: xabarni o‘zingiz yozing va unga /broadcast bilan javob bering — nusxalangan xabarda saqlanadi.
+f87763b78	👆 <b>E’lon #⟨0⟩ oldindan ko‘rish</b>
+3790c85e6	🎯 Qabul qiluvchilar: ⟨0⟩
+d46292455	🔥 Faqat oxirgi ⟨0⟩ kunda faol bo‘lganlar
+019c9cc1b	✅ Tanlangan guruh/kanallar: ⟨0⟩
+14d962307	👤 Odamlar: botdan shaxsiy foydalanadiganlar; Telegram guruhlarda ko‘rilgan, lekin botni ishga tushirmagan odamlarga yozishga ruxsat bermaydi (bir marta urinib, keyin o‘tkazib yuboriladi).
+f7bcd6c82	⏱ Taxminiy vaqt: ~⟨0⟩ s
+aaca2bf64	⏰ Yuborish vaqti: ⟨0⟩
+4046d6be5	📌 Guruh va kanallarda qadaladi
+c3eded236	🔕 Ovozsiz
+cffb2a880	👆 Tugma bosishlari sanaladi
+251fac5c6	🗳 So‘rovnoma forward qilinadi; ovozlar shu so‘rovnomada yig‘iladi
+ba70fe09b	⏰ Rejalashtirish
+8241e1495	✅ Yuborish
+86f2e67ab	❌ Bekor qilish
+d53523fb6	Yuboradigan hech kim yo‘q.
+2882de09f	🎯 Guruh/kanallarni tanlash
+78f17fac4	❌ Yopish
+e6b5975cd	◀️ Oldingi
+b84641c59	Keyingi ▶️
+9a4dab900	🔄 Tanlovni tozalash
+6044624ae	✅ Tayyor
+786000738	🎯 <b>E’lon #⟨0⟩: guruh/kanallarni tanlang</b> (sahifa ⟨1⟩/⟨2⟩)
+8273973d4	Tanlangan: <b>⟨0⟩</b> — hech biri tanlanmasa, hammaga yuboriladi.
+0b988bbef	Bu buyruqdan faqat bot egasi foydalana oladi!
+4b64d112c	Shablon uchun xabar yozing yoki xabarga javob bering.
+9cc026c97	💾 Shablon saqlandi: #⟨0⟩
+12933b18c	Foydalanish: /broadcast -users #⟨0⟩
+dcba9eba6	#⟨0⟩ nomli shablon yo‘q. Ro‘yxat: /templates.
+c3b81b13d	So‘rovnomani shunday yozing:
+185c6d7a9	/broadcast -poll -users "Savol?
+27ced0bf8	Variant 2"
+9de509dc5	So‘rovnoma yaratib bo‘lmadi: ⟨0⟩
+e8c8a3987	🧪 Sinov so‘rovnomasi faqat sizga yuborildi.
+f6c39b561	Sinovni yuborib bo‘lmadi: ⟨0⟩
+3ccbd9c93	🧪 Sinov e’loni faqat sizga yuborildi.
+305ee0f9a	(shaxsiy)
+cb34b252b	Oldindan ko‘rishni yuborib bo‘lmadi: ⟨0⟩
+68aa08ebf	🔕 E’lonlar o‘chirildi. Qayta yoqish: /subscribe
+ead4b09a2	🗑 O‘chirildi
+6fc68153b	Ruxsat yo‘q yoki noto‘g‘ri.
+5027629e8	Bu e’lon allaqachon ishlangan.
+1b315a09e	⏰ E’lon #⟨0⟩ rejalashtirildi: ⟨1⟩
+08d8e26cc	Uni /broadcasts da ko‘rishingiz mumkin.
+d236ce6c8	📤 E’lon #⟨0⟩ yuborilmoqda…
+e15ad036b	Bekor qilindi
+8c0a53753	❌ E’lon #⟨0⟩ bekor qilindi.
+32ff8287a	Rejalashtirilmagan.
+95d0599f3	⏹ To‘xtatilmoqda…
+a96302489	Hozir yuborilmayapti.
+7afa989da	📢 Hali e’lonlar yo‘q.
+b0b0b34ae	📢 <b>So‘nggi e’lonlar</b>
+a2148c2a7	🗳 so‘rovnoma
+771c7f3fb	👆 ⟨0⟩ bosish⟨1⟩
+8139aea8f	(⟨0⟩ kishi)
+71fc8c6a3	❌ #⟨0⟩ ni bekor qilish
+6b91bce73	⏹ #⟨0⟩ ni to‘xtatish
+55b4c1882	💾 Saqlangan shablonlar yo‘q.
+4dc8bf919	Saqlash: <code>/broadcast -save nom "xabar"</code> yoki xabarga <code>/broadcast -save nom</code> bilan javob bering
+a5f43a44d	💾 <b>E’lon shablonlari</b>
+bd5b7fec5	📋 nusxalangan xabar
+8ebf8c6d8	Foydalanish: <code>/broadcast -users #nom</code>
+d9ecd93d0	⏹ E’lon to‘xtatilmoqda…
+e6989213d	Hozir hech qanday e’lon yuborilmayapti.
+1d2937461	🔔 E’lonlar yoqildi.
+b75b13003	➕ <b>Meni yangi ⟨0⟩ ga qo‘shishdi</b>
+862253052	· ⟨0⟩ a’zo
+7171ced0d	👤 Qo‘shgan: ⟨0⟩⟨1⟩
+b0c699f59	🔐 Admin
+7505ec5cf	⚠️ Hali admin emasman (24 soatdan keyin eslatma yuboriladi)
+93e256834	➖ <b>Meni chiqarishdi:</b> ⟨0⟩
+f6cedb404	👤 Chiqargan: ⟨0⟩ · <code>⟨1⟩</code>
+545d22c19	⚠️ Men hali ham <b>⟨0⟩</b> da admin emasman, shuning uchun himoya ishlamayapti.
+e7c66ff8b	Guruh sozlamalari → Administratorlar → Admin qo‘shish → @⟨0⟩ (xabarlarni o‘chirish va foydalanuvchilarni cheklash yetarli) yoki pastdagi tugmadan foydalaning.
+519fdb65c	⚡ Meni admin qiling
+977c42cf0	📈 <b>⟨0⟩ haftalik hisoboti</b> (⟨1⟩ – ⟨2⟩)
+075c08a00	👥 Guruhlar: <b>⟨0⟩</b> · 📢 Kanallar: <b>⟨1⟩</b>
+626db2ea3	➕ Qo‘shildi: <b>⟨0⟩</b> · ➖ Chiqarildi: <b>⟨1⟩</b>
+3b300252b	👤 Shaxsiy foydalanuvchilar: <b>⟨0⟩</b> (shu hafta +⟨1⟩)
+8ebb70df7	💬 Xabarlar: <b>⟨0⟩</b>⟨1⟩ · faol odamlar: <b>⟨2⟩</b>
+179fe6c75	🚪 Guruhlarga qo‘shildi: <b>⟨0⟩</b> · chiqdi: <b>⟨1⟩</b>
+171919cd0	🆕 <b>Yangi chatlar</b>
+8298e9706	… va yana ⟨0⟩ ta
+7ba765796	🏆 <b>Eng faol guruhlar</b>
+03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ xabar
+57d75c0ab	🛠 Bot qisqa texnik xizmatda; tez orada qaytadi. Himoyalar ishlamoqda.
+fc94758f1	🛠 Texnik xizmat rejimi <b>yoqiq</b>⟨0⟩
+588994912	— ⟨0⟩ da tugaydi
+35ea18ef8	✅ Texnik xizmat rejimi o‘chiq
+e1a334ce2	(muddatsiz)
+e7103f4b6	<code>/maintenance 30</code> — 30 daqiqa · <code>/maintenance on</code> — muddatsiz · <code>/maintenance off</code>
+c05840eb1	Guruhlarga qisqa xabar yuborish uchun oxiriga <code>-duyur</code> qo‘shing.
+fe8a047fd	Texnik xizmat paytida buyruqlar va tugmalar hamma uchun (sizdan tashqari) o‘chiriladi; spam, havola, flood va kapcha kabi himoyalar ishlashda davom etadi.
+9fd9dff45	✅ Texnik xizmat rejimi o‘chirildi.
+280c2df8e	Texnik xizmat rejimi allaqachon o‘chirilgan.
+a476c76e4	✅ Texnik xizmat tugadi, bot to‘liq ishlamoqda.
+5a2d5c21d	🛠 Texnik xizmat rejimi yoqildi, avtomatik o‘chish vaqti: ⟨0⟩.
+321af0468	🛠 Texnik xizmat rejimi yoqildi (muddatsiz). O‘chirish uchun: /maintenance off
+81851cbcd	Foydalanish: /maintenance 30 · /maintenance on · /maintenance off
+0d8f36bae	Buyruqlar va tugmalar hamma uchun (sizdan tashqari) o‘chirilgan; himoyalar ishlamoqda.
+0e64031cc	/invite guruhda ishlatiladi: sizga shaxsiy taklif havolasini beradi va siz olib kelgan odamlarni sanaydi.
+882848490	Bu guruhda taklif tanlovi o‘chirilgan.
+b5811c1fa	Taklif havolasini yarata olmadim: menga "foydalanuvchilarni taklif qilish" huquqi kerak.
+c2dee7686	Taklif havolasini yarata olmadim, birozdan keyin qayta urinib ko‘ring.
+24b1d9ce7	🔗 ⟨0⟩, sizning taklif havolangiz:
+1dafe45ec	👥 Siz olib keldingiz: <b>⟨0⟩</b> kishi⟨1⟩
+6f74b2ba9	🏆 Reyting: /invites
+060348723	(⟨0⟩ kishi chiqib ketdi)
+cb5bdaa5f	/invites guruhda ishlatiladi.
+1db2cf152	🏆 Hali hech kim taklif orqali qo‘shilmadi. Havolangizni /invite bilan oling!
+4ba6e3c96	🏆 <b>Takliflar reytingi</b>⟨0⟩
+d7ee0f9c5	(oxirgi 7 kun)
+b71ab530b	⟨0⟩ ⟨1⟩ — <b>⟨2⟩</b> kishi
+e309c956d	O‘z havolangiz uchun: /invite⟨0⟩
+ff021375b	· haftalik: /invites 7
+db6ff4fd5	🚫 Bloklash
+ead127c24	📨 Xabaringiz bot adminiga yuborildi. Javobni shu yerda ko‘rasiz.
+b3be121db	✅ Javob yetkazildi.
+6a71974f7	❌ Yetkazib bo‘lmadi: foydalanuvchi botni bloklagan.
+29d8bcae2	❌ Yetkazib bo‘lmadi: ⟨0⟩
+a299e6f40	Ruxsat yo‘q!
+67149866b	username yo‘q
+e9d283a8a	ID: ⟨0⟩
+546855b2f	Jami xabarlar: ⟨0⟩
+4caedc905	🚫 Bloklandi: uning xabarlari endi yuborilmaydi.
+aa1be6bef	✅ Blokdan chiqarildi.
+05fe7a9ae	✅ Blokdan chiqarish
+347667dc7	💬 Botga shaxsiy yozgan xabarlaringiz bot adminiga yuboriladi; javob ham shu yerga keladi.
+fb6c079d1	💬 Yordam liniyasi: <b>⟨0⟩</b>
+29ab6a683	Oxirgi 7 kun: ⟨0⟩ xabar, ⟨1⟩ kishi
+d3a86e2ed	Foydalanuvchilarning botga shaxsiy xabarlari sizga yuboriladi; o‘sha xabarga <b>javob</b> bersangiz, javobingiz foydalanuvchiga boradi (shaxsingiz yashirin qoladi). Kimnidir bloklash uchun ostidagi 🚫 tugmasidan foydalaning.
+2e8d13df7	/support off — o‘chirish
+b9d5c0506	/support on — yoqish
+69750b260	👢 chiqarib yuborish
+ba949e0b3	🔇 ovozsiz qilish
+499389526	⚠️ ogohlantirish
+2146683b0	🗑 o‘chirish
+29c555d38	✅ bandan chiqarish
+2adb56b78	🔊 ovozini qaytarish
+be630c265	↩️ ogohlantirishni bekor qilish
+4a1bf66db	chiqarib yuborildi
+804ba7661	o‘chirish
+324073880	🔻 Uning Telegram admin huquqlari ham olib tashlandi.
+cf9b454c2	⚠️ Uning Telegram admin huquqlarini olib bo‘lmadi (ehtimol, uni bot tayinlamagan); kerak bo‘lsa, guruh sozlamalarida qo‘lda oling. (⟨0⟩)
+b55e087a5	🚨 <b>Admin harakatlari limiti oshib ketdi</b> — ⟨0⟩
+427b5c6c1	⟨0⟩ oxirgi bir soatda <b>⟨1⟩</b> ta ban/kick/mute qildi (limit ⟨2⟩). Uning huquqlari to‘xtatildi⟨3⟩.⟨4⟩
+95dbff4c7	(daraja: ⟨0⟩)
+1f08073ce	♻️ Huquqlarini qaytarish
+007e62b21	↩️ Oxirgi 2 soatdagi banlarini bekor qilish
+62523d9c0	✅ Mayli, to‘xtatilgan holda qolsin
+edef2b326	Buni faqat guruh asoschisi qila oladi.
+c2ee2c9d8	↩️ ⟨0⟩ kishi bandan chiqarildi
+91b30283d	↩️ ⟨0⟩ ning so‘nggi banlari bekor qilindi (⟨1⟩) | ⟨2⟩
+9ed54f7b6	To‘xtatilmagan (allaqachon hal qilingan).
+65e104036	(Telegram huquqlarini qaytarib bo‘lmadi: ⟨0⟩)
+fdec34132	♻️ Huquqlar qaytarildi⟨0⟩
+e44b14d39	♻️ ⟨0⟩ ning huquqlari qaytarildi | ⟨1⟩
+caddb66f3	✅ Huquqlar olingan holda qoladi
+a9968a219	⛔ ⟨0⟩: huquqlar to‘xtatildi
+5d7617657	👮 <b>Kunlik admin xulosasi</b> — ⟨0⟩
+053473339	<i>Telegram ilovada qo‘lda o‘chirilgan xabarlar haqida botlarga xabar bermaydi; o‘chirishlar faqat /del va /purge bilan qilinganlarni hisoblaydi.</i>
+46faeb5b0	Avval /select bilan guruh tanlang!
+c1c404194	Bu buyruq asoschi va hammuassislar uchun.
+3960d6a99	Bu davrda xodimlar harakati yo‘q.
+42c00ba90	👮 <b>Admin auditi</b> — ⟨0⟩ (oxirgi ⟨1⟩ kun)
+5cb08e285	Kunlar soni: <code>/audit 7</code>
+3de0d27b9	📩 Audit xulosasi shaxsiy xabarda yuborildi.
+57a762312	Sizga shaxsiy yoza olmadim: avval botga /start yuboring.
+6accc9fd5	… va yana ⟨0⟩ ta xabar
+37de34f22	🗑 <b>O‘chirilgan xabarlar</b>⟨0⟩ | O‘chirgan: ⟨1⟩
+9a1505c99	/del guruhda, o‘chiriladigan xabarga javob sifatida ishlatiladi.
+d223e7b03	O‘chiriladigan xabarga /del bilan javob bering.
+9fada83b0	🗑 <b>Xabar o‘chirildi</b> | Muallif: ⟨0⟩ | O‘chirgan: ⟨1⟩
+a1c331d8e	/edits guruhda, xabarga javob sifatida ishlatiladi.
+5f93a0deb	Tarixini ko‘rmoqchi bo‘lgan xabarga /edits bilan javob bering.
+250e055ba	Bu xabar uchun tahrir tarixi yo‘q (oxirgi ⟨0⟩ kun saqlanadi).
+36da7c07e	📝 <b>Tahrir tarixi</b> — ⟨0⟩ · ⟨1⟩ ta tahrir
+27ec83d6a	asl nusxa
+afea26f62	tahrir #⟨0⟩
+39562283b	🌐 Global ban olgan foydalanuvchi qo‘shildi va banlandi: ⟨0⟩
+b42c13323	🤖 Shubhali akkaunt cheklandi: ⟨0⟩ → ⟨1⟩
+3c4fe05e5	👋 ⟨0⟩ qo‘shildi → ⟨1⟩
+aa9673f91	BUGUN
+fe5b02de1	SHU HAFTA
+05e451c40	SHU OY
+a65b592d7	BARCHA VAQT
+fa5c481c7	Foydalanuvchi → Xabarlar
+11a5c6c19	├ Jami faol foydalanuvchilar: ⟨0⟩
+d8524730d	└ Jami xabarlar: ⟨0⟩
+cd18a00ba	Siz ⟨0⟩ : ⟨1⟩
+8b57b7048	Bu guruh ro‘yxatdan o‘tmagan! Agar shaxsiy chatda ishlatayotgan bo‘lsangiz, avval /select bilan guruh tanlang.
+d2fc8f52c	Guruhingizdagi oyning eng faol 15 kishisi:
+10710d7e5	📊 Bu reyting shu oy uchun.
+0bffc9609	Guruhingizdagi barcha vaqtlarning eng faol 15 kishisi:
+5552d868e	📊 Barcha vaqtlar reytingi.
+9d75c68d7	Hali xabar statistikasi yo‘q!
+54dbc7053	Guruhingizdagi kunning eng faol 15 kishisi:
+86767b480	📊 Bu reyting oxirgi bir kun uchun.
+25670a03f	Guruhingizdagi haftaning eng faol 15 kishisi:
+17af6b262	📊 Bu reyting oxirgi bir hafta uchun.
+43d197ca4	📅 Kunlik
+f70fa8d28	📅 Haftalik
+1b9326b3c	📅 Oylik
+c9c0e3bcd	📊 Barcha vaqt
+d4d0010bd	📋 Batafsil
+674ed30af	👥 Bu guruh uchun reyting turini tanlang.
+0f3a59f6a	Bu menyuni ⟨0⟩ ochgan.
+bbf0e9940	👥 Guruhingizdagi eng faol ⟨0⟩ kishi:
+62e79a0f9	Bot admin bo‘lganidan beri guruhingizdagi faollik:
+f55378a92	👥 Faol foydalanuvchilar:
+503794387	💬 Jami xabarlar:
+ef5bd5de0	📊 Jami faollik:
+c6c4664dd	Muayyan foydalanuvchi uchun /info @user dan foydalaning yoki uning xabariga javob bering.
+7e811e0d2	👱 Ism: ⟨0⟩
+9b0e7b293	🌐 Username: ⟨0⟩
+14ed29970	👥 Siz a’zo bo‘lgan guruhlar soni: ⟨0⟩
+ba33e26dc	💬 Guruhlaringizdagi jami xabarlar:
+8cb7f31a3	├📆 Kunlik: ⟨0⟩
+5ee653a06	🔍 Guruhlaringizdagi jami:
+0df3dab20	├🃏 Stikerlar: ⟨0⟩
+e93a634c3	📊 ⟨0⟩ statistikasi:
+ae2b984ac	💬 Xabarlar soni:
+3e08d6dfd	┌📆 Kunlik: ⟨0⟩
+037b7c646	├📆 Haftalik: ⟨0⟩
+9f577c2b5	├📆 Oylik: ⟨0⟩
+cf3b5cf8f	└Jami: ⟨0⟩
+e1ed2556f	📊 Faollik tafsilotlari:
+0327b318b	┌🃏 Stikerlar: ⟨0⟩
+5ca7902a2	├🀄️ GIF: ⟨0⟩
+b667cf812	├🙃 Emoji: ⟨0⟩
+68fa09ce3	├📷 Rasmlar: ⟨0⟩
+886e342ec	├🎥 Videolar: ⟨0⟩
+a11d703a7	├💾 Fayllar: ⟨0⟩
+0afb08ea1	├🎙 Ovozli xabarlar: ⟨0⟩
+5199486f9	└📼 Musiqa: ⟨0⟩
+7d244b585	🏆 Umumiy o‘rin: #⟨0⟩
+9394cb52f	Barcha adminlarni tiklash
+846fa3804	Spamchidan boshqa hammasini tiklash
+ea0ec5a8c	Gumondor: ⟨0⟩
+40ab78429	🚨 <b>KANAL HIMOYASI REJIMI FAOL</b>
+65bfd4f34	⟨0⟩Kanal: <code>⟨1⟩</code>
+d5d022cd9	Asoschi va botni qo‘shgan admindan tashqari barcha admin huquqlari olib tashlandi.
+11b7596d5	⟨0⟩ ta admin tiklandi
+19c35e8f0	🌐 Tarmoq bani olib tashlandi: ⟨0⟩ (tarmoqning barcha guruhlarida)
+c2e7013a3	🌐 Tarmoq bani: ⟨0⟩ tarmoqdagi yana ⟨1⟩ ta guruhga tarqatildi
+9fe755831	yozuv topilmadi
+d121e65b8	bot ma’lumotini olib bo‘lmadi: ⟨0⟩
+463126054	♻️ Adminlarni tiklash: ⟨0⟩ ta admin tiklandi⟨1⟩
+90d9a6b20	, muvaffaqiyatsiz: ⟨0⟩
+caa60fdc5	🚨 <b>Ommaviy lavozimdan tushirish</b>
+8ba5e6709	Guruh/kanal: <b>⟨0⟩</b>
+5d095f637	⟨0⟩ (<code>⟨1⟩</code>) 10 daqiqa ichida ⟨2⟩ ta adminning huquqlarini oldi.
+8d21e12ea	Oxirgi yaxshi nusxa: ⟨0⟩
+9ba30f2ce	♻️ Adminlarni tiklash
+a96545d83	♻️ Avtomatik tiklandi: ⟨0⟩ ta admin⟨1⟩
+a556aedb4	(muvaffaqiyatsiz: ⟨0⟩)
+ee38d1474	Yaroqli admin nusxasi yo‘q.
+d94586a2d	Siz tiklay oladigan guruh/kanal yo‘q. Guruh egasi sizni panelda 'ishonchli shaxs' sifatida qo‘shishi kerak.
+a186abeb7	Qaysi guruh/kanal adminlarini tiklamoqchisiz?
+358350243	Bu guruh uchun hali admin nusxasi yo‘q (nusxalar har 6 soatda olinadi).
+e0f04d2e3	⟨0⟩ · ⟨1⟩ ta admin
+629844d31	<b>⟨0⟩</b> — tiklanadigan nusxani tanlang:
+b5ad3a8e7	Ruxsat yo‘q yoki nusxa yo‘q.
+0644770db	♻️ ⟨0⟩ nusxasidagi adminlar tiklanadi:
+700b3ac82	Tasdiqlaysizmi?
+1ca35b0e1	✅ Ha, tiklash
+e6a5e85cd	❌ Bekor qilish
+805c38798	Tiklanmoqda...
+cf63ea900	♻️ ⟨0⟩ ta admin tiklandi.⟨1⟩
+b8058c528	❌ Muvaffaqiyatsiz: ⟨0⟩
+e82edc1de	(Bot o‘zida yo‘q huquqlarni bera olmaydi va boshqa birov tayinlagan adminlarni o‘zgartira olmaydi.)
+f13124b3b	Adminlar ro‘yxati tiklandi (⟨0⟩ ta admin).
+400c018e5	media flud
+60ff56604	⟨0⟩ xabar / ⟨1⟩ s
+97268aded	30 daqiqada 2+ admin spam qildi
+d739884a3	⚠️ <b>Admin spami aniqlandi!</b>
+3302869c8	Admin: ⟨0⟩ (<code>⟨1⟩</code>)
+3cbc92eef	Harakat: ⟨0⟩
+3d7963ca4	Kanal himoyasi rejimi: Faol emas
+72f491ffe	Ban + huquqlar olindi
+35cf8f7fb	Huquqlar olindi
+b6331605b	🤖 Bot qo‘shish bloklandi
+ad9ead387	Bot: ⟨0⟩
+a7c242666	Qo‘shgan: ⟨0⟩
+9b75f55a2	⚠️ Ruxsatsiz admin tayinlash aniqlandi!
+e97409070	Tayinlagan: ⟨0⟩ (<code>⟨1⟩</code>)
+c065dbd5f	Tayinlangan: ⟨0⟩ (<code>⟨1⟩</code>)
+17a403bbb	Ommaviy ban aniqlandi: ⟨0⟩ (⟨1⟩) ⟨2⟩ ban / ⟨3⟩ s
+e21052fad	Sarlavha: '⟨0⟩' → '⟨1⟩'
+eb38d7d1c	Tavsif o‘zgartirildi
+b2209389a	Kanal klon himoyasi ishga tushdi!
+85a87d615	O‘zgarishlar qaytarildi:
+b79ccad39	📋 <b>Kanal jurnalining haftalik hisoboti</b>
+546658b9b	Ban + huquqlarni olish
+2c124f337	Faqat huquqlarni olish
+a5505fdbd	⟨0⟩ Admin spamidan himoya
+183b4aa2e	Spam uchun harakat: ⟨0⟩
+5d5673266	⟨0⟩ Admin media fludi
+652974e14	Media uchun harakat: ⟨0⟩
+9123863e2	⟨0⟩ Havola himoyasi
+3d1465b74	⟨0⟩ Klon himoyasi
+a03517abc	⟨0⟩ Bot qo‘shish himoyasi
+b27f8f968	⟨0⟩ Ommaviy ban himoyasi
+006229c38	👥 Xavfsiz adminlar
+ec411a6b8	💾 Kanal sarlavhasi/tavsifini saqlash
+a8d6a7aa4	🔙 Yopish
+e0a90af5c	Kanal topilmadi!
+9abd1a97e	Bu buyruq kanal sozlamalari uchun. Guruh sozlamalari uchun /settings dan foydalaning.
+d63cd9886	Saqlandi: ⟨0⟩
+c3d254196	Xavfsiz adminlar ro‘yxati:
+ff4ef369c	(Havola yuborishga ruxsat bor)
+5243a71a1	Kanal postlari
+f6489e475	kanal admini
+29bb8c58f	So‘rovlar tasdiqlanmoqda, kuting...
+218960722	Kutilayotgan qo‘shilish so‘rovlari topilmadi.
+1b385aeaa	✅ ⟨0⟩ ta so‘rov tasdiqlandi.
+fb8bc6b23	(⟨0⟩ ta so‘rovni tasdiqlab bo‘lmadi; muddati o‘tgan yoki qaytarib olingan bo‘lishi mumkin)
+05d63d7c6	So‘rovlarni tasdiqlash: ⟨0⟩ ta tasdiqlandi | ⟨1⟩
+9ea0064d2	Siz bu botdan foydalanishdan bloklangansiz.
+db8a1871b	Foydalanish: /membertag @user <teg> yoki javob + /membertag <teg>
+584a09e9f	Foydalanuvchi va teg kerak!
+84aa89869	Teg ko‘pi bilan 32 belgi bo‘lishi mumkin!
+fcd61489e	⛔ O‘zingiz bilan bir xil yoki yuqoriroq darajadagi odamga teg bera olmaysiz.
+5f53e65d3	⟨0⟩ admin emas! Teglar faqat adminlarga beriladi.
+f4fc9906d	🏷 Teg berildi: ⟨0⟩ → ⟨1⟩
+be06d3d2f	Hammuassislarni faqat asoschi tayinlay oladi.
+0ef49a704	Foydalanuvchi topilmadi! ID, @username yoki javobdan foydalaning.
+4de20141f	Foydalanish: /⟨0⟩ @user [teg]
+e1b55fb8a	Teg: ⟨0⟩
+b60f7c81a	⟨0⟩ tayinlandi: ⟨1⟩⟨2⟩
+9adcfd5da	Foydalanish: /block <id> [sabab]
+dd3f79560	Noto‘g‘ri ID!
+b53956227	✅ ⟨0⟩ bloklandi.
+68a3942e7	Foydalanish: /unblock <id>
+7f14d47f5	✅ ⟨0⟩ blokdan chiqarildi.
+a07c6c04c	Joriy ogohlantirish limiti: ⟨0⟩
+eeceb0ee6	Foydalanish: /setwarnlimit <2-20>
+68cb7aa9e	Limit 2 dan 20 gacha bo‘lishi kerak!
+7fdd7a44f	Ogohlantirish limiti ⟨0⟩ qilib belgilandi.
+32cb8952a	Spam istisnolari ro‘yxati bo‘sh.
+804f32102	/whitelist @user bilan qo‘shing.
+7ec4b51e6	Spam istisnolari ro‘yxati:
+c0c03c505	⟨0⟩ istisnolar ro‘yxatidan olib tashlandi.
+e6695a6db	⟨0⟩ spam istisnolari ro‘yxatiga qo‘shildi.
+9e5f1a353	Yopiq guruh
+688f939e9	So‘z filtri
+cbabb7d8b	Yo‘q
+28b8f5479	👥 A’zolar: ⟨0⟩
+ceb987630	👮 Adminlar: ⟨0⟩
+af72a68a6	📈 Statistika
+28086b0d5	├ Jami xabarlar: ⟨0⟩
+01c7b8d8a	├ Faol foydalanuvchilar: ⟨0⟩
+12279a365	├ Jami banlar: ⟨0⟩
+74d4fdeab	├ Jami ogohlantirishlar: ⟨0⟩
+69516a922	└ Ogohlantirish limiti: ⟨0⟩
+c77739311	Faol himoya: ⟨0⟩
+58b3e5e14	Gerb! 🪙
+561c75012	Raqam! 🪙
+1a786e9bf	⟨0⟩ Zar: ⟨1⟩
+e7e394f96	🤖 ⟨0⟩ — Bot egasi buyruqlari
+f4e511a55	/panel — Botingiz guruhlari va statistikasi
+94da61b33	/broadcast — Guruhlar, kanallar va odamlarga e’lon (foydalanishni ko‘rish uchun /broadcast yozing)
+5d08c9107	/broadcasts — E’lonlar tarixi, bosishlar, so‘rovnoma natijalari
+cbbbbd1fd	/templates — E’lon shablonlari
+70215bc5f	/growth — Haftalik o‘sish hisoboti (har dushanba avtomatik keladi)
+7a7fa1e0f	/support — Yordam liniyasi (shaxsiy xabarlar sizga yuboriladi)
+0d05bfd3b	/gban <id|@user> [sabab] — Botingizning barcha guruhlarida ban
+1db86c395	/ungban <id|@user> — Banni olib tashlash
+2eb535697	/gbanlist — Banlar ro‘yxati
+eeedac8d1	/select — Guruh tanlash
+98b86d999	🤖 Bot egasi buyruqlari
+6e9bfe3b7	/clones — Klon botlarni boshqarish (to‘xtatish/ishga tushirish/o‘chirish)
+e48ef6b31	/clone — O‘zingizning klon botingiz
+3f50c5d54	/panel — Boshqaruv paneli (guruhlar/kanallar, botni chiqarish, 🧹 tozalash)
+5e0335772	/perf — Unumdorlik: sekin amallar, xotira, navbat
+6d08e2352	/maintenance — Texnik xizmat rejimi (buyruqlar o‘chiq, himoyalar ishlaydi)
+f160302c5	/block <id> [sabab] — Bloklash
+b1c36dc93	/unblock <id> — Blokdan chiqarish
+647651cb8	/gban <id|@user> [sabab] — Barcha guruhlarda ban
+86ee8d200	/ungban <id|@user> — Global banni olib tashlash
+d094b4c43	/gbanlist — Global banlar ro‘yxati
+d729d3ba2	/backup — Ma’lumotlar bazasining zaxira nusxasini olish
+0e556fad9	/gblockmedia — Javob berilgan mediani barcha guruhlarda bloklash
+8af5e8c17	/recover — Adminlarni tiklash
+f0032f0c7	/select — Kanal tanlash
+97a1889ae	/channelsettings — Kanal sozlamalari
+def1847f5	⟨0⟩/start — Boshlash
+f467f5a12	/menu — Menyuni ko‘rsatish
+579f051c8	/settings — Tanlangan guruhning tugmali sozlamalar paneli
+0ecfed5c8	/help — Yordam
+d1d491df3	/select — Guruh/kanal ulash
+a64b799ed	/appeal <izoh> — Ban ustidan shikoyat yuborish
+3aaf39bd7	/recover — Adminlarni tiklash (ishonchli shaxslar uchun)
+e8a9f2564	💬 Botga yozgan xabarlaringiz bot adminiga yuboriladi; javob shu yerga keladi.
+90b35c202	/clone — O‘z nomingiz bilan klon bot yaratish
+53ff31717	👤 Foydalanuvchi buyruqlari
+a6ac25fa6	📊 Statistika va profil
+7c1cddd9b	/profile — Profilingizni ko‘rish
+4794e486d	/daily — Kunlik xabarlar reytingi
+9304026c3	/weekly — Haftalik reyting
+0f2144ac5	/monthly — Oylik reyting
+dab273f01	/alltime — Barcha vaqtlar reytingi
+ffca95898	/top — Tugmali reyting menyusi
+f6859df4f	/info @user — Foydalanuvchi statistikasi
+f739f3e69	/chatinfo — Guruh haqida ma’lumot
+96d41dfbc	/rules — Guruh qoidalarini ko‘rish
+cf6de9a2b	/afk [sabab] — AFK rejimi (sizni belgilaganlarga aytiladi; yozganingizda o‘chadi)
+427ccde79	/votemute — Javob berilgan odamni ovozsiz qilish uchun ovoz berishni boshlash
+f2f9f9eaf	/notag — /tag ro‘yxatidan chiqish (qayta qo‘shilish uchun yana yozing)
+6de9402ed	/invite — Shaxsiy taklif havolangiz (olib kelgan odamlaringiz sanaladi) · /invites — reyting
+82789607f	📝 Eslatmalar
+f9f2a17b9	/notes — Saqlangan eslatmalar
+46ba4fefd	#eslatma — Eslatmani olish (misol: #rules)
+a37fbde9a	/get <nom> — Eslatmani olish
+5ff3c9cb2	🎰 Ko‘ngilochar
+b0d9549b8	/coin — Tanga tashlash
+3ab74dacf	/dice — Zar tashlash
+304dfe62b	ℹ️ Boshqa
+b4031dc89	/help — Shu menyu
+6467c9dbe	/id — ID ni ko‘rsatish
+0af5bde71	/appeal <izoh> — Ban ustidan shikoyat (botga shaxsiy)
+aff60c67d	/report [sabab] yoki @admin — Javob berilgan xabar ustidan xodimlarga shikoyat qilish
+15575b067	👮 Xodimlar buyruqlari — darajangiz: ⟨0⟩
+d955391ce	Darajalar tartibi: 👑 Asoschi > 🔱 Hammuassis > ⭐ Katta admin > 🛡 Admin
+cb1ecf135	🛡 Admin va undan yuqori
+ba31c6e75	/warn @user [sabab] — Ogohlantirish
+9db2b48b7	/mute @user [vaqt] — Ovozsiz qilish (Adminlar: ko‘pi bilan 24 soat)
+0d7e990d0	/unmute @user — Ovozini qaytarish
+258592394	/kick @user — Guruhdan chiqarib yuborish
+40e58c981	/warns · /banlist · /mutelist — Ro‘yxatlar
+07722765d	/giveaway · /endgiveaway — Konkurs
+faabdc38a	/filter — Avtojavob (masalan, salom → Assalomu alaykum; media va tugmalar mumkin)
+0e48d2662	/filters · /stop <so‘z> · /stopall — Filtrlar ro‘yxati / o‘chirish
+a295c1d2b	/tag <xabar> · /stoptag — A’zolarni qismlab belgilash / to‘xtatish
+43f5db5d3	/record @user — Botning barcha guruhlaridagi jazolar tarixi va eski ismlar (shaxsiy yuboriladi)
+4268b44a9	/giveaway 1d 3 Sovg‘a | channel=@channel messages=20 days=7 — Shartli va muddatli konkurs
+f9892b61b	/myrank — Darajangiz va huquqlaringiz
+10ead6ab1	⭐ Katta admin va undan yuqori
+667e625bc	/ban @user [vaqt] [sabab] · /unban — Ban
+387e5f34e	/unwarn @user — 1 ta ogohlantirishni olib tashlash
+48c85c764	/purge <son/all> · /slowmode <soniya> — Tozalash, sekin rejim
+2454c2b92	/pin · /unpin — Qadash
+d0ffce66f	/lockdown [daq] · /lockmedia [daq] — Favqulodda qulflash
+f6b07290c	/approveall — Qo‘shilish so‘rovlarini tasdiqlash
+f252c350e	/setrules · /setwelcome · /setgoodbye · /save · /clear — Qoidalar, xush kelibsiz, xayrlashuv, eslatmalar
+7bf273598	(media, tugmalar, formatlash va tasodifiy xabarlar qo‘llab-quvvatlanadi; yordam uchun /setwelcome yozing)
+8c7cbbe68	/welcome · /goodbye · /resetwelcome — Oldindan ko‘rish / standartga qaytarish
+df2e5eccc	/schedule 6h <xabar> · /schedules — Rejalashtirilgan (takrorlanuvchi) xabarlar
+de546f6e8	🔱 Hammuassis va undan yuqori
+d18538a2d	/settings — Tugmali sozlamalar paneli (barcha himoya sozlamalari)
+00043ba1c	/setup — Tezkor sozlash (tayyor andoza + xush kelibsiz + himoyalar)
+bfe1425f8	/forcesub @channel — Yozish uchun foydalanuvchilar kanalga a’zo bo‘lishi shart (o‘chirish: /forcesub off)
+886d570db	/unlockdown · /unlockmedia — Qulflarni olib tashlash
+5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
+443a00692	/setwarnlimit · /setwarnaction · /captchatime
+3d2493394	/blockmedia · /blockpack — Media/to‘plamlarni bloklash
+20abda0cf	/admin (/addadmin) · /senioradmin @user [teg] — Daraja berish
+3c7389596	/remove @user — Darajani olib tashlash
+a83e94dc8	/perms — Shaxsiy huquqlar paneli (botga shaxsiy)
+13accc070	/membertag @user <teg> — Admin tegi
+775ec46f0	/reload — Adminlar ro‘yxatini Telegramdan yangilash (qo‘lda/boshqa bot bergan huquqlar)
+9a654a567	👑 Faqat asoschi
+f0d85c250	/cofounder @user — Hammuassis qilish
+aed09d232	/setlog — Jurnal kanali · Guruhlar tarmog‘i · Zaxira adminlarni tiklash
+81fcecc0c	📊 Ma’lumot
+99e6db648	/stats · /chatinfo · /leaderboard · /staff
+a475e9c96	Vaqt formati: 30m, 2h, 7d
+5a0e84cda	⚙️ Sozlamalar paneli
+f910032f2	🌍 Til: /setlang⟨0⟩
+215259316	⚙️ Sozlamalar
+96fccfef2	🛡 Guruhlarim
+5e167ed13	📊 Statistika
+4ab530c07	❓ Yordam
+a2c4fcfa1	🔗 Guruh tanlash
+ed11ea7cd	📢 Kanal tanlash
+d7f837819	Menyudan tanlang yoki buyruq yozing…
+2ac5318f5	➕ Guruhga qo‘shish
+7357057be	📢 Kanalga qo‘shish
+2dadb70db	Menyu pastda 👇
+71aa20a4d	Avval guruh tanlang: 🛡 Guruhlarim yoki 🔗 Guruh tanlash tugmasidan foydalaning.
+3224664d6	Bot bu chatda admin emas. Botni u yerga admin qilib qo‘shing va qayta tanlang.
+78ad7212f	Bu chatda sizda ruxsat yo‘q.
+2216a64f4	✅ Tanlandi: <b>⟨0⟩</b>
+e107177fc	Yordam menyusi
+9e88862d9	Guruh qoidalari
+07efa78b4	Saqlangan eslatmalar
+cf90a04f1	Profilingiz va ogohlantirishlaringiz
+b79df54d5	Faollik reytingi
+a0d54db08	Foydalanuvchi statistikasi
+c3da965fe	Guruh ma’lumoti
+aa6b818af	ID ni ko‘rsatish
+c23bc7fa5	Zar tashlash
+cbd34c9f1	Tanga tashlash
+1a6e6af53	Javob berilgan xabar ustidan xodimlarga shikoyat qilish
+61e89c9ef	AFK rejimi
+c51b37c71	Teg ro‘yxatidan chiqish
+d1076c2fa	Guruh tili
+03811f00b	Ovozsiz qilish uchun ovoz berish (xabarga javob bering)
+ef4e5e596	Shaxsiy taklif havolangiz
+1db922722	Takliflar reytingi
+53d58e1ac	Tugmali sozlamalar paneli
+0c4051b76	Adminlar ro‘yxatini yangilash
+c55aa4167	Ogohlantirish
+cec03bba0	1 ta ogohlantirishni olib tashlash
+263cc2188	Ogohlantirishlarni ko‘rish
+76f0023be	Ovozini qaytarish
+9d1a81717	Bandan chiqarish
+6118dce5a	Guruhdan chiqarib yuborish
+18bbd14ee	Xabarlarni ommaviy o‘chirish
+2d7017ef2	Xabarni qadash
+d7722a3e3	Qadashni olib tashlash
+a263e4e53	Sekin rejim
+9da046535	Banlar ro‘yxati
+6d6c46eda	Ovozsizlar ro‘yxati
+a84a2a1e7	Eslatma saqlash
+385c7d8ec	Eslatmani o‘chirish
+a60cb06d0	Tezkor sozlash
+d2dd24bcc	Avtojavob qo‘shish
+364057e43	Filtrlar ro‘yxati
+5d24c4032	Filtrni o‘chirish
+e46d6d528	Xush kelibsiz xabari (media/tugmalar)
+2c1419a05	Xayrlashuv xabari
+27f1ba342	Qoidalarni yozish
+3d5b58779	Rejalashtirilgan xabar qo‘shish
+943458e1e	Rejalashtirilgan xabarlar
+2331d765c	A’zolarni belgilash
+b0d7d4f3d	Belgilashni to‘xtatish
+e912877cd	Majburiy kanal
+29cc4c872	Foydalanuvchi tarixi
+8871a3c02	Konkurs boshlash
+dfae805ce	Konkursni yakunlash
+1945bd345	Favqulodda: guruhni qulflash
+c0559b5cc	Guruh qulfini ochish
+422c89bec	Darajangiz va huquqlaringiz
+fa7d4e18f	Xodimlar ro‘yxati
+84be9db5d	Guruh statistikasi
+3a085165d	Javob berilgan mediani bloklash
+414c8153f	Stiker to‘plamini bloklash
+c3e7837f2	Media yuborishni qulflash
+956c0ce19	Media qulfini olib tashlash
+4e382259e	Boshlash va menyu
+1c4ce1da4	Menyuni ko‘rsatish
+7e27a3b5a	Guruh/kanal tanlash
+dc6cac394	Tanlangan guruh sozlamalari
+e78fa8e35	Ban ustidan shikoyat yuborish
+eaba0a794	Yordam
+cbad220d3	Adminlarni tiklash (ishonchli shaxslar)
+fcea72bad	Tanlangan guruh uchun tezkor sozlash
+495825a5e	Veb-panel (barcha sozlamalar bitta sahifada)
+9674953cf	Bot e’lonlarini o‘chirish
+99ab93b21	Til
+333895635	Adminga yozish (yordam liniyasi)
+0d0187ac4	Botingiz guruhlari va statistikasi
+8938961a5	Guruhlar, kanallar, odamlarga e’lonlar
+be4f2dea9	E’lonlar tarixi
+0c8b2de83	E’lon shablonlari
+ecced9e02	Haftalik o‘sish hisoboti
+52b5b2176	Yordam liniyasini yoqish/o‘chirish
+32791cc9a	Botingiz guruhlarida ban
+a7b61f397	Klon botlarni boshqarish
+205162f9b	Unumdorlik statistikasi
+5d22ead7d	Boshqaruv paneli
+68cd0b7eb	Global banni olib tashlash
+a38b6848f	Global banlar ro‘yxati
+45a767875	Foydalanuvchi/chatni bloklash
+4902bf286	Blokdan chiqarish
+cfc719f1d	Ma’lumotlar bazasi zaxirasi
+efdd2ee59	Texnik xizmat rejimi
+bf65fdcd0	Barcha guruhlarda mediani bloklash
+385efb5c0	⚡ Asosiy bot: @⟨0⟩
+8f13119d3	⟨0⟩ — guruh va kanallarni himoya qiluvchi bot: spam, havolalar, flud, reydlar va captcha.
+63edd3296	🛡 ⟨0⟩ Security Bot
+7ebe2ab6b	Guruh va kanalingizni spam, havolalar, flud, reydlar va soxta akkauntlardan himoya qiladi. Barcha sozlamalar tugmali paneldan amalga oshiriladi.
+287dec170	Boshlash uchun: /start⟨0⟩
+81daf5632	<b>⟨0⟩</b> ga qo‘shilish so‘rovingiz qabul qilindi. Tasdiqlanish uchun savolga javob bering:
+784db6bac	⏰ Vaqt: ⟨0⟩
+90d0b5f0a	🔐 Shaxsiy tekshiruv yuborildi: ⟨0⟩ | ⟨1⟩
+49349d70e	Bu tekshiruvning muddati tugagan.
+6af257079	So‘rov endi amal qilmaydi (allaqachon ko‘rib chiqilgan bo‘lishi mumkin).
+d7eff8c3b	✅ Tasdiqlandi! Siz <b>⟨0⟩</b> ga qabul qilindingiz.
+69af7d417	✅ Shaxsiy tekshiruvdan o‘tdi va qabul qilindi: ⟨0⟩ | ⟨1⟩
+99c1bac07	❌ Noto‘g‘ri javob. <b>⟨0⟩</b> ga qo‘shilish so‘rovingiz rad etildi; yangi so‘rov yuborishingiz mumkin.
+86e28712b	❌ Shaxsiy tekshiruvdan o‘tmadi, rad etildi: ⟨0⟩ | ⟨1⟩
+9dbf30953	⏰ Vaqt tugadi, qo‘shilish so‘rovingiz rad etildi. Yangi so‘rov yuborishingiz mumkin.
+2ec5e8129	⏰ Shaxsiy tekshiruv vaqti tugadi → ID:⟨0⟩ rad etildi | ⟨1⟩
+12ae98fff	⚠️ Kanalda flud aniqlandi! 10 soniyada ⟨0⟩ ta post
+f271bb123	🌐 Global ban olgan foydalanuvchining qo‘shilish so‘rovi rad etildi: ⟨0⟩
+7b944f9a5	❌ Bot/soxta akkaunt rad etildi: ⟨0⟩ → ⟨1⟩
+d5d491f80	✅ Avtomatik qabul qilindi: ⟨0⟩ → ⟨1⟩
+5f7e623cd	❌ Avtomatik rad etildi: ⟨0⟩ → ⟨1⟩
+f8cddb848	📩 Yangi so‘rov: ⟨0⟩ → ⟨1⟩
+a984efcca	Bu odamga nisbatan harakat qila olmaysiz.
+30a92b565	⛔ Darajalarni boshqarish uchun ⟨0⟩ yoki undan yuqori bo‘lishi kerak.
+f57eaa44e	⛔ O‘zingiz bilan bir xil yoki yuqoriroq darajadagi odamni tahrirlay olmaysiz.
+c8857eea2	⛔ ⟨0⟩ darajasini faqat yuqoriroq daraja bera oladi.
+fd71ebc88	Foydalanuvchi topilmadi.
+fa5ded262	❌ Bot admin tayinlay olmaydi!
+889786c65	❌ Foydalanuvchi guruhda topilmadi!
+3c0a7e1f2	⚙️ Huquqlar
+e9e94dc59	Bu odamning darajasi yo‘q. Avval /admin yoki /senioradmin bilan daraja bering.
+627b90668	⚠️ ⟨0⟩ (botda yo‘q)
+ae8f6f509	📡 Telegram huquqlari
+033d23563	🤖 Bot huquqlari
+3d3a3d682	→ 📡 Telegram huquqlari
+8bff101a7	→ 🤖 Bot huquqlari
+daddb4f0e	❌ Darajani olib tashlash
+12ec1558f	✅ Yopish
+8f4a3cad6	👤 <b>Huquqlarni tahrirlash:</b> ⟨0⟩
+2a138f61a	Daraja: <b>⟨0⟩</b>
+9d0d28c34	✅ yoqiq · ❌ o‘chiq · 🔒 daraja yetarli emas
+bc2ec6c27	<i>O‘zgarishlar darhol kuchga kiradi. Daraja tugmalari darajani o‘zgartiradi.</i>
+4dd50d885	Noto‘g‘ri tugma.
+2f00bbdcd	Bu huquq uning darajasidan yuqori.
+da5fcba10	Noto‘g‘ri daraja.
+8ba8423be	Allaqachon ⟨0⟩.
+aac33021a	⟨0⟩ tayinlandi: ⟨1⟩ | ⟨2⟩
+d37ea2c16	Daraja: ⟨0⟩
+222dfbc00	Daraja olib tashlandi.
+f97fd51ad	✅ ⟨0⟩ ning darajasi olib tashlandi.
+570da29a3	Sizda ruxsat yo‘q.
+c119667e9	✅ Huquqlar paneli yopildi. O‘zgarishlar saqlandi.
+cf9f2e455	⟨0⟩ bu guruhda xodim emas.
+d4df62038	🔒 Bu huquq darajangizdan yuqori yoki botda yo‘q.
+ca3e89467	Siz tahrirlay oladigan xodim yo‘q. Daraja berish uchun guruhda /admin @odam deb yozing.
+9befd0808	👑 <b>Huquqlarni boshqarish</b>
+6fcfd3b55	Tahrirlanadigan odamni tanlang:
+770d8a43d	Tungi rejim sozlamasi
+0d3da9061	Cheklanadigan huquqlarni tanlang, so‘ng Saqlash tugmasini bosing:
+3014d10c7	Soatlarni o‘zgartirish uchun: /nightmod 23:00 07:00
+8b386c8fe	Tungi rejim sozlamasida xato.
+441634b34	🛡 ⟨0⟩ faol! Sozlamalar uchun /settings, buyruqlar uchun /help.
+f9f826fff	🛡 <b>⟨0⟩ Security Bot</b>
+a299d1e4f	Guruh va kanallaringiz uchun spam, havola, flud, reyd va captcha himoyasi.
+b40285a71	1️⃣ Quyidagi tugma orqali botni kerakli huquqlar bilan guruhingizga qo‘shing.
+15b8ba9ba	2️⃣ Pastdagi menyudan guruhingizni tanlang va hammasini ⚙️ Sozlamalar orqali boshqaring.
+eae59de08	💬 Yordam
+81e22b47b	Huquqlar havolasi noto‘g‘ri.
+5af6c10c1	Guruh ro‘yxatdan o‘tdi! Endi uni shaxsiy chatda 🛡 Guruhlarim orqali tanlashingiz mumkin.
+425ac7c01	Guruh ID: ⟨0⟩
+60a03153e	Ro‘yxatdan o‘tkazib bo‘lmadi: avval botni bu guruhda admin qiling.
+08cdd8869	Bu guruh ro‘yxatdan o‘tgan (ID: ⟨0⟩)
+7b80705e1	Boshqaruv paneliga o‘tish uchun shaxsiy chatda /select yozing.
+c6668e444	Sizga tegishli ro‘yxatdan o‘tgan guruh/kanal topilmadi.
+489f886fe	Pastdagi 🔗 Guruh tanlash / 📢 Kanal tanlash tugmasi bilan chatingizni tanlang: agar bot u yerda admin bo‘lsa, avtomatik aniqlanadi. Agar bot hali qo‘shilmagan bo‘lsa, avval Guruhga qo‘shish tugmasidan foydalaning.
+529f5b296	Boshqariladigan kanal/guruhni tanlang:
+3b561f5ba	✅ Tanlandi: ⟨0⟩
+e537ee79f	Endi shaxsiy chatda buyruqlardan foydalanishingiz mumkin.
+5da9ca5b4	Sizning ID: <code>⟨0⟩</code>
+758b4fa2f	Javob berilgan odamning ID si: <code>⟨0⟩</code>
+a52056450	Misol:
+8db290527	Kanal topilmadi!
+d7db3c4cf	Joriy jurnal: ⟨0⟩
+354f04cc0	Foydalanish: /setlog -1001234567890
+9cc790504	✅ Jurnal kanali yangilandi: ⟨0⟩
+f40d6696a	GURUH XODIMLARI
+511c4973a	Jami: ⟨0⟩ ta xodim
+284837aa3	Foydalanish: /gban <id|@user> [sabab] (yoki xabarga javob bering)
+e2d4f8ab8	Bu odamni banlab bo‘lmaydi.
+01c3bd4a0	barcha botlarda
+cb8da44a3	⟨0⟩ guruhlarida
+49aed1394	🌐 ⟨0⟩ ⟨1⟩ banlanmoqda...
+73497703d	🌐 ⟨0⟩ ⟨1⟩ banlandi.
+a960dfa59	✅ ⟨0⟩ ta chat | ❌ ⟨1⟩ (ruxsat yo‘q/a’zo emas)
+ffc42c25d	Foydalanish: /ungban <id|@user>
+ad983fea1	✅ ⟨0⟩: ⟨1⟩ban olib tashlandi.
+63de87994	Banlar ro‘yxati bo‘sh.
+d65a4bee5	Global banlar ro‘yxati
+c58c96fc0	⟨0⟩ banlar ro‘yxati
+6d34fa6d2	🌐 <b>⟨0⟩</b> (oxirgi 50 ta):
+15db0d20b	Joriy: ⟨0⟩ (⟨1⟩)
+08771c47b	Foydalanish:
+9ebd56f1c	✅ Ogohlantirish limitiga yetilganda qo‘llaniladigan jazo: ⟨0⟩⟨1⟩
+bd06580b1	Yangi a’zolarni cheklash: ⟨0⟩
+d8eaa4a1a	Foydalanish: /newbie <daqiqa> yoki /newbie off
+4986c7002	0-1440 oralig‘ida daqiqa kiriting yoki off yozing.
+7e4bdbce0	✅ Yangi a’zolarni cheklash o‘chirildi.
+d5a3095ed	✅ Yangi a’zolar dastlabki ⟨0⟩ daqiqada havola/media/forward yubora olmaydi.
+d4c80a6a7	🔗 Havola istisnolari ro‘yxati:
+f3425da9b	/allowlink add youtube.com
+71399725d	/allowlink del youtube.com
+99d71c223	(t.me/mychannel kabi yo‘llarni ham qo‘shish mumkin)
+d555eadad	(bo‘sh)
+4bcfe1994	✅ ⟨0⟩ havola istisnolari ro‘yxatiga qo‘shildi.
+e6dffb4e9	✅ ⟨0⟩ ro‘yxatdan olib tashlandi.
+c22e23f31	Foydalanish: /captchatime 2m (30s dan 60min gacha)
+b4b2c0b74	✅ Captcha vaqti: ⟨0⟩
+42cf26778	Shikoyat qilish uchun menga shaxsiy yozing: /appeal <izoh>
+ef023696b	Foydalanish: /appeal <baningiz nega olib tashlanishi kerak?>
+294f98c41	Sizda qayd etilgan ban yo‘q.
+78158a307	Shikoyatingiz qaysi guruh uchun?
+0072d91b7	Bu guruh uchun har 24 soatda bir marta shikoyat qilishingiz mumkin.
+0799f76c1	✅ Banni olib tashlash
+1358a154b	❌ Rad etish
+6d20aaa15	📨 <b>Ban ustidan shikoyat</b> #⟨0⟩
+1040c08fa	Guruh: <code>⟨0⟩</code>
+fae78e9bb	Ban sababi: ⟨0⟩
+76700df28	✅ Shikoyatingiz adminlarga yuborildi. Natija shu yerda xabar qilinadi.
+53667435f	Vaqt tugadi, /appeal ni qayta yozing.
+6486efe3d	Yuborilmoqda...
+6c9744f83	Shikoyat topilmadi.
+e2457d551	Bu shikoyat allaqachon ko‘rib chiqilgan: ⟨0⟩
+07b34dcdd	✅ Shikoyatingiz qabul qilindi, baningiz olib tashlandi. Guruhga qayta qo‘shilishingiz mumkin.
+ed103ceb6	❌ Shikoyatingiz rad etildi.
+f7480a2b3	<b>Natija:</b> ⟨0⟩ — ⟨1⟩
+b497d1353	✅ Qabul qilindi
+6c25e020d	❌ Rad etildi
+97239bc70	📨 Shikoyat #⟨0⟩ ⟨1⟩ | ⟨2⟩
+7a80eefec	🖼 media yo‘q
+573052e01	🔘 ⟨0⟩ ta tugma
+b81be0f7f	🎲 ⟨0⟩ ta variant
+d542cb1c4	💎 aynan nusxa
+03cb45a36	Rasm
+638bbfe15	Fayl
+867b291d2	Musiqa
+e8bff35ea	Ovozli xabar
+2e9d0e77a	Stiker
+966648de4	Video xabar
+7d472b473	soat
+f4a9f3249	Bu tugma endi amal qilmaydi.
+30dc00c2e	Bu havola endi amal qilmaydi.
+c9910a305	Bu eslatma endi mavjud emas.
+0e89955b2	👋 {name} bizni tark etdi. Xayr!
+e41edf275	📜 <b>⟨0⟩ qoidalari</b>
+3f1696378	<b>Formatlash:</b> xabar Telegramda qanday yozsangiz, xuddi shunday saqlanadi (qalin, kursiv, havolalar, spoylerlar, iqtiboslar).
+06c164645	<b>Media:</b> rasm/video/GIF/stikerga javob berib, buyruqni yozing.
+6a1a1a0ad	<b>Tugmalar</b> (har bir satr — bitta qator, yonma-yon uchun <code>&amp;&amp;</code>):
+a1c3d2c0b	<code>Kanalimiz - https://t.me/channel &amp;&amp; Yordam - @support</code>
+3424e60cc	<code>Qoidalarni o‘qish - rules</code> · <code>Ma’lumot - popup:Matn</code> · <code>Eslatma - #nom</code>
+dd3608634	Rang: qator oxirida <code>#green</code> <code>#red</code> <code>#blue</code> · Rose uslubi: <code>[Kanal](buttonurl://t.me/channel)</code>
+90f26740a	<b>O‘zgaruvchilar:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
+23adc295f	<b>Tasodifiy:</b> bir nechta xabarni faqat <code>%%%</code> dan iborat qator bilan ajrating.
+7d75ab43e	Bu xabarni kanallarda ishlatib bo‘lmaydi.
+93a792a44	Xush kelibsiz
+06ba336bf	Xayrlashuv
+ff0fe91d4	Qoidalar
+86eca05aa	✏️ <b>⟨0⟩ xabari</b>
+0d20c41d6	Foydalanish: <code>/⟨0⟩ matn</code> yoki xabar/mediaga javob bering: <code>/⟨1⟩</code>
+ee9b02bb7	💎 Premium emojilar saqlanadi: xabar aynan nusxalanadi. Manba xabarni o‘chirmang (o‘chirilsa, oddiy emojilar bilan yuboriladi).
+d54d1a799	✅ ⟨0⟩ xabari saqlandi (⟨1⟩).⟨2⟩
+32bc1141c	Oldindan ko‘rish:
+a4fd88326	✏️ ⟨0⟩ xabari yangilandi | ⟨1⟩
+f2ecba035	Bu guruhda hali qoidalar belgilanmagan.
+f6d49a8a4	Ularni /setrules bilan qo‘shishingiz mumkin.
+3dadf54ab	⟨0⟩ xabari: ⟨1⟩ · ⟨2⟩
+42b967a7b	O‘zgartirish uchun: /set⟨0⟩
+6d2d95e97	👋 Xush kelibsiz
+46af570c5	🚪 Xayrlashuv
+6413cb724	✅ Xush kelibsiz xabari standartga qaytarildi.
+14324da2a	Interval formati: <code>30m</code>, <code>6h</code>, <code>1d</code>
+a44cbb972	Interval kamida 10 daqiqa va ko‘pi bilan 7 kun bo‘lishi kerak.
+7e69525ad	Bitta guruhda ko‘pi bilan ⟨0⟩ ta rejalashtirilgan xabar bo‘lishi mumkin.
+ee86ab412	⏰ <b>Rejalashtirilgan xabar</b>
+8dada6c44	Foydalanish: <code>/schedule 6h Qoidalarni o‘qishni unutmang!</code>
+82c791f2c	yoki xabar/mediaga javob bering: <code>/schedule 6h</code>
+7939ca797	Ro‘yxat va o‘chirish: /schedules
+62c97be15	✅ Rejalashtirilgan xabar #⟨0⟩: har ⟨1⟩ da yuboriladi (birinchisi ⟨2⟩ dan keyin). Ro‘yxat: /schedules
+bd18601d1	⏰ Rejalashtirilgan xabar qo‘shildi (har ⟨0⟩) | ⟨1⟩
+e2d35adb1	⟨0⟩ <b>#⟨1⟩</b> har ⟨2⟩ · keyingisi ⟨3⟩
+76c241937	🧹 Oldingisini o‘chirish
+b35d597c9	📌 Oldingisini qoldirish
+225f856c3	⏰ <b>Rejalashtirilgan xabarlar</b>
+207dc0f12	Qo‘shish uchun: <code>/schedule 6h xabar</code> (media/tugmalar qo‘llab-quvvatlanadi)
+351e8911a	Hozircha yo‘q.
+242c0f02c	Topilmadi
+ec93a493c	⏸ To‘xtatildi
+e388dd558	▶️ Boshlandi
+d08a36466	➕ Yangi rejalashtirilgan xabar
+25cda8fe6	🚪 <b>Xayrlashuv xabari</b> — ⟨0⟩
+b61184fea	Holat: <b>⟨0⟩</b> · ⟨1⟩
+0eec2952d	Faqat o‘zi chiqib ketganlarga yuboriladi (chiqarilgan/banlanganlarga emas). Avtomatik o‘chirish vaqti xush kelibsiz bilan bir xil.
+b0037f2fb	👋 <b>Xush kelibsiz</b> — ⟨0⟩
+611ef08d1	Xush kelibsiz: <b>⟨0⟩</b> · ⟨1⟩
+a4530174c	📜 Qoidalar: ⟨0⟩ · 🚪 Xayrlashuv: ⟨1⟩ · ⏰ Rejalashtirilgan xabarlar: ⟨2⟩
+d0b1d849f	Media, tugmalar va o‘zgaruvchilar uchun ✏️ Tahrirlash tugmasini bosing (yoki yordamni ko‘rish uchun guruhda /setwelcome yozing).
+2b7ced272	Yoqiq
+e5b4e786e	bor
+68b8326a2	yo‘q
+2bae1a721	✏️ Tahrirlash
+894e0e55f	👁 Oldindan ko‘rish
+099ae3d9c	🖼 Mediani olib tashlash
+8bb5bb494	↩️ Standartga qaytarish
+adcf7aa93	🧹 Eskisini o‘chirish
+1eaf255d1	👥 Ko‘pchilik uchun bitta xabar
+7ef1d92b8	⏱ Avtomatik o‘chirish
+e0454a0ce	📩 Shaxsiy yuborish
+060b7f669	📜 Qoidalarni yozish
+ee89e73e1	👁 Qoidalar
+b6669596d	🚪 Xayrlashuv xabari ›
+0c2dc5967	⏰ Rejalashtirilgan xabarlar ›
+9a8a538db	Qora ro‘yxat: ⟨0⟩
+0eed14a22	Qoidalar yo‘q
+a6aea5676	👁 Oldindan ko‘rish yuborildi
+eb9f11f93	↩️ Standartga qaytarildi
+14af210b4	🖼 Media olib tashlandi
+f615cd8f5	⏹ Belgilash to‘xtatildi
+ce76be77d	✅ Belgilash tugadi
+98452c88d	⟨0⟩: ⟨1⟩/⟨2⟩ kishi belgilandi.
+7f535520c	/tag guruhda ishlatiladi.
+59b9ad51d	⏳ Bu guruhda belgilash allaqachon ketmoqda. To‘xtatish uchun: /stoptag
+46a8f403f	⏳ Guruh spam bo‘lmasligi uchun belgilashlar orasida tanaffus bor. ⟨0⟩ daqiqadan keyin qayta urinib ko‘ring.
+02343ede4	Belgilash uchun hech kim topilmadi. (Bot guruhda yozgan yoki qo‘shilgan a’zolarni biladi.)
+29099e290	🏷 Belgilash boshlandi: <b>⟨0⟩</b> kishi, har xabarda ⟨1⟩ ta · taxminan ⟨3⟩ daqiqa
+5a101718d	To‘xtatish uchun: /stoptag
+f64e607e0	⏹ To‘xtatish
+87e8dab7e	🏷 /tag boshlandi (⟨0⟩ kishi) | ⟨1⟩
+93e9f8e23	Hozir hech qanday belgilash ketmayapti.
+de3fd2d6f	⏹ Belgilash to‘xtatilmoqda…
+6e637aa42	⏹ To‘xtatilmoqda
+a0fd2c146	Belgilash allaqachon tugagan.
+60c103470	Buni belgilanishni istamagan guruhingizda yozing.
+170599775	🔔 Siz yana /tag ro‘yxatidasiz.
+3812eb431	🔕 Bu guruhda endi /tag bilan belgilanmaysiz. Bekor qilish uchun yana /notag yozing.
+21946f144	⚠️ Majburiy kanalni tekshirib bo‘lmadi: bot kanalda adminmi? (/forcesub bilan qayta sozlang)
+8e87bf498	Kanalga qo‘shilish
+cbb50c7c3	✅ Qo‘shildim
+0ca6d0da1	📢 ⟨0⟩, bu guruhda yozish uchun avval <b>⟨1⟩</b> kanaliga qo‘shilishingiz kerak.
+c0ec4b2f3	Bu tugma siz uchun emas.
+aaed7d345	✅ Rahmat, endi yozishingiz mumkin!
+bd2685273	Siz hali kanalga qo‘shilmagansiz. Avval 📢 tugmasi bilan qo‘shiling, so‘ng qayta bosing.
+1886b3d17	Kanalni <code>@username</code>, <code>t.me/channel</code> yoki <code>-100…</code> ID ko‘rinishida yozing.
+f02d79616	Kanal topilmadi yoki bot kanalda emas. ⟨0⟩
+87bee0af3	Bu kanal emas.
+4171be67d	Avval botni kanalga <b>admin</b> qilib qo‘shing (a’zolarni ko‘rish uchun kerak).
+9d38f82c5	Yoqiq — <b>⟨0⟩</b>
+4adcca7b1	📢 <b>Majburiy kanal</b>: ⟨0⟩
+a3407edfd	Sozlash: <code>/forcesub @channel</code>
+95acb52af	O‘chirish: <code>/forcesub off</code>
+045928d81	Bot kanalda admin bo‘lishi kerak. Adminlar va bot egasi bundan mustasno.
+fe929a5d7	📢 Majburiy kanal o‘chirildi.
+53a5e40c2	Kanalga qo‘shilmaganlarning xabarlari o‘chiriladi va qo‘shilish tugmasi ko‘rsatiladi.
+cef984319	📢 Majburiy kanal: ⟨0⟩ | ⟨1⟩
+d48d5b5ae	qisqa vaqt
+05260e946	⟨0⟩ kun
+b04fc7f5d	hozirgina
+21aaa5a62	⟨0⟩ daqiqa
+7448bebe4	⟨0⟩ soat
+5ba98ca40	⟨0⟩ kun
+ad5b41977	💤 ⟨0⟩ endi AFK⟨1⟩
+44c5de771	👋 ⟨0⟩ qaytdi (⟨1⟩ AFK edi).
+e117178d7	💤 ⟨0⟩ hozir AFK (⟨1⟩)⟨2⟩
+44140939f	📢 <b>Majburiy kanal</b> — ⟨0⟩
+e5b1aac1e	Holat: <b>⟨0⟩</b>
+0716f7bc2	Kanal: ⟨0⟩
+0d5b480e5	Kanalga qo‘shilmagan a’zolarning xabarlari o‘chiriladi va '📢 Kanalga qo‘shilish / ✅ Qo‘shildim' tugmali eslatma chiqadi. Adminlar bundan mustasno. Bot kanalda admin bo‘lishi kerak.
+7d73e8088	belgilanmagan
+6ba5f155e	✏️ Kanalni belgilash
+c9606c43c	🏷 <b>Belgilash sozlamalari</b> — ⟨0⟩
+203ce8b22	<code>/tag xabar</code> a’zolarni qismlab belgilaydi. <code>/stoptag</code> to‘xtatadi, a’zolar <code>/notag</code> bilan ro‘yxatdan chiqishi mumkin.
+b86bf2507	Har xabarda: <b>⟨0⟩ kishi</b> · Uslub: <b>⟨1⟩</b> · Kimlar: <b>⟨2⟩</b>
+d2abd1ed8	Ism
+1da63df5e	oxirgi 7 kunda faol bo‘lganlar
+4b30ca4e3	hamma
+4e45e032a	Odamlar
+4dd25e398	⟨0⟩Ism bilan
+c39394400	⟨0⟩Emoji bilan
+b48e5cb08	Faqat oxirgi 7 kunda faol bo‘lganlar
+b1d807974	Xabar berish
+ca39fe0f8	botning boshqa ⟨0⟩ ta guruhida banlangan
+9872ca74d	CAS spam ro‘yxatida bor
+9396a2730	🚩 ⟨0⟩ qora ro‘yxatda (⟨1⟩) → <b>banlandi</b>.
+545b1c5c1	🚩 ⟨0⟩ qora ro‘yxatda (⟨1⟩) → <b>ovozsiz qilindi</b>. Adminlar uni qo‘yib yuborishi mumkin.
+07441d924	🚩 Diqqat: ⟨0⟩ ⟨1⟩.
+45358021b	✏️ Ism o‘zgarishi: ⟨0⟩ (ID <code>⟨1⟩</code>)
+281b2747a	Eski: ⟨0⟩
+059547382	Yangi: ⟨0⟩
+a2c2bec19	📋 <b>Tarix</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
+0786218b9	🏷 Eski ismlar: ⟨0⟩
+14c5bccb9	🚩 Umumiy qora ro‘yxat: ⟨0⟩
+38fd7e621	<b>⟨0⟩ ta guruhda banlangan</b>
+15ab6d34d	toza
+04a2454bb	🌐 CAS: ⟨0⟩
+66b71c0f8	⚠️ ro‘yxatda bor
+5a25bd323	📊 Oxirgi ⟨0⟩ kun: ⚠️ ⟨1⟩ ogohlantirish · 🔇 ⟨2⟩ mute · 👢 ⟨3⟩ kick · 🚫 ⟨4⟩ ban
+5f914853f	Qayd etilgan jazolar yo‘q.
+05d9f273c	Foydalanish: /record @user, /record ID yoki xabarga javob sifatida /record
+f3ac03616	📩 Tarix shaxsiy xabarda yuborildi.
+5d8b9aade	📩 Tarixni shaxsiy yuborishim uchun avval menga shaxsiy chatda /start yuboring.
+2e3efd222	🤖 Botga o‘tish
+859b5bb09	🔇 Ovozsiz qilish (⟨0⟩/⟨1⟩)
+4d8231ce2	❌ Bekor qilish (admin)
+39229bf11	/votemute guruhda, xabarga javob sifatida ishlatiladi.
+6a2b8f19c	Bu guruhda ovoz berib ovozsiz qilish o‘chirilgan.
+61afc3c7f	Ovozsiz qilmoqchi bo‘lgan odamning xabariga /votemute bilan javob bering.
+89cfeb825	Bu odam uchun ovoz berishni boshlab bo‘lmaydi.
+77053150c	Yangi a’zolar ovoz berishni boshlay olmaydi (guruhda kamida 1 kun bo‘lishingiz kerak).
+ebb86ddce	Yaqinda ovoz berishni boshlagansiz, biroz kuting.
+2848c7501	Bu odam uchun ovoz berish allaqachon ketmoqda.
+97509d3a2	🗳 ⟨0⟩ uchun <b>ovozsiz qilish ovozi</b> (⟨1⟩)
+49efb6ab2	Boshlagan: ⟨0⟩ · ⟨1⟩ ta ovoz kerak · ⟨2⟩ daqiqa ichida
+dc6640321	Bu ovoz berishning muddati tugagan.
+608b293ec	Ovoz berish bekor qilindi
+0fdae78cf	❌ Ovoz berishni ⟨0⟩ bekor qildi.
+a0e2f43f9	O‘zingizga ovoz bera olmaysiz.
+ffff3ff40	Yangi a’zolar ovoz bera olmaydi (guruhda kamida 1 kun bo‘lishingiz kerak).
+fe7fa73cc	Siz allaqachon ovoz bergansiz.
+e0e085981	✅ Ovozingiz hisobga olindi
+73e49db75	Ovozsiz qilib bo‘lmadi (bot huquqlari?)
+aa6350471	🔇 Ovozsiz qilindi
+75f1001f2	🔇 ⟨0⟩ ⟨1⟩ ta ovoz bilan ⟨2⟩ ga ovozsiz qilindi.
+8555c063c	🗳 Ovoz berish: ⟨0⟩ ⟨1⟩ ta ovoz bilan ⟨2⟩ ga ovozsiz qilindi | ⟨3⟩
+18fb9aaaa	🧑‍⚖️ <b>Jamoa himoyasi</b> — ⟨0⟩
+f1deffa09	🚩 <b>Umumiy qora ro‘yxat:</b> botning boshqa guruhida banlangan kimdir bu yerga qo‘shilsa, tanlangan harakat qo‘llaniladi.
+43a185211	🌐 <b>CAS:</b> jahon spam ro‘yxatidagi akkauntlar ham ushlanadi.
+6e4660beb	✏️ <b>Ismni kuzatish:</b> ism/username o‘zgarishlari jurnal kanaliga yoziladi (tarix: /record).
+adabf49fe	🗳 <b>Ovoz bilan ovozsiz qilish:</b> a’zolar /votemute bilan xabar ustida ovoz berib, kimnidir vaqtincha ovozsiz qilishi mumkin (yangi a’zolar ovoz bera olmaydi, xodimlarga qo‘llanmaydi).
+b800b8e5f	🚩 Umumiy qora ro‘yxat
+97bceca81	✏️ Ismni kuzatish
+c5772d4e7	🗳 Ovoz berish
+f12c4aec5	Kerakli ovozlar
+662158acd	Ovozsiz qilish
+5c4935039	🎁 <b>Konkurs</b>⟨0⟩
+0dad0ba32	🏆 G‘oliblar soni: <b>⟨0⟩</b>
+7c606f70b	⏰ Tugashi: <b>⟨0⟩</b>
+92b031d27	📢 ⟨0⟩ kanaliga a’zo bo‘lish
+1a822445f	💬 guruhda kamida ⟨0⟩ ta xabar (oxirgi ⟨1⟩ kun)
+d9e82561c	📅 guruhda kamida ⟨0⟩ kun bo‘lish
+d0610eddb	🛡 profil rasmi yoki username bor haqiqiy akkaunt
+208622235	📋 <b>Shartlar</b>
+99c8d7297	👥 Ishtirokchilar: <b>⟨0⟩</b>
+cadb40104	🎁 Qatnashish (⟨0⟩)
+eb533cc4f	Bu guruhda konkurs ketmoqda. Yakunlash uchun: /endgiveaway
+10870143e	Davomiylik 1 daqiqadan 30 kungacha bo‘lishi kerak.
+9c50f1ba5	❌ Kanal sharti: ⟨0⟩
+ec58b461d	✅ Konkurs boshlandi.⟨0⟩
+9d6e7b1e0	Shartli misol: /giveaway 1d 3 Sovg‘a | channel=@channel messages=20 days=7
+8a942b576	Yakunlash uchun: /endgiveaway [g‘oliblar soni]
+05fd915f2	🎉 ⟨0⟩ konkurs boshladi: ⟨1⟩ | ⟨2⟩
+30f5e7aae	Botlar qatnasha olmaydi.
+f03d1a2cb	Avval guruhga qo‘shilishingiz kerak.
+b5417cc27	Guruh a’zoligingizni tekshirib bo‘lmadi.
+004bfc204	Profil rasmi yoki username bo‘lmagan akkauntlar qatnasha olmaydi (soxta akkauntdan himoya).
+39a47e334	Avval ⟨0⟩ ga qo‘shilishingiz kerak.
+99797f0e4	Guruhda kamida ⟨0⟩ ta xabaringiz bo‘lishi kerak (hozir ⟨1⟩).
+f21f9c94c	Guruhda kamida ⟨0⟩ kun bo‘lgan bo‘lishingiz kerak.
+ff2167b09	Bu konkurs yakunlangan.
+b5116fff1	Siz allaqachon qatnashyapsiz, omad! 🍀
+5c88f09bc	🎉 Konkursga qo‘shildingiz, omad!
+b05652dd1	✅ <b>Konkurs yakunlandi</b>
+4cc381328	🎉 Konkurs yakunlandi! Hech bir ishtirokchi shartlarga mos kelmadi.
+8e2d564a7	🎉 <b>Konkurs yakunlandi!</b>⟨0⟩
+5aa86da43	🏆 G‘olib(lar): ⟨1⟩
+e9ade43fd	👥 Ishtirokchilar: ⟨0⟩
+7438ab083	🏆 Konkurs yakunlandi: ⟨0⟩ | ⟨1⟩
+1e5f2647b	g‘olib yo‘q
+12a0187af	Faol konkurs yo‘q.
+9de1a5b57	✅ Konkurs yakunlandi.
+ff647517b	Kunlik xabarlar — oxirgi 30 kun
+34673a626	Soatlar bo‘yicha xabarlar (Turkiya vaqti, 30 kun)
+fa46923fb	Qo‘shilganlar / chiqqanlar — oxirgi 30 kun
+0edbd3fce	Qo‘shilganlar (⟨0⟩)
+03822ea5b	Chiqqanlar (⟨0⟩)
+5b09123ba	Eng faol a’zolar — oxirgi 7 kun
+8faf5f37f	Hali ma’lumot yo‘q
+c68b2a090	💬 Xabarlar: 7 kun <b>⟨0⟩</b> · 30 kun <b>⟨1⟩</b> · faol a’zolar (7 kun): <b>⟨2⟩</b>
+efd6992e0	👥 30 kunda qo‘shildi <b>⟨0⟩</b> · chiqdi <b>⟨1⟩</b>
+980151f9d	🛡 Jami: 🚫 ⟨0⟩ ban · 🔇 ⟨1⟩ mute · 👢 ⟨2⟩ kick · 🔁 ⟨3⟩ spam · 🙋 ⟨4⟩ so‘rov
+8b3ad8463	⟨0⟩ — statistika
+afd536817	Jazo
+74a1b4f70	🌊 Flud: xabar limiti
+7d5fdce06	🌊 Flud: vaqt oralig‘i
+6eec7f346	🖼 Media flud: media limiti
+188dc2ac4	🖼 Media flud: vaqt oralig‘i
+4cb84b51a	🔇 Ovozsiz qilish muddati
+3b723e30f	🕊 Spamdan ozod odamlar
+62af570a8	Har qatorga bitta foydalanuvchi ID. Spam, flud va havola himoyasi bu odamlarga qo‘llanmaydi.
+97559aa34	🛡 Himoyalar
+eaecb6e7c	🔤 So‘z va havola ro‘yxatlari
+50e7fc41b	Taqiqlangan so‘zlar
+5d70efcb4	Har qatorga bitta so‘z. Regex uchun boshiga re: yozing
+a59a817c8	Ruxsat etilgan domenlar
+98ae8882f	Har qatorga bitta domen (masalan, youtube.com).
+17dfd3589	🚪 Qo‘shilish
+47bc3cee8	Captcha vaqti
+31a22d269	📩 Qo‘shilish so‘rovlari uchun shaxsiy tekshiruv
+51640d5b4	Reyd: a’zolar limiti
+33500eff3	Reyd: vaqt oralig‘i
+bcd337aa1	🐣 Yangi a’zolarni cheklash
+b7e0a1cb1	Usernamesiz foydalanuvchilarni ovozsiz qilish
+3fe9d6820	✅ Qo‘shilish so‘rovlarini avtomatik qabul qilish
+876437b88	❌ Qo‘shilish so‘rovlarini avtomatik rad etish
+94dd4d1bd	🤖 Botlar / usernamesiz foydalanuvchilarni rad etish
+b582c2d59	🖼 Nomaqbul media
+ca770c605	🤖 18+ kontent uchun AI tekshiruvi
+737b0637b	Rasmlar, stikerlar va GIFlar tekshiriladi (serverda nudenet o‘rnatilgan bo‘lishi kerak).
+1903d3d63	📦 Xavfli fayllarni o‘chirish
+9c0ff36ee	.apk .exe .bat .scr kabi fayllar
+c79ee4fbb	Qisqa vaqtda ko‘p nomaqbul media kelsa, guruh mediasi vaqtincha qulflanadi.
+b43510a81	✏️ Tahrirlar va shikoyatlar
+e97c80f7b	✏️ Kechikkan tahrirdan himoya
+7f9f3195d	Yuborilgandan keyin ancha vaqt o‘tib tahrirlangan xabar o‘chiriladi; eski va yangi versiyalar asoschiga yuboriladi.
+5e74ca845	👥 Kimlarga taalluqli
+ddd26077d	Tanlanmagan darajalar bundan mustasno. Buni faqat asoschi o‘zgartira oladi.
+66613016d	Tahrir vaqti chegarasi
+e0d3940a6	📨 Asoschi / qo‘shganga xabar berish
+9b1e938f3	🚩 Shikoyat tizimi (/report, @admin)
+44d53d26e	⚠️ Ogohlantirishlar
+70d607de5	Ogohlantirish limiti
+a8dd080ee	Limitga yetilganda
+453982208	Vaqtinchalik jazo muddati
+bfbfead91	👋 Xush kelibsiz
+e8a88eb95	🧹 Yangi odam qo‘shilganda eskisini o‘chirish
+5c2fbdfa8	👥 Ommaviy qo‘shilishlar uchun bitta xabar
+90de79bd5	🚪 Xayrlashuv xabari
+0f39f1096	📜 Qoidalar
+f9c17c1f0	🏷 Belgilash va kanal
+4f7b4fd4f	/tag: har xabarda
+4aa6ce6cc	/tag uslubi
+6b93199e3	Ism bilan
+aa42b8748	Emoji bilan
+1d365363e	📢 Majburiy kanal
+7b7afd285	Kanalni /forcesub @channel bilan belgilang.
+87bb0ff1a	🔗 Taklif tanlovi
+1c0fda956	A’zolar /invite bilan o‘z havolasini, /invites bilan reytingni oladi.
+c8d05f85f	🧑‍⚖️ Jamoa himoyasi
+33af72703	Botning boshqa guruhida banlangan kimdir qo‘shilganda.
+25347c8be	Qora ro‘yxat harakati
+f7e588100	🌐 CAS spam ro‘yxati
+4a02f552b	✏️ Ism o‘zgarishini kuzatish
+32a52c44c	🗳 Ovoz bilan ovozsiz qilish
+9b96d57aa	Ovoz bilan ovozsiz qilish muddati
+d51893a35	🌍 Til
+8d6c8a4a5	Botning bu guruhdagi tili
+45ac69c17	Botning xabarlari, tugmalari va ogohlantirishlari shu tilda bo‘ladi. Siz yozgan kontent o‘zgarmaydi.
+a53ce8e7e	👮 Admin auditi
+d06ffe7b8	📋 Kunlik admin xulosasi
+79c2f9928	Har kuni kechqurun: kim nechta ban, mute, ogohlantirish va o‘chirish qilgani (asoschi va botni qo‘shgan odamga).
+c1b823489	🚨 Admin harakatlari limiti
+b05a27d38	Asoschi bo‘lmagan xodim 1 soatda limitdan ko‘p ban/kick/mute qilsa, uning huquqlari to‘xtatiladi.
+2a6b6f7f9	Soatlik limit
+99f28dbae	🗑 O‘chirilgan xabarlarni jurnal kanaliga nusxalash
+704d44996	/del va /purge bilan o‘chirilganlar. Telegram qo‘lda o‘chirishlar haqida botlarga xabar bermaydi.
+bf952a57c	🛟 Adminlarni tiklash
+c4395cbb9	Ishonchli shaxslar (ko‘pi bilan 3)
+94f3d0e2c	Har qatorga bitta foydalanuvchi ID. Adminlar ommaviy lavozimdan tushirilsa, bu odamlar botga /recover yuborishi mumkin.
+44ada5469	♻️ Ommaviy lavozimdan tushirishdan keyin avtomatik tiklash
+fe85b70c6	#green
+485f81ade	#red
+9cfcbc726	Noto‘g‘ri tanlov
+4094a1250	Juda uzun: ⟨0⟩…
+3994c99a9	Noto‘g‘ri ID: ⟨0⟩ (faqat raqamlar)
+5055a2323	Ko‘pi bilan ⟨0⟩ kishi
+abe802098	Noto‘g‘ri
+43936b588	Xabar bo‘sh bo‘lishi mumkin emas
+45313b745	Noma’lum maydon
+98d2db628	Har 30 daqiqada
+15ff62ef8	Har soatda
+3ff28dc87	Har 2 soatda
+b7b8f6424	Har 3 soatda
+b5416f932	Har 6 soatda
+d74bcca07	Har 12 soatda
+e07f13000	Kuniga bir marta
+f1868872f	Har 3 kunda
+b09892476	Haftada bir marta
+fe3e896af	📦 Stiker to‘plami: ⟨0⟩
+cce0f0bc2	Sizda ruxsat yo‘q
+b91959e41	Vaqt formati HH:MM bo‘lishi kerak
+6ed0b041b	🌙 Tungi rejim saqlandi
+04f474277	Eslatma nomi: harflar, raqamlar, - yoki _ (ko‘pi bilan 32)
+064f4b29e	Eslatma matni bo‘sh bo‘lishi mumkin emas
+a918fc143	📝 #⟨0⟩ saqlandi
+8af22b61d	🗑 Eslatma o‘chirildi
+bdf64f16d	Eslatma topilmadi
+2550a4e51	Noto‘g‘ri trigger (ko‘pi bilan 100 belgi; xabar ichida moslash uchun *so‘z*)
+65d904f46	Javob bo‘sh bo‘lishi mumkin emas
+543b45aca	Ko‘pi bilan ⟨0⟩ ta filtr bo‘lishi mumkin
+75dac4689	🧩 Filtr ⟨0⟩: ⟨1⟩
+833cd7a4f	yangilandi
+8421922af	🗑 Filtr o‘chirildi
+d52273a24	Filtr topilmadi
+737953689	Noto‘g‘ri interval
+8f07eb02e	⏰ Rejalashtirilgan xabar qo‘shildi
+4a5a1fa05	✅ Yangilandi
+e10b8c2a9	🗑 Blok olib tashlandi
+e750a9371	Noma’lum harakat
+233235be6	Noma’lum sozlama
+64198f47f	Avval kanalni /forcesub @channel bilan belgilang
+794ac0486	🖥 Veb-paneldan o‘zgartirildi: ⟨0⟩ | ⟨1⟩
+c5340e8d3	Seansni tasdiqlab bo‘lmadi. Panelni Telegram ichida oching.
+650c37e3f	Guruh topilmadi
+ed8d9ddd6	Siz bu guruhda admin emassiz (yoki bot Telegramga ulana olmadi).
+d1d4f67c2	Bot texnik xizmatda, birozdan keyin qayta urinib ko‘ring.
+e2d7c5c97	POST talab qilinadi
+33edae1a5	So‘rov juda katta
+bcde64b8a	Noto‘g‘ri so‘rov
+0429402e5	Noto‘g‘ri havola
+ed8c751c4	Qo‘llab-quvvatlanmaydigan so‘rov
+a5bfc246e	Server xatosi
+6b75a37b8	🖥 Veb-panelni ochish
+b76f92e63	Bu bot uchun veb-panel yoqilmagan (.env dagi WEBAPP_URL bo‘sh).
+61267ecf8	🖥 Veb-panel bot bilan shaxsiy chatda ochiladi:
+1503ed392	🖥 Shaxsiy chatda ochish
+f6dcc8f07	🖥 <b>Veb-panel</b>
+ffdbfe849	Barcha sozlamalar bitta sahifada: himoyalar, tahrir himoyasi, nomaqbul media, qo‘shilish, xush kelibsiz, ro‘yxatlar, tungi rejim, eslatmalar, filtrlar, rejalashtirilgan xabarlar, bloklangan media, xodimlar va guruh statistikasi. O‘zgarishlar botga bir necha soniyada yetib boradi.
+72019bbac	asosiy
+62ca31689	⟨0⟩: ⟨1⟩ kutmoqda⟨2⟩
+3f8811338	, ⟨0⟩ bajarilmoqda
+e5136258e	⚡ <b>Unumdorlik</b> — ish vaqti ⟨0⟩
+be1d477f1	💬 Qayta ishlangan yangilanishlar: <b>⟨0⟩</b> · navbat: ⟨1⟩
+fdd4f90c1	🧠 Xotira: <b>⟨0⟩ MB</b> (cho‘qqi ⟨1⟩ MB) · CPU: ⟨2⟩ s
+3da2a45ed	🧠 CPU: ⟨0⟩ s
+3d0951b3b	🗄 Ma’lumotlar bazasi: ⟨0⟩ MB · paketli yozuvlar: ⟨1⟩ marta, ⟨2⟩ qator · kutilmoqda: ⟨3⟩
+22a8d336d	⏱ Sikl kechikishi: o‘rtacha ⟨0⟩ · maks ⟨1⟩ (100 ms dan ortiq = qandaydir amal botni to‘xtatmoqda)
+7f78c41d0	👥 Guruhlar: ⟨0⟩ · Kanallar: ⟨1⟩ · Klonlar: ⟨2⟩
+a860ce1ad	🐢 <b>Eng sekin (o‘rtacha)</b>
+6ea19cdf0	⟨0⟩. <code>⟨1⟩</code> — o‘rtacha ⟨2⟩ · maks ⟨3⟩ · ⟨4⟩ marta
+b46e47f18	⏳ <b>Eng ko‘p umumiy vaqt</b>
+5d3700941	⟨0⟩. <code>⟨1⟩</code> — jami ⟨2⟩ · ⟨3⟩ marta
+3e186b7ac	🔄 Yangilash
+0b681bc34	🧹 Nolga tushirish
+7866cfd7a	🧹 O‘lchovlar nolga tushirildi
+8ed3799c7	🔄 Yangilandi
+e8f595afe	🪦 Bot chiqarilgan / ulanib bo‘lmaydi
+fbd3f68b8	⚠️ Bot admin emas
+7950587b4	🕳 Bo‘sh (≤⟨0⟩ a’zo)
+c7417acd3	💤 ⟨0⟩ kundan beri jim
+b2d73a5b7	🤖 <b>⟨0⟩ Security Bot paneli</b>
+6dcd06cc1	📊 Statistika:
+2934c79d8	├ Jami guruhlar: ⟨0⟩
+e11665156	├ Jami kanallar: ⟨0⟩
+98ee4dccc	├ Jami foydalanuvchilar: ⟨0⟩
+2cdc2cc48	└ Shaxsiy foydalanuvchilar: ⟨0⟩
+774aa2184	👥 Guruhlar
+de09056f1	🧹 Tozalash
+d03041124	📊 Statistika
+9782862bd	🚫 Bloklanganlar
+c5249c21a	⚡ Unumdorlik
+009c2e489	Guruhlar
+43dd9b917	⟨0⟩ <b>⟨1⟩</b> (⟨2⟩) — sahifa ⟨3⟩/⟨4⟩
+1e4e3b199	Nomni bosing: ma’lumot · 🚪: botni chiqarish
+7035c59fd	📢 Ro‘yxatdan o‘tgan kanallar yo‘q.
+a6492303c	👥 Ro‘yxatdan o‘tgan guruhlar yo‘q.
+e5b94ef1a	🔙 Orqaga
+8b1164c1a	🔙 Ro‘yxatga qaytish
+6abf2b290	Bu chat uchun yozuv yo‘q (o‘chirilgan).
+deacf11c1	✅ admin
+19ae8c1fe	✅ egasi
+c5de3cdae	⚠️ a’zo (admin emas)
+6d25c19b2	❌ guruhda yo‘q
+9f9a5ad1c	❌ chiqarib yuborilgan
+84ba3029b	👥 A’zolar: ⟨0⟩ · 🤖 Bot: ⟨1⟩
+c86df7e48	📅 Ro‘yxatdan o‘tgan: ⟨0⟩⟨1⟩
+079fe4cc3	💬 Oxirgi xabar: ⟨0⟩ · 7 kunda ⟨1⟩ ta xabar
+33a131ec1	🛡 Faol himoyalar: ⟨0⟩
+c215ada82	· Qo‘shgan: ⟨0⟩
+cac2ce338	hech qachon
+d4f5955f6	🚪 Botni chiqarish
+84297554a	🗑 Yozuvni o‘chirish
+5b1da6456	📋 Uning sozlamalarini boshqa guruhlarga qo‘llash
+f9c565e5d	🧹 <b>Tozalash tekshiruvi</b> — ⟨0⟩ ta chat tekshirildi
+9309c9a8c	🗑 Yozuvlarni o‘chirish
+f9dc0c92a	🚪 Chiqish + o‘chirish
+3939c3aa3	📋 Ko‘rsatish
+4fd13b5b2	✅ Tozalanadigan narsa yo‘q.
+71017a253	Eslatma: ‘Chiqish + o‘chirish’ botni o‘sha chatlardan chiqaradi va ularning sozlamalarini o‘chiradi.
+78c3f116c	🔄 Qayta tekshirish
+f73473dc3	Bu buyruq faqat shaxsiy chatda ishlaydi!
+42c9a2045	📋 <b>⟨0⟩</b> sozlamalari qolgan <b>⟨1⟩</b> ta guruhga qo‘llansinmi?
+3e1a4c661	Nusxalanadi: himoya sozlamalari, jazolar, captcha, tungi rejim, ogohlantirish limiti va boshqalar.
+ac2c708cc	Nusxalanmaydi: xush kelibsiz/xayrlashuv/qoidalar xabarlari, majburiy kanal, qulflar, guruhga xos ro‘yxatlar.
+46d884196	<b>+ ro‘yxatlar</b>: taqiqlangan so‘zlar va ruxsat etilgan havolalar ro‘yxatlari ham qo‘shiladi (mavjudlari o‘chirilmaydi).
+cc53a5889	✅ Qo‘llash + ro‘yxatlar
+4bbf7625d	Manba guruhning yozuvi yo‘q.
+8b18be741	✅ ⟨0⟩ ta guruhga qo‘llandi
+a27027da6	📋 Bu guruh sozlamalari ⟨0⟩ ta guruhga qo‘llandi | ⟨1⟩
+584db30d0	🚪 Bot <b>⟨0⟩</b> dan chiqarilsinmi?
+5cb08b81f	• <b>Sozlamalarni saqlash</b>: bot qayta qo‘shilsa, sozlamalar qaytadi.
+c988453c1	• <b>Yozuvni ham o‘chirish</b>: sozlamalar, darajalar va statistika o‘chiriladi.
+29f10e48b	🚪 Chiqish, sozlamalar qolsin
+874976382	🗑 Chiqish va yozuvni o‘chirish
+1a6229583	Chiqib bo‘lmadi: ⟨0⟩
+c8614638e	✅ Chiqildi⟨0⟩
+588b8a501	va yozuv o‘chirildi
+4dd5e9778	Tekshirilmoqda…
+f127b4d7a	🧹 ⟨0⟩ ta chat tekshirilmoqda, bu biroz vaqt olishi mumkin…
+c04373159	Tekshiruv eskirgan, qayta tekshiring.
+f3c33c83f	🔙 Tekshiruvga qaytish
+1a3a3e54d	yozuvlari o‘chirilsinmi
+84c117afe	tark etilib, yozuvlari o‘chirilsinmi
+1f67427da	⚠️ ⟨0⟩: <b>⟨1⟩</b> ta chat ⟨2⟩? Buni ortga qaytarib bo‘lmaydi.
+eb3f9ab14	✅ Ha
+33889c985	Bajarilmoqda…
+5ac06101c	✅ ⟨0⟩ ta chat tozalandi⟨1⟩
+73500e336	Faqat asosiy bot egasi uchun.
+6a8179ecc	Bloklanganlar ro‘yxati faqat asosiy bot egasi uchun.
+7ec9c6536	🚫 <b>Bloklanganlar</b>
+2f8268ac0	Hech kim bloklanmagan.
+13f3c860d	📊 <b>Bot statistikasi</b>
+25fdf74b3	├ Jami xabar yozuvlari: ⟨0⟩
+31d1735c8	└ Jami banlar: ⟨0⟩
+511d1c70c	Foydalanish: /save <nom> <matn>  (yoki xabarga javob bering: /save <nom>)
+b9050868c	Eslatma matni bo‘sh bo‘lishi mumkin emas.
+fe73e61b7	✅ Eslatma saqlandi: #⟨0⟩
+e2c814129	Foydalanish: /get <nom>
+6d1ba3c3a	Bunday eslatma yo‘q. Ro‘yxatni /notes bilan ko‘ring.
+fdb9a02af	Saqlangan eslatmalar yo‘q. /save bilan qo‘shing.
+da2bf5ed4	📝 <b>Eslatmalar</b>
+755923919	Ko‘rish uchun guruhda #nom deb yozing.
+80841e69d	Foydalanish: /clear <nom>
+41afe3456	✅ Eslatma o‘chirildi.
+bd44e9b93	Bunday eslatma yo‘q.
+c74724c97	🔗 Havolalarni bloklash
+a2e8d7dd3	↪️ Forwardni bloklash
+65984a6d2	🚨 Reyddan himoya
+64de715c0	🐣 Yangi a’zolarni cheklash (60 daq)
+da5934c57	🔤 So‘z filtri
+90879408f	🟢 Yengil
+b042dc5d1	🟡 Oddiy
+79b39bda7	🔴 Qattiq
+58c29a09a	⚡ <b>Tezkor sozlash</b> — ⟨0⟩
+bf650f464	<b>1/3</b> Himoya andozasini tanlang. Har birini keyin o‘zgartirishingiz mumkin.
+51a1926be	🟢 <b>Yengil</b>: havolalar + flud
+14630f04b	🟡 <b>Oddiy</b>: + takroriy spam, captcha, nomaqbul media
+b89411ab4	🔴 <b>Qattiq</b>: + yangi a’zolarni cheklash, forwardni bloklash, reyddan himoya
+ce91c6e00	⚙️ O‘zim tanlayman
+e45f19110	✖️ Hozircha o‘tkazib yuborish
+d6c79520c	Standart
+e62d3857f	O‘z matnim
+3c5a1bd73	<b>2/3</b> Yangi kelganlarga xush kelibsiz xabari yuborilsinmi?
+4a80c8576	Hozir: <b>⟨0⟩</b>
+f4b2ad895	🚫 O‘chiq
+b8723d469	👋 Standart
+5566ef1f3	✏️ O‘z matnimni yozaman
+0a255f736	<b>3/3</b> Qaysi himoyalar yoqilsin? Yoqish/o‘chirish uchun bosing.
+b229f24f3	➡️ Davom etish
+39c7bad60	standart matn
+05c1aeb32	o‘z matningiz
+d405d7c75	<b>Xulosa</b>
+5618672c1	👋 Xush kelibsiz: ⟨0⟩
+f2adce74f	Sozlamalarni saqlash uchun Qo‘llash tugmasini bosing. Hammasini keyin /settings bilan o‘zgartirishingiz mumkin.
+77676a86d	✅ Qo‘llash
+eebb82b20	🛡 Himoyalarni o‘zgartirish
+2e80a5fce	Bu guruh ro‘yxatdan o‘tmagan. Avval botni admin qiling.
+762cfa3fa	⚡ Tezkor sozlash bot bilan shaxsiy chatda amalga oshiriladi:
+32f93f6ae	⚡ Sozlashni ochish
+ab8bc5e3f	Avval 🛡 Guruhlarim orqali guruh tanlang, so‘ng /setup yozing.
+008c8e774	Sozlash o‘tkazib yuborildi. Uni istalgan vaqtda /setup bilan ochishingiz mumkin.
+6f6bec44f	✅ Sozlamalar saqlandi
+5dc655d64	✅ <b>Sozlash yakunlandi!</b> — ⟨0⟩
+46d73ff37	Batafsil sozlamalar: /settings · Avtojavoblar: guruhda /filter
+d9a9eba4a	⚡ Tezkor sozlash qo‘llandi | ⟨0⟩
+161bbf828	🧩 <b>Filtrdan foydalanish</b>
+8344bd8fb	• Xabarga javob bering: <code>/filter Assalomu alaykum</code> (trigger — siz javob bergan xabar)
+7e201996f	• Javobsiz: <code>/filter salom Assalomu alaykum</code>
+cf1db6a05	• Bir nechta so‘z: <code>/filter "xayrli tun" Sizga ham xayrli tun!</code>
+812fb6d89	• Xabar ichida uchrasa: <code>/filter *salom* Salom!</code>
+206f91a6d	• Stiker/rasm/GIF bilan javob: mediaga javob bering → <code>/filter salom</code>
+b0b395569	• Tugmalar: javob ostida, har qatorda bittadan <code>Kanal - https://t.me/channel</code>
+380f07344	O‘zgaruvchilar: <code>{user}</code> <code>{first}</code> <code>{group}</code> · Formatlash (qalin, havolalar…) saqlanadi
+528d066d4	Ro‘yxat: /filters · O‘chirish: /stop salom · Hammasini o‘chirish: /stopall
+7315f262e	⚠️ Bitta guruhda ko‘pi bilan ⟨0⟩ ta filtr bo‘lishi mumkin. Eskilarini /stop bilan o‘chiring.
+cf56cd5da	xabar ichida uchraganda
+0272debab	yozilganda
+3045102b7	✅ Filtr ⟨0⟩: <b>⟨1⟩</b> — ⟨2⟩ javob beraman.
+67c264f1a	qo‘shildi
+c64b0c3ca	🧩 Filtr qo‘shildi: ⟨0⟩ | ⟨1⟩
+830911851	Bu guruhda filtrlar yo‘q. Qo‘shish uchun: /filter
+32a5d5ddb	🧩 <b>Filtrlar</b> (⟨0⟩)
+3b8b66dd5	O‘chirish uchun: /stop &lt;trigger&gt;
+8b3a30608	Foydalanish: /stop <trigger>
+f2ba0c77b	✅ Filtr o‘chirildi.
+77a5db13d	Bunday filtr yo‘q. Ro‘yxatni /filters bilan tekshiring.
+b7301e99a	Bu guruhda filtrlar yo‘q.
+bd0505102	⚠️ Bu guruhdagi barcha <b>⟨0⟩</b> ta filtr o‘chirilsinmi?
+8d8252e68	🗑 Ha, hammasini o‘chirish
+9b6fcea87	↩️ Bekor qilish
+272826aad	Bekor qilindi.
+cf9d69e94	🗑 ⟨0⟩ ta filtr o‘chirildi.
+13c07c249	🧹 Barcha filtrlar o‘chirildi (⟨0⟩) | ⟨1⟩
+0451d6399	🏷 Brend nomi
+93077ebd5	Botingiz xabarlarda ko‘rsatadigan nomni yozing (masalan, Alpha Guard).
+efbbbb435	👋 Xush kelibsiz matni
+4e2fd1f48	Kimdir /start yozganda ko‘rinadigan xush kelibsiz matnini yozing.
+e840e51a6	🔗 Yordam havolasi
+2236aa076	Yordam guruhi/kanali havolasini yozing (https://t.me/...). O‘chirish uchun: -
+74af46bea	❓ Yordam sarlavhasi
+ce0e0d6dc	Yordam menyusining sarlavhasini yozing.
+07075bae9	Foydalanuvchi
+8c59b527c	🤖 <b>Klon botni tasdiqlash</b> #⟨0⟩
+673f5ba81	👤 Bot ochmoqchi bo‘lgan odam: ⟨0⟩ — ID: <code>⟨1⟩</code>
+286285872	🔑 Bot tokeni: <code>⟨0⟩</code>
+140e8742e	🏷 Bot nomi: ⟨0⟩ (@⟨1⟩)
+bbde0b439	Token noto‘g‘ri yoki bekor qilingan.
+2f1be69b6	Token boshqa botga tegishli.
+b8261ca98	⚠️ @⟨0⟩ klon botingiz to‘xtatildi: ⟨1⟩
+5b74bc345	BotFather dan yangi token oling va 🤖 Klon menyusidagi <b>Tokenni almashtirish</b> orqali qayta ishga tushiring.
+15f0441be	noto‘g‘ri token (⟨0⟩)
+c079ca840	⏳ <b>@⟨0⟩</b> bot egasining tasdig‘ini kutmoqda. Tasdiqlangach ishga tushadi.
+f3fc6979c	ULUS dvigatelida ishlaydigan, o‘z bot nomingiz bilan himoya botini oching.
+4fbf35472	1) @BotFather da /newbot bilan bot yarating
+632cbf17b	2) Olgan tokeningizni quyidagi tugma orqali yuboring
+883193ad7	3) Bot egasi tasdiqlagach, botingiz ishga tushadi⟨0⟩
+3a5be4fd4	🔑 Token yuborish
+e76ac71f1	🟢 Ishlamoqda
+f8a7fde2a	⚠️ Noto‘g‘ri token
+b535c1e0c	🤖 <b>Klon botingiz</b>: @⟨0⟩
+0bc0356ba	Holat: ⟨0⟩ · Guruhlar/kanallar: ⟨1⟩
+47500a892	🏷 Brend: <b>⟨0⟩</b>
+ca0fe8e9a	🔗 Yordam: ⟨0⟩
+b07ee01ba	❓ Yordam sarlavhasi: ⟨0⟩
+8e9727f2e	👋 Xush kelibsiz: ⟨0⟩⟨1⟩
+de54dae36	standart
+53f82bc49	⏸ To‘xtatish
+b8abb05fb	▶️ Ishga tushirish
+60446c88d	↩️ So‘rovni qaytarib olish
+ded7cc646	🔑 Tokenni almashtirish
+d3fb29907	🗑 Klonni o‘chirish
+367b6aa51	Klon amallari bot bilan shaxsiy chatda bajariladi.
+a51f7d30f	Bu so‘rov allaqachon ko‘rib chiqilgan.
+c862658b2	Eski versiyadagi so‘rov; foydalanuvchi /clone bilan token yuborishi kerak.
+a102e834e	🤖 Klon tizimi yangilandi: /clone yozing va bot tokeningizni yuboring; bot egasi tasdiqlagach botingiz ishga tushadi.
+982a0150c	Ishga tushirib bo‘lmadi: ⟨0⟩
+447501409	⚠️ Ishga tushirib bo‘lmadi: ⟨0⟩
+64fbe849e	⚠️ Klon botingizni ishga tushirib bo‘lmadi: ⟨0⟩
+03718599d	/clone bilan yangi token yuborishingiz mumkin.
+ba7f6e886	✅ Tasdiqlandi, bot ishga tushdi
+705bd8131	❌ Rad etildi
+744d07117	✅ <b>Klon botingiz tasdiqlandi va ishga tushdi!</b> @⟨0⟩
+90edeb341	Nom, xush kelibsiz matni va yordam havolasi uchun: /clone
+172a66fda	❌ @⟨0⟩ uchun klon bot so‘rovingiz rad etildi.
+dffc58eb3	Endi ruxsat so‘rashingiz shart emas: tokenni yuboring, bot egasi tasdiqlagach botingiz ishga tushadi.
+7269890c3	Buni faqat bot egasi qila oladi.
+741c29704	Sizda kutilayotgan so‘rov yo‘q.
+a353b8903	↩️ Foydalanuvchi so‘rovni qaytarib oldi
+cb7da55c2	↩️ So‘rov qaytarib olindi
+b30c05510	🔑 @BotFather dan olgan bot tokeningizni yozing (masalan, <code>123456789:ABC...</code>).
+0adaad0bb	Bekor qilish uchun: cancel
+a54c0e304	Bu klon sizniki emas.
+8f8af330e	Noto‘g‘ri.
+6a47f34ed	Bu klon o‘chirilgan.
+21d148b57	🗑 @⟨0⟩ kloni o‘chirilsinmi? Bot to‘xtaydi, guruhlardagi sozlamalar qoladi.
+e53f197f7	🗑 Ha, o‘chirish
+cb1a5e233	🗑 @⟨0⟩ klon botingiz bot egasi tomonidan o‘chirildi.
+19e55244e	Havola https://t.me/ bilan boshlanishi kerak. Qayta yozing yoki cancel deb yozing.
+6e97fcc27	✅ ⟨0⟩ yangilandi.
+feae94615	❌ Bu bot tokeniga o‘xshamaydi. @BotFather dan to‘liq tokenni yuboring.
+19769e756	❌ Bu asosiy botning tokeni.
+d305390e4	❌ Token noto‘g‘ri. @BotFather dan to‘g‘ri tokenni nusxalang.
+82a945d00	❌ Bu bot allaqachon boshqa birovning kloni.
+d190f37f5	❌ Bu bot uchun boshqa birovning kutilayotgan so‘rovi bor.
+fa9063dd4	❌ Botni ishga tushirib bo‘lmadi: ⟨0⟩
+8ffa38acb	✅ <b>Klon botingiz tayyor!</b> @⟨0⟩
+9b90f4091	Guruhga qo‘shish uchun: https://t.me/⟨0⟩?startgroup=ulus&admin=⟨1⟩
+34ed30a8e	↩️ O‘rniga yangi so‘rov yuborildi
+98545fdcd	✅ Tasdiqlash
+b3bf17908	📨 <b>@⟨0⟩</b> uchun so‘rovingiz bot egasiga yuborildi.
+988ee3c22	Tasdiqlangach, botingiz ishga tushadi va sizga xabar beraman.
+eb51d0e12	Bu bot allaqachon boshqa birovning kloni.
+dfe2324b4	⟨0⟩ @⟨1⟩ — egasi <code>⟨2⟩</code>
+1cd8c4513	⏳ @⟨0⟩ — so‘ragan: <code>⟨1⟩</code>
+92021a063	🤖 <b>Klon botlar</b> (⟨0⟩) · Tasdiq kutmoqda: ⟨1⟩
+21bb22c3f	Hali klonlar yo‘q.
+32f6170ef	<b>Tasdiq kutmoqda</b>
+f666e1d93	🗄 Ma’lumotlar bazasi zaxirasi · ⟨0⟩ MB (siqilgan ⟨1⟩ MB)
+9cfd9973e	Tiklash uchun zip ichidagi .db faylni bot papkasiga bot_data.db nomi bilan joylang.
+391c8e6d0	🗄 Zaxira olindi, lekin Telegramga sig‘maydi (⟨0⟩ MB): ⟨1⟩
+c3fcc95df	🗄 Zaxira olinmoqda...
+103ec5f85	Chat: ⟨0⟩
+0f97d9633	⚠️ Bot xatosi
+15781d4a0	⚠️ Bu tugma eskirgan yoki noto‘g‘ri. Menyuni qayta oching.
+043246756	⚠️ Nimadir xato ketdi, amal bajarilmadi. Iltimos, qayta urinib ko‘ring.
+4e9b13c4d	⛔ Bu buyruqdan faqat adminlar foydalana oladi.
+af7654ae4	⏳ Adminlar ro‘yxati hozirgina yangilandi. ⟨0⟩ s dan keyin qayta urinib ko‘ring.
+7117a9ab8	⚠️ Adminlar ro‘yxatini olib bo‘lmadi. Bot bu guruhda adminmi?
+48b81ffc1	🔄 <b>Adminlar ro‘yxati yangilandi</b> — ⟨0⟩ ta admin
+10701ad0a	➕ Daraja berildi: ⟨0⟩
+7eed3b278	➖ Daraja olib tashlandi (endi admin emas): ⟨0⟩
+3ffb1dffa	Yozuvlar allaqachon dolzarb.
+be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
+2a8ec5530	🟢 ULUS ishga tushdi
+82459fdce	Ma’lumotlar bazasi: <code>⟨0⟩</code> (⟨1⟩ KB)
+d2e59a824	Ro‘yxatdan o‘tgan guruhlar/kanallar: <b>⟨0⟩</b>
+6c20c0dd0	⚠️ Ma’lumotlar bazasi bo‘sh ochildi va oxirgi zaxiradan tiklandi: <code>⟨0⟩</code>
+0e4276ce2	⚠️ Ro‘yxatdan o‘tgan chatlar yo‘q. Bot qayta ishga tushganda bu son kamaysa, ma’lumotlar bazasi fayli o‘chirilgan yoki bot boshqa papkadan ishlayotgan bo‘lishi mumkin.
+3831f1221	Serverga ulanib bo‘lmadi
+ca576aa9b	Xato ⟨0⟩
+44d8a56f0	Saqlash (⟨0⟩)
+8c5f53f0b	🖼 ⟨0⟩ biriktirilgan — olib tashlash uchun belgilang
+6050fb2fa	Majburiy kanal: ⟨0⟩
+2101bb05d	⟨0⟩ o‘chirilsinmi?
+210266e99	Yoqish/o‘chirish
+ac3d94f38	Xabarlar (7 kun)
+251aa63e3	Faol odamlar
+7782d329c	Qo‘shilganlar (7 kun)
+f515fefde	Ogohlantirilganlar
+b32121bc6	Banlanganlar
+4136a9068	📋 Jurnal kanali: ⟨0⟩
+1f589ad54	belgilanmagan (botda /setlog dan foydalaning)
+91e55d41e	🌙 Tungi rejim
+5a572078e	· hozir faol
+db433084f	· yoqiq
+841c11292	Tanlangan huquqlar shu soatlarda o‘chiriladi va keyin qaytariladi (UTC+3).
+587308129	Boshlanishi
+2a2a44bc3	Tugashi
+e07763331	O‘chiriladi:
+fb5b6de88	Tungi rejimni saqlash
+626b1b386	📝 Eslatmalar (⟨0⟩)
+9ba887ab0	Hali eslatmalar yo‘q. Guruhda #nom yozilsa, eslatma yuboriladi.
+0ebe5615b	Eslatma nomi (masalan, rules)
+83fff7c73	Eslatma matni (formatlash: <b>qalin</b>, tugmalar: Matn - https://havola)
+0c4734df9	🧩 Filtrlar / avtojavoblar (⟨0⟩/⟨1⟩)
+40d6aee5f	💬 tarkibida: ⟨0⟩
+25ea7b948	Hali filtrlar yo‘q.
+8e0bb1fb8	Trigger (xabar ichida moslash: *so‘z*)
+db212635d	Javob ({user} {first} {group} o‘zgaruvchilari, tugma qatorlari)
+75a77232d	➕ Filtr qo‘shish
+ed3622d45	Media (stiker/rasm) bilan javob uchun guruhda mediaga /filter bilan javob bering.
+aa7a25249	⏰ Rejalashtirilgan xabarlar (⟨0⟩)
+3eb72af09	Har ⟨0⟩ · keyingisi: ⟨1⟩
+240088248	Yoqish/o‘chirish
+f479b96fd	Bu rejalashtirilgan xabar
+158f37bff	Hali rejalashtirilgan xabarlar yo‘q.
+38f7fb835	Xabar (tugma qatorlari va %%% tasodifiy variantlar qo‘llab-quvvatlanadi)
+67866ebd3	Interval
+039052532	➕ Rejalashtirilgan xabar qo‘shish
+ec1ffce3d	🚫 Bloklangan media (⟨0⟩)
+39590ef60	Bu blok
+35fb023cf	Qo‘shish uchun guruhda mediaga /blockmedia bilan, stiker to‘plami uchun /blockpack bilan javob bering.
+2de76a779	👮 Xodimlar (⟨0⟩)
+bf3bc5b16	Daraja berish/olish uchun guruhda /admin, /senioradmin, /cofounder dan; shaxsiy huquqlar uchun botda /perms dan foydalaning.
+3a5e96d47	Yuklanmoqda…
+7419f16f9	✅ Saqlandi
+69efe9b3e	O‘zgarish yo‘q
+4c12da56f	Siz boshqaradigan guruhlar
+b57672cb0	Siz hech qanday guruhni boshqarmaysiz
+03396c6dd	Bot admin bo‘lgan va siz xodim bo‘lgan guruh topilmadi.
+274139b9d	Saqlanmagan o‘zgarishlar bekor qilinsinmi?
+67b14047c	Tugmalar: har qatorda bitta  Matn - https://havola  (yonma-yon: &&) · Qoidalar - rules · Ma’lumot - popup:matn · O‘zgaruvchilar: {user} {first} {group} {count} · Tasodifiy xabar: orasida %%% qatori · Qalin/kursiv uchun <b> <i> teglaridan foydalaning. Mediani bot orqali /setwelcome bilan qo‘shing.
 '''
 
 _i18n_load()
