@@ -1643,14 +1643,44 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_flood_ts ON flood_history(timestamp);
         """)
 
-def _enable_wal():
+_IS_WEB_PROC = '--web-request' in sys.argv  # web panel isteği (PythonAnywhere'de bottan ayrı bir sunucuda çalışır)
+
+def _db_healthy(path: str) -> bool:
+    try:
+        conn = sqlite3.connect(path)
+        try:
+            return conn.execute("PRAGMA quick_check").fetchone()[0] == 'ok'
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return False
+
+def _set_journal_mode():
+    """WAL kipi dosyayı aynı makinedeki paylaşımlı belleğe bağlar; web panel bottan ayrı sunucuda aynı dosyayı açınca
+    (PythonAnywhere) veritabanı bozulur. Bu yüzden klasik (DELETE) günlük kipi kullanılır."""
     conn = sqlite3.connect(DB_FILE)
     try:
-        conn.execute("PRAGMA journal_mode = WAL")
+        if conn.execute("PRAGMA journal_mode").fetchone()[0].lower() != 'delete':
+            conn.execute("PRAGMA journal_mode = DELETE")
+    except sqlite3.OperationalError as e:  # başka işlem dosyayı tutuyorsa sonraki açılışta denenir
+        logger.warning(f"Günlük kipi değiştirilemedi: {e}")
     finally:
         conn.close()
 
-_enable_wal()
+def _quarantine_if_corrupt() -> str | None:
+    """Açılışta bozuk veritabanını kenara alır (yerine boş dosya kurulur, veriler sonra kurtarılır). Dönüş: bozuk dosya."""
+    if _IS_WEB_PROC or not os.path.exists(DB_FILE) or _db_healthy(DB_FILE):
+        return None
+    bad = f"{DB_FILE}.bozuk-{int(time.time())}"
+    for ext in ('', '-wal', '-shm', '-journal'):
+        if os.path.exists(DB_FILE + ext):
+            os.replace(DB_FILE + ext, bad + ext)
+    logger.error(f"Veritabanı bozuk, kenara alındı: {bad}")
+    return bad
+
+CORRUPT_DB = _quarantine_if_corrupt()
+if not _IS_WEB_PROC:
+    _set_journal_mode()
 init_db()
 
 def migrate_db():
@@ -1786,7 +1816,56 @@ def _restore_if_empty() -> str | None:
         return name
     return None
 
-RESTORED_FROM = _restore_if_empty()
+def _latest_healthy_backup() -> str | None:
+    try:
+        files = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith('bot_data_') and f.endswith('.db'))
+    except OSError:
+        return None
+    for name in reversed(files):
+        path = os.path.join(BACKUP_DIR, name)
+        if _db_healthy(path):
+            return path
+    return None
+
+def _salvage_db(bad: str | None) -> dict | None:
+    """Bozuk dosyadan okunabilen tabloları yeni veritabanına kopyalar; okunamayanı en son sağlam yedekten alır."""
+    if not bad:
+        return None
+    backup = _latest_healthy_backup()
+    report = {'kurtarildi': [], 'yedekten': [], 'kayip': [], 'yedek': os.path.basename(backup) if backup else None}
+    dst = get_db()
+    tables = [r[0] for r in dst.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+    for t in tables:
+        dcols = [r[1] for r in dst.execute(f'PRAGMA table_info("{t}")')]
+        for key, src_path in (('kurtarildi', bad), ('yedekten', backup)):
+            if not src_path:
+                continue
+            try:
+                src = sqlite3.connect(src_path)
+                try:
+                    scols = {r[1] for r in src.execute(f'PRAGMA table_info("{t}")')}
+                    cols = [c for c in dcols if c in scols]
+                    if not cols:
+                        continue
+                    sel = ", ".join(f'"{c}"' for c in cols)
+                    rows = src.execute(f'SELECT {sel} FROM "{t}"').fetchall()
+                finally:
+                    src.close()
+            except sqlite3.DatabaseError as e:
+                logger.warning(f"Tablo okunamadı ({t}, {os.path.basename(src_path)}): {e}")
+                continue
+            with dst:
+                dst.execute(f'DELETE FROM "{t}"')
+                dst.executemany(f'INSERT OR IGNORE INTO "{t}" ({sel}) VALUES ({", ".join("?" * len(cols))})', rows)
+            report[key].append(t)
+            break
+        else:
+            report['kayip'].append(t)
+    logger.warning(f"Veritabanı onarıldı: {report}")
+    return report
+
+REPAIR_REPORT = _salvage_db(CORRUPT_DB)
+RESTORED_FROM = None if _IS_WEB_PROC else _restore_if_empty()
 
 # ═══════════════════════════ RÜTBE HİYERARŞİSİ ═══════════════════════════
 # Kurucu (grup sahibi) > Yardımcı Kurucu > Üst Admin > Admin. Herkes sadece kendinden alt rütbeye işlem yapar.
@@ -16231,6 +16310,28 @@ async def db_cleanup_job(context: ContextTypes.DEFAULT_TYPE):
 # ── Genel hata yakalayıcı ──
 _last_error_notify = 0.0
 
+_PROC_START = time.time()
+_db_restart_pending = False
+
+async def _db_corrupt_restart(context):
+    """Çalışırken veritabanı bozulursa: sahibe haber ver ve işlemi kapat. PythonAnywhere'deki sürekli görev
+    (always-on task) botu yeniden başlatır, açılışta bozuk dosya kenara alınıp veriler kurtarılır."""
+    global _db_restart_pending
+    if _db_restart_pending:
+        return
+    _db_restart_pending = True
+    restart = time.time() - _PROC_START > 300  # açılıştan hemen sonra tekrar bozulursa döngüye girme
+    text = ("⚠️ <b>Veritabanı bozuldu</b> (database disk image is malformed).\n"
+            + ("Bot 5 sn içinde yeniden başlatılıyor; açılışta bozuk dosya kenara alınıp veriler kurtarılacak."
+               if restart else "Bot az önce açıldı, otomatik yeniden başlatma yapılmadı. Botu elle yeniden başlatın."))
+    if FOUNDER_ID:
+        try:
+            await (MAIN_BOT or context.bot).send_message(FOUNDER_ID, text, parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
+    if restart:
+        asyncio.get_running_loop().call_later(5, os._exit, 3)
+
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     global _last_error_notify
     err = context.error
@@ -16241,6 +16342,9 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
             'message to delete not found', 'message is not modified', 'query is too old', "message can't be deleted")):
         return
     logger.error("İşlenmeyen hata", exc_info=err)
+    if isinstance(err, sqlite3.DatabaseError) and 'malformed' in str(err).lower():
+        await _db_corrupt_restart(context)
+        return
     now = time.time()
     if FOUNDER_ID and now - _last_error_notify > 60:  # dakikada en fazla 1 bildirim
         _last_error_notify = now
@@ -16383,6 +16487,12 @@ async def _startup_report(b):
     size = os.path.getsize(DB_FILE) // 1024 if os.path.exists(DB_FILE) else 0
     text = (f"🟢 ULUS başladı\nVeritabanı: <code>{html.escape(DB_FILE)}</code> ({size} KB)\n"
             f"Kayıtlı grup/kanal: <b>{n}</b>")
+    if REPAIR_REPORT:
+        r = REPAIR_REPORT
+        text += (f"\n🛠 <b>Veritabanı bozuktu, onarıldı.</b> Bozuk dosya: <code>{html.escape(os.path.basename(CORRUPT_DB))}</code>\n"
+                 f"Kurtarılan tablo: {len(r['kurtarildi'])} · yedekten alınan: {len(r['yedekten'])}"
+                 + (f" (<code>{html.escape(r['yedek'])}</code>)" if r['yedekten'] else "")
+                 + (f"\n⚠️ Kurtarılamayan: {html.escape(', '.join(r['kayip']))}" if r['kayip'] else ""))
     if RESTORED_FROM:
         text += f"\n⚠️ Veritabanı boş açıldı, son yedekten geri yüklendi: <code>{html.escape(RESTORED_FROM)}</code>"
     elif n == 0:
@@ -19183,6 +19293,9 @@ f666e1d93	🗄 Veritabanı yedeği · ⟨0⟩ MB (sıkıştırılmış ⟨1⟩ M
 9cfd9973e	Geri yüklemek için zip'teki .db dosyasını bot_data.db adıyla bot klasörüne koy.
 391c8e6d0	🗄 Yedek alındı ama Telegram'a sığmıyor (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 Yedek alınıyor...
+35db56b39	⚠️ <b>Veritabanı bozuldu</b> (database disk image is malformed).
+6889d6242	Bot 5 sn içinde yeniden başlatılıyor; açılışta bozuk dosya kenara alınıp veriler kurtarılacak.
+6ffdbe5e2	Bot az önce açıldı, otomatik yeniden başlatma yapılmadı. Botu elle yeniden başlatın.
 96773f704	message to delete not found
 dcdd537ba	message is not modified
 e7aab0f82	query is too old
@@ -19203,6 +19316,10 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS başladı
 82459fdce	Veritabanı: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	Kayıtlı grup/kanal: <b>⟨0⟩</b>
+05229d023	🛠 <b>Veritabanı bozuktu, onarıldı.</b> Bozuk dosya: <code>⟨0⟩</code>
+8a235e6be	Kurtarılan tablo: ⟨0⟩ · yedekten alınan: ⟨1⟩⟨2⟩⟨3⟩
+25e151e9c	(<code>⟨0⟩</code>)
+9bd6ab5aa	⚠️ Kurtarılamayan: ⟨0⟩
 6c20c0dd0	⚠️ Veritabanı boş açıldı, son yedekten geri yüklendi: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Kayıtlı sohbet yok. Bot yeniden başlatılınca bu sayı düşüyorsa veritabanı dosyası silinmiş ya da farklı bir klasörden çalıştırılıyor olabilir.
 3831f1221	Sunucuya ulaşılamadı
@@ -27704,6 +27821,10 @@ a4439e0c5	<a href="tg://user?id=⟨0⟩">⟨1⟩</a>
 cd8533168	• ⟨0⟩: <code>⟨1⟩</code> — ⟨2⟩
 4e4068d8f	bot_data_⟨0⟩.db
 176712105	⟨0⟩<pre>⟨1⟩</pre>
+05229d023	🛠 <b>Veritabanı bozuktu, onarıldı.</b> Bozuk dosya: <code>⟨0⟩</code>
+8a235e6be	Kurtarılan tablo: ⟨0⟩ · yedekten alınan: ⟨1⟩⟨2⟩⟨3⟩
+25e151e9c	(<code>⟨0⟩</code>)
+9bd6ab5aa	⚠️ Kurtarılamayan: ⟨0⟩
 '''
 
 I18N_ES = r'''
