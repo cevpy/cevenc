@@ -371,6 +371,8 @@ _DECOR_LEAD = re.compile(r'^([^\w<&{(\[/@#"\'«]+)(.+)$', re.S)
 _DECOR_TRAIL = re.compile(r'^(.*?[^\s])(\s*[^\w\s<>&;()\[\]{}"\'«»%/@#.,!?…+\-]+)$', re.S)
 _DECOR_MENTION = re.compile(r'^(<a\b[^>]*>.*?</a>[\s,:]*)(.+)$', re.S)
 _DECOR_PAREN = re.compile(r'^(.*?)(\s*\()([^()]+)(\)[.!]?)$', re.S)
+_DECOR_NUM_TAIL = re.compile(r'^(.*?[^\d\s.,:/%+\-])(\s+[\d.,:/%+\-]+)$', re.S)
+_DECOR_NUM_HEAD = re.compile(r'^([\d.,:/%+\-]+\s+)(.*[^\W\d_].*)$', re.S)
 _SEPS = (' · ', ' | ', ' — ', ' – ', ': ', ' → ')
 _LETTERS = re.compile(r'[^\W\d_]{2,}')
 
@@ -480,12 +482,26 @@ def _tr_decor(s: str, lang: str, depth: int, seps: tuple = _SEPS, level: int = 0
         if t is not None and offer(t + m.group(2)):
             return best[0]
     m = _DECOR_PAREN.match(s)
-    if m and _LETTERS.search(m.group(3)):
+    if m and (_LETTERS.search(m.group(3)) or _LETTERS.search(m.group(1))):
         head = sub(m.group(1)) if _LETTERS.search(m.group(1)) else None
-        inner = sub(m.group(3).strip(), _SEPS)
+        whole = _tr_core('(' + m.group(3) + ')', lang, depth) if _LETTERS.search(m.group(3)) else None
+        if whole is not None and whole.startswith('(') and whole.endswith(')'):
+            inner = whole[1:-1]
+        else:
+            inner = sub(m.group(3).strip(), _SEPS) if _LETTERS.search(m.group(3)) else None
         if (head is not None or inner is not None) and offer(
                 (head if head is not None else m.group(1)) + m.group(2) + (inner if inner is not None else m.group(3))
                 + m.group(4)):
+            return best[0]
+    m = _DECOR_NUM_TAIL.match(s)
+    if m and _LETTERS.search(m.group(1)):
+        t = sub(m.group(1))
+        if t is not None and offer(t + m.group(2)):
+            return best[0]
+    m = _DECOR_NUM_HEAD.match(s)
+    if m and _LETTERS.search(m.group(2)):
+        t = sub(m.group(2))
+        if t is not None and offer(m.group(1) + t):
             return best[0]
     for i, sep in enumerate(seps):
         if sep in s:
@@ -596,15 +612,37 @@ def set_user_lang(uid: int, lang: str):
         conn.execute("INSERT OR REPLACE INTO user_lang (user_id, lang, at) VALUES (?, ?, ?)", (uid, lang, time.time()))
     _user_lang_cache[uid] = lang
 
+_log_lang_cache: dict = {}
+
+def _log_owner_lang(cid: str) -> str | None:
+    """Bu sohbet bir grubun log kanalıysa o grubun dili (5 dk önbellek)."""
+    hit = _log_lang_cache.get(cid)
+    if hit and time.time() - hit[0] < 300:
+        return hit[1]
+    lang = None
+    try:
+        with get_db() as conn:
+            rows = conn.execute("SELECT settings FROM channels WHERE log_chat_id = ? LIMIT 20", (cid,)).fetchall()
+        for r in rows:
+            lang = (json.loads(r['settings'] or '{}') or {}).get('lang')
+            if lang:
+                break
+    except (sqlite3.Error, ValueError, TypeError):
+        lang = None
+    if len(_log_lang_cache) > 5000:
+        _log_lang_cache.clear()
+    _log_lang_cache[cid] = (time.time(), lang)
+    return lang
+
 def chat_lang(chat_id) -> str:
-    """Grup/kanal → grubun dili; özel sohbet → kişinin dili."""
+    """Grup/kanal → grubun dili (log kanalı → bağlı olduğu grubun dili); özel sohbet → kişinin dili."""
     try:
         cid = int(chat_id)
     except (TypeError, ValueError):
         return DEFAULT_LANG
     if cid < 0:
         ch = get_channel_settings(str(cid))
-        return ((ch or {}).get('settings') or {}).get('lang') or DEFAULT_LANG
+        return ((ch or {}).get('settings') or {}).get('lang') or _log_owner_lang(str(cid)) or DEFAULT_LANG
     return user_lang(cid)
 
 _TR_SEND_KEYS = {'text': 4096, 'caption': 1024}
@@ -1985,6 +2023,7 @@ def save_channel_settings(chat_id: str, data: dict):
         ))
         conn.commit()
     _settings_cache[chat_id] = (time.time(), copy.deepcopy(data))
+    _log_lang_cache.clear()
 
 async def send_log(chat_id: str, message: str, parse_mode: str | None = None, reply_markup=None):
     channel = get_channel_settings(chat_id)
@@ -2378,6 +2417,17 @@ async def resolve_user(chat_id, user_ref=None, replied_user=None):
         return chat_member.user.id, chat_member
     except Exception:
         return None, None
+
+MOD_ACT_LABELS = {'warn': "uyarı", 'unwarn': "uyarı geri alma", 'mute': "susturma", 'unmute': "susturma kaldırma",
+                  'kick': "gruptan atılma", 'ban': "ban", 'unban': "ban kaldırma", 'delete': "silme", 'tempban': "geçici ban",
+                  'demote': "yetki alma"}
+MOD_SRC_LABELS = {'rapor': "rapor", 'buton': "buton", 'karaliste': "kara liste", 'oylama': "oylama"}
+
+def mod_act_label(action: str) -> str:
+    """Kayıttaki işlem adı → okunur etiket ('oylama:mute' → 'oylama → susturma'); etiketler hedef dile çevrilir."""
+    src, _, act = (action or '').rpartition(':')
+    label = MOD_ACT_LABELS.get(act, act)
+    return f"{MOD_SRC_LABELS.get(src, src)} → {label}" if src else label
 
 async def log_mod_action(chat_id: str, action: str, target_id: int, target_uname: str, by_id: int, by_uname: str, reason: str = ""):
     
@@ -4858,7 +4908,7 @@ async def profil(update: Update, context):
 
     durum = "Normal"
     if ban_row:
-        durum = "BANLANDI"
+        durum = "Banlandı"
     elif mute_row and mute_row['until_date'] and mute_row['until_date'] > time.time():
         kalan = int((mute_row['until_date'] - time.time()) / 60)
         durum = f"Susturuldu ({kalan//60}s {kalan%60}dk kaldi)" if kalan >= 60 else f"Susturuldu ({kalan} dk kaldi)"
@@ -4883,7 +4933,7 @@ async def profil(update: Update, context):
             else:
                 by = "sistem"
             sebep = f" · {html.escape(row['reason'])}" if row['reason'] else ""
-            msg += f"  {tarih} · {html.escape(row['action'])} · {by}{sebep}\n"
+            msg += f"  {tarih} · {html.escape(mod_act_label(row['action']))} · {by}{sebep}\n"
     else:
         msg += "\n\nHic moderasyon islemi yok."
 
@@ -8393,12 +8443,12 @@ async def top_callback(update: Update, context):
                 f"┌📆 Günlük: {active_users(g)}\n"
                 f"├📆 Haftalık: {active_users(h)}\n"
                 f"├📆 Aylık: {active_users(a)}\n"
-                f"└Total: {active_users(0)}\n\n"
+                f"└Toplam: {active_users(0)}\n\n"
                 f"💬 Toplam mesaj:\n"
                 f"┌📆 Günlük: {total_msgs(g)}\n"
                 f"├📆 Haftalık: {total_msgs(h)}\n"
                 f"├📆 Aylık: {total_msgs(a)}\n"
-                f"└Total: {total_msgs(0)}\n\n"
+                f"└Toplam: {total_msgs(0)}\n\n"
                 f"📊 Toplam çeşitli etkileşim:\n"
                 f"┌🃏 Çıkartma: {type_count('sticker')}\n"
                 f"├🀄️ Gif: {type_count('gif')}\n"
@@ -8451,7 +8501,7 @@ async def top_callback(update: Update, context):
                 f"      ├📆 Günlük: {global_msgs(g)}\n"
                 f"      ├📆 Haftalık: {global_msgs(h)}\n"
                 f"      ├📆 Aylık: {global_msgs(a)}\n"
-                f"      └Total: {global_msgs(0)}\n\n"
+                f"      └Toplam: {global_msgs(0)}\n\n"
                 f"🔍 Bulunduğun gruplarda toplam bilgi:\n"
                 f"      ├🃏 Çıkartma: {global_type('sticker')}\n"
                 f"      ├🀄️ Gif: {global_type('gif')}\n"
@@ -8510,7 +8560,7 @@ async def cmd_info(update: Update, context):
         f"┌📆 Günlük: {msgs['g']}\n"
         f"├📆 Haftalık: {msgs['h']}\n"
         f"├📆 Aylık: {msgs['a']}\n"
-        f"└Total: {msgs['t']}\n\n"
+        f"└Toplam: {msgs['t']}\n\n"
         f"📊 Etkileşim detayı:\n"
         f"┌🃏 Çıkartma: {types['sticker']}\n"
         f"├🀄️ Gif: {types['gif']}\n"
@@ -10039,7 +10089,7 @@ async def help_command(update: Update, context):
         "🎰 Eglence\n"
         "/yazitura — Yazi tura at\n"
         "/zar — Zar at\n\n"
-        "ℹ️ Diger\n"
+        "ℹ️ Diğer\n"
         "/help — Bu menu\n"
         "/id — ID goster\n"
         "/itiraz <aciklama> — Ban itirazi (bota ozelden)\n"
@@ -11179,7 +11229,7 @@ async def cmd_setwarnaction(update: Update, context):
     s = channel['settings']
     if not context.args or context.args[0].lower() not in ('ban', 'tempban', 'kick', 'mute'):
         await update.effective_message.reply_text(
-            f"Şu an: {s.get('warn_action', 'ban')} ({human_duration(int(s.get('warn_action_duration', 86400)))})\n\n"
+            f"Şu an: {mod_act_label(s.get('warn_action', 'ban'))} ({human_duration(int(s.get('warn_action_duration', 86400)))})\n\n"
             "Kullanım:\n/setwarnaction ban\n/setwarnaction tempban 1d\n/setwarnaction kick\n/setwarnaction mute 2h")
         return
     action = context.args[0].lower()
@@ -12654,7 +12704,7 @@ def render_fsub_tag_page(cid: str, base: str, s: dict, title: str):
     style = s.get('tag_style') or 'name'
     text = (f"🏷 <b>Etiket ayarları</b> — {title}\n\n<code>/etiket mesaj</code> üyeleri gruplar hâlinde etiketler. "
             "<code>/etiketdur</code> durdurur, üyeler <code>/etiketme</code> ile listeden çıkabilir.\n\n"
-            f"Bir mesajda: <b>{int(s.get('tag_size') or 5)} kişi</b> · Biçim: <b>{'emoji' if style == 'emoji' else 'isim'}</b> · "
+            f"Bir mesajda: <b>{int(s.get('tag_size') or 5)} kişi</b> · Biçim: <b>{'Emoji' if style == 'emoji' else 'İsim'}</b> · "
             f"Kimler: <b>{'son 7 günün aktifleri' if s.get('tag_active_only') else 'herkes'}</b>")
     rows = [_num_row(cid, 'tag_size', s, 'tag', "Kişi"),
             [ibtn(("✅ " if style == 'name' else "") + "İsimle", f"s|{cid}|ts|name", GREEN if style == 'name' else None),
@@ -12833,7 +12883,7 @@ async def build_sicil(user_id: int) -> str:
             if r['chat_id'] not in titles:
                 titles[r['chat_id']] = await _chat_title(r['chat_id'])
         items = [f"• {datetime.fromtimestamp(r['timestamp'], TZ_TR):%d.%m %H:%M} — {html.escape(titles[r['chat_id']][:30])}: "
-                 f"{html.escape(r['action'])}{(' (' + html.escape((r['reason'] or '')[:60]) + ')') if r['reason'] else ''}"
+                 f"{html.escape(mod_act_label(r['action']))}{(' (' + html.escape((r['reason'] or '')[:60]) + ')') if r['reason'] else ''}"
                  for r in shown]
         lines.append("<blockquote expandable>" + "\n".join(items) + "</blockquote>")
     else:
@@ -16772,12 +16822,13 @@ def i18n_extract(src: str) -> list:
         for ch in ast.iter_child_nodes(node):
             parents[ch] = node
     tr_chars = re.compile(r'[çğıöşüÇĞİÖŞÜ]')
-    emoji = re.compile(r'[\U0001F300-\U0001FAFF☀-➿⬀-⯿←-⇿]')
+    emoji = re.compile(r'[\U0001F000-\U0001FAFF☀-➿⬀-⯿←-⇿]')
     sql = re.compile(r'^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|PRAGMA|ALTER|WITH|DROP|BEGIN|REPLACE)\b|\bFROM\b.*\bWHERE\b'
                      r'|\bVALUES\s*\(', re.S)
     letters = re.compile(r'[A-Za-zçğıöşüÇĞİÖŞÜ]{2,}')
     tr_words = re.compile(r'\b(saat|saattir|saniye|dakika|dk|sn|gün|hafta|haftalık|ay|yıl|kez|kere|adet|kişi|üye|mesaj|'
-                          r'tane|grup|kanal|uyarı|sil|yok|var|hepsi|kapalı|açık|sistem|ana|hiç|evet|hayır|bekleyen)\b')
+                          r'tane|grup|kanal|uyarı|sil|yok|var|hepsi|kapalı|açık|sistem|ana|hiç|evet|hayır|bekleyen|herkes|temiz|isim|'
+                          r'medya|kelime|silme|buton|rapor|oylama|susturma)\b')
     skip_attr = {'execute', 'executemany', 'executescript', 'getenv', 'get', 'setdefault', 'pop', 'startswith', 'endswith',
                  'strftime', 'split', 'rsplit', 'replace', 'compile', 'search', 'match', 'fullmatch', 'sub', 'findall',
                  'finditer', 'index', 'count', 'encode', 'decode', 'lstrip', 'rstrip', 'strip', 'format', 'add_handler',
@@ -16802,7 +16853,12 @@ def i18n_extract(src: str) -> list:
                 inner.add(v)
                 if isinstance(v, ast.FormattedValue) and v.format_spec is not None:
                     inner |= set(ast.walk(v.format_spec))
-        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and (t.id in ('WEB_PAGE', 'TG_ERRORS', 'I18N_SRC',
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'TG_ERRORS' for t in node.targets) \
+                and isinstance(node.value, (ast.List, ast.Tuple)):
+            for elt in node.value.elts:  # (Telegram hata parçaları, Türkçe açıklama): sadece açıklama çevrilir
+                if isinstance(elt, ast.Tuple) and elt.elts:
+                    skip_nodes |= set(ast.walk(elt.elts[0]))
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and (t.id in ('WEB_PAGE', 'I18N_SRC',
                                                                                       'LANG_LABELS', 'CMD_ALIASES',
                                                                                       '_PH_UNIT', '_TAG_PAIRS')
                                                                              or t.id.startswith('I18N_'))
@@ -16915,7 +16971,7 @@ def i18n_extract(src: str) -> list:
             if not letters.search(static):
                 continue
             words = re.findall(r'[A-Za-zçğıöşüÇĞİÖŞÜ]+', static)
-            single_cap = len(words) == 1 and len(s) >= 2 and s[:1].isupper() and not s.isupper()
+            single_cap = len(words) == 1 and len(words[0]) >= 2 and words[0][:1].isupper() and not words[0].isupper()
             if not (tr_chars.search(static) or emoji.search(static) or ui or len(words) >= 2 or single_cap
                     or tr_words.search(static)):
                 continue
@@ -17008,6 +17064,17 @@ c264fb5af	💬 Konu yönetimi
 f56347abf	🗑 Hikaye silme
 fc5b6f247	ℹ️ Grup bilgisi
 16f35c22f	⭐ Admin atama
+5a2dcf161	Botun bu işlem için yetkisi yok. Botu gerekli yetkilerle yönetici yap.
+da1585078	Bot, kendisinde olmayan bir yetkiyi başkasına veremez.
+5f334b209	Bu kişi grupta yönetici; bu işlem yöneticilere uygulanamaz.
+a34bdfc67	Kullanıcı grupta bulunamadı.
+247a273bd	Mesaj bulunamadı (silinmiş olabilir).
+342d7a053	Bu mesaj silinemiyor (48 saatten eski olabilir).
+59b207012	Telegram şu an çok fazla istek alıyor, biraz sonra tekrar dene.
+29072692d	Sohbet bulunamadı. Bot o sohbette mi?
+9a9bee4a1	Bu işlem sadece süper gruplarda çalışır.
+e99fefa09	Bota erişim yok (bot engellenmiş ya da sohbetten çıkarılmış).
+f6a39420d	Telegram'a ulaşılamadı, biraz sonra tekrar dene.
 fce0709e2	❌ İşlem yapılamadı, lütfen tekrar dene.
 c1a2c3bf9	Bu işlemi kendine uygulayamazsın.
 58503ae82	Bu hesaba işlem uygulanamaz.
@@ -17028,6 +17095,19 @@ e89ec2f7d	Tip: ⟨0⟩
 fbb8f4be4	Bot eklendi: ⟨0⟩ (⟨1⟩) | owner: ⟨2⟩
 417b3cc01	✅ Bot eklendi ve kaydedildi! Komutlar için /help, ayarlar için /settings.
 189f689b9	🌍 Language / Dil: /setlang
+cde2bd7c8	uyarı
+929d8360f	uyarı geri alma
+3c0ddc51a	susturma
+9c030a691	susturma kaldırma
+91787bcf5	gruptan atılma
+b131626a5	ban kaldırma
+6838cf1a3	silme
+b707492ec	geçici ban
+6f1a328f6	yetki alma
+4f0282227	rapor
+12c391a8f	buton
+b581541a3	kara liste
+b01a6a6e8	oylama
 e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> uyarı
 ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Uyarı: ⟨3⟩/⟨4⟩ | ⟨5⟩
 4c8ea4760	warn
@@ -17066,7 +17146,8 @@ d2cdf97e4	⟨0⟩<blockquote expandable>⟨1⟩</blockquote>⟨2⟩
 008e3c181	⚠️ ⟨0⟩, rapor alındı ama şu an ulaşılabilir yetkili yok.
 ad6b780a2	Rapor bulunamadı.
 04f22133c	Bu rapor zaten işlendi: ⟨0⟩
-4f0282227	rapor
+9c4385cbc	rapor:⟨0⟩
+add542f6d	rapor #⟨0⟩
 94cea35e5	↩️ Uyarıyı geri al
 2446ce8e3	🔊 Susturmayı kaldır
 d3d996724	↩️ Uyarı geri alındı (⟨0⟩/⟨1⟩)
@@ -17074,6 +17155,7 @@ d3d996724	↩️ Uyarı geri alındı (⟨0⟩/⟨1⟩)
 969014784	🔊 Susturma kaldırıldı
 96524e022	🚫 Banlandı
 c1ef156c4	✅ Ban kaldırıldı
+534d0f9e8	buton:⟨0⟩
 7181ac4be	Geçersiz işlem.
 3461c44ea	Bu işlem için grupta yönetici olmalısın.
 74042fc88	Bot bu grupta yönetici değil veya yetkileri yetersiz.
@@ -17263,6 +17345,7 @@ cc103ac23	Grup zaten kilitli değil.
 bce49f901	Profil alinamadi!
 9131de73e	Kullanici bulunamadi!
 45e118d05	Normal
+0aaf03287	Banlandı
 bf84ddcb3	Susturuldu (⟨0⟩s ⟨1⟩dk kaldi)
 08c52b8c6	Susturuldu (⟨0⟩ dk kaldi)
 c5a6c0399	👤 <b>Kullanici Profili</b>
@@ -17270,6 +17353,7 @@ c5a6c0399	👤 <b>Kullanici Profili</b>
 0fd8daf31	ID: <code>⟨0⟩</code>
 16d1a3d6f	Durum: ⟨0⟩
 c90e09fec	Uyari: ⟨0⟩/⟨1⟩
+c6a441715	(Son: ⟨0⟩)
 f7b55484b	Son Islemler:
 245846708	sistem
 1ebb0f458	Hic moderasyon islemi yok.
@@ -17350,6 +17434,7 @@ a79d71fbf	Uyar
 bd3c8d60c	Geçici ban
 7c65bba4a	⟨0⟩ mesaj
 5df501398	⟨0⟩ sn
+cf6293e00	⟨0⟩ medya
 637c7d4eb	⟨0⟩ üye
 2a687b503	⟨0⟩ kişi
 2dd4cbf18	⟨0⟩ işlem/saat
@@ -17371,6 +17456,7 @@ ffb95707b	@kanal
 b7be418c7	Süre: 30dk, 6sa, 1g · Medya için fotoğrafın açıklamasına yaz.
 dafcc65fa	6sa Mesaj
 c1e570e92	🔤 Yasaklanacak kelimeleri yaz (her satıra bir tane). Regex için başına re: koy.
+2038b8200	kelime
 8031790fb	🔗 İzin verilecek alan adlarını yaz (boşlukla ayır). Örn: youtube.com t.me/kanalim
 dd20fa7d1	📝 Notu şu biçimde yaz: isim içerik
 750db2552	kurallar Grup kuralları...
@@ -17690,6 +17776,7 @@ a96302489	Şu an gönderilmiyor.
 7afa989da	📢 Henüz duyuru yok.
 b0b0b34ae	📢 <b>Son duyurular</b>
 a2148c2a7	🗳 anket
+a68f06db1	(medya)
 771c7f3fb	👆 ⟨0⟩ tıklama⟨1⟩
 8139aea8f	(⟨0⟩ kişi)
 71fc8c6a3	❌ #⟨0⟩ iptal
@@ -17857,6 +17944,7 @@ f55378a92	👥 Aktif kullanıcı:
 503794387	💬 Toplam mesaj:
 ef5bd5de0	📊 Toplam çeşitli etkileşim:
 c6c4664dd	Belirli bir kullanıcı için /info @kullanici veya mesaja reply vererek bilgi alabilirsiniz.
+fccc7c16c	🆔 ID: ⟨0⟩
 7e811e0d2	👱 İsim: ⟨0⟩
 9b0e7b293	🌐 Kullanıcı adı: ⟨0⟩
 14ed29970	👥 Toplam Bulunduğun grup sayısı: ⟨0⟩
@@ -17869,8 +17957,10 @@ ae2b984ac	💬 Mesaj sayısı:
 3e08d6dfd	┌📆 Günlük: ⟨0⟩
 037b7c646	├📆 Haftalık: ⟨0⟩
 9f577c2b5	├📆 Aylık: ⟨0⟩
+cf3b5cf8f	└Toplam: ⟨0⟩
 e1ed2556f	📊 Etkileşim detayı:
 0327b318b	┌🃏 Çıkartma: ⟨0⟩
+5ca7902a2	├🀄️ Gif: ⟨0⟩
 b667cf812	├🙃 Emoji: ⟨0⟩
 68fa09ce3	├📷 Fotoğraf: ⟨0⟩
 886e342ec	├🎥 Video: ⟨0⟩
@@ -18063,6 +18153,7 @@ a37fbde9a	/not <isim> — Notu getir
 5ff3c9cb2	🎰 Eglence
 b0d9549b8	/yazitura — Yazi tura at
 3ab74dacf	/zar — Zar at
+304dfe62b	ℹ️ Diğer
 b4031dc89	/help — Bu menu
 6467c9dbe	/id — ID goster
 0af5bde71	/itiraz <aciklama> — Ban itirazi (bota ozelden)
@@ -18429,6 +18520,7 @@ b35d597c9	📌 Öncekini tut
 207dc0f12	Eklemek için: <code>/zamanla 6sa mesaj</code> (medya/buton desteklenir)
 351e8911a	Henüz yok.
 242c0f02c	Bulunamadı
+ec93a493c	⏸ Durduruldu
 e388dd558	▶️ Başlatıldı
 d08a36466	➕ Yeni zamanlanmış mesaj
 25cda8fe6	🚪 <b>Veda mesajı</b> — ⟨0⟩
@@ -18516,7 +18608,10 @@ e5b1aac1e	Durum: <b>⟨0⟩</b>
 c9606c43c	🏷 <b>Etiket ayarları</b> — ⟨0⟩
 203ce8b22	<code>/etiket mesaj</code> üyeleri gruplar hâlinde etiketler. <code>/etiketdur</code> durdurur, üyeler <code>/etiketme</code> ile listeden çıkabilir.
 b86bf2507	Bir mesajda: <b>⟨0⟩ kişi</b> · Biçim: <b>⟨1⟩</b> · Kimler: <b>⟨2⟩</b>
+5090a9e78	Emoji
+d2abd1ed8	İsim
 1da63df5e	son 7 günün aktifleri
+4b30ca4e3	herkes
 4e45e032a	Kişi
 4dd25e398	⟨0⟩İsimle
 c39394400	⟨0⟩Emojiyle
@@ -18534,6 +18629,7 @@ a2c2bec19	📋 <b>Sicil</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
 0786218b9	🏷 Eski isimler: ⟨0⟩
 14c5bccb9	🚩 Ortak kara liste: ⟨0⟩
 38fd7e621	<b>⟨0⟩ grupta banlı</b>
+15ab6d34d	temiz
 04a2454bb	🌐 CAS: ⟨0⟩
 66b71c0f8	⚠️ kayıtlı
 5a25bd323	📊 Son ⟨0⟩ gün: ⚠️ ⟨1⟩ uyarı · 🔇 ⟨2⟩ susturma · 👢 ⟨3⟩ atma · 🚫 ⟨4⟩ ban
@@ -18766,6 +18862,7 @@ e2d7c5c97	POST gerekli
 33edae1a5	İstek çok büyük
 bcde64b8a	Geçersiz istek
 0429402e5	Bağlantı geçersiz
+534970479	302 Found
 d219c6810	Location
 010457c55	text/plain; charset=utf-8
 67a86b556	text/html; charset=utf-8
@@ -18832,6 +18929,7 @@ c5de3cdae	⚠️ üye (yönetici değil)
 c86df7e48	📅 Kayıt: ⟨0⟩⟨1⟩
 079fe4cc3	💬 Son mesaj: ⟨0⟩ · 7 günde ⟨1⟩ mesaj
 33a131ec1	🛡 Açık korumalar: ⟨0⟩
+c215ada82	· Ekleyen: ⟨0⟩
 cac2ce338	hiç
 d4f5955f6	🚪 Botu çıkar
 84297554a	🗑 Kaydı sil
@@ -19023,7 +19121,6 @@ b30c05510	🔑 @BotFather'dan aldığın bot token'ını yaz (ör. <code>1234567
 661af98d3	123456789:ABC...
 a54c0e304	Bu klon senin değil.
 8f8af330e	Geçersiz.
-ec93a493c	⏸ Durduruldu
 6a47f34ed	Bu klon silinmiş.
 21d148b57	🗑 @⟨0⟩ klonu silinsin mi? Bot durur, gruplardaki ayarlar kalır.
 e53f197f7	🗑 Evet, sil
@@ -19168,6 +19265,17 @@ c264fb5af	💬 Manage topics
 f56347abf	🗑 Delete stories
 fc5b6f247	ℹ️ Group info
 16f35c22f	⭐ Add admins
+5a2dcf161	The bot doesn't have permission for this. Make the bot an admin with the required rights.
+da1585078	The bot can't give someone a right it doesn't have itself.
+5f334b209	This person is an admin in the group; this action can't be applied to admins.
+a34bdfc67	User not found in the group.
+247a273bd	Message not found (it may have been deleted).
+342d7a053	This message can't be deleted (it may be older than 48 hours).
+59b207012	Telegram is receiving too many requests right now, try again a bit later.
+29072692d	Chat not found. Is the bot in that chat?
+9a9bee4a1	This only works in supergroups.
+e99fefa09	No access to the bot (the bot was blocked or removed from the chat).
+f6a39420d	Couldn't reach Telegram, try again a bit later.
 fce0709e2	❌ The action failed, please try again.
 c1a2c3bf9	You can't do this to yourself.
 58503ae82	This action can't be applied to this account.
@@ -19186,6 +19294,19 @@ e89ec2f7d	Type: ⟨0⟩
 fbb8f4be4	Bot added: ⟨0⟩ (⟨1⟩) | owner: ⟨2⟩
 417b3cc01	✅ Bot added and registered! /help for commands, /settings for settings.
 189f689b9	🌍 Language: /setlang
+cde2bd7c8	warning
+929d8360f	warning removal
+3c0ddc51a	mute
+9c030a691	unmute
+91787bcf5	kick
+b131626a5	unban
+6838cf1a3	deletion
+b707492ec	temporary ban
+6f1a328f6	rights removal
+4f0282227	report
+12c391a8f	button
+b581541a3	blacklist
+b01a6a6e8	vote
 e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> warnings
 ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Warning: ⟨3⟩/⟨4⟩ | ⟨5⟩
 9e23d2151	temporary ban (⟨0⟩)
@@ -19221,7 +19342,6 @@ c3a6b7566	Reported by: ⟨0⟩
 008e3c181	⚠️ ⟨0⟩, report received but no staff member is reachable right now.
 ad6b780a2	Report not found.
 04f22133c	This report was already handled: ⟨0⟩
-4f0282227	report
 94cea35e5	↩️ Undo warning
 2446ce8e3	🔊 Unmute
 d3d996724	↩️ Warning removed (⟨0⟩/⟨1⟩)
@@ -19408,12 +19528,14 @@ cc103ac23	The group isn't locked.
 4918e916d	Error: couldn't unlock (check the bot's permissions).
 bce49f901	Couldn't get the profile!
 9131de73e	User not found!
+0aaf03287	Banned
 bf84ddcb3	Muted (⟨0⟩h ⟨1⟩min left)
 08c52b8c6	Muted (⟨0⟩ min left)
 c5a6c0399	👤 <b>User Profile</b>
 8359545a8	Name: ⟨0⟩
 16d1a3d6f	Status: ⟨0⟩
 c90e09fec	Warnings: ⟨0⟩/⟨1⟩
+c6a441715	(Last: ⟨0⟩)
 f7b55484b	Recent actions:
 245846708	system
 1ebb0f458	No moderation actions.
@@ -19488,6 +19610,7 @@ a79d71fbf	Warn
 bd3c8d60c	Temporary ban
 7c65bba4a	⟨0⟩ messages
 5df501398	⟨0⟩ s
+cf6293e00	⟨0⟩ media
 637c7d4eb	⟨0⟩ members
 2a687b503	⟨0⟩ people
 2dd4cbf18	⟨0⟩ actions/hour
@@ -19509,6 +19632,7 @@ ffb95707b	@channel
 b7be418c7	Interval: 30m, 6h, 1d · For media, write in the photo's caption.
 dafcc65fa	6h Message
 c1e570e92	🔤 Write the words to ban (one per line). For regex, start with re:
+2038b8200	words
 8031790fb	🔗 Write the domains to allow (separated by spaces). E.g.: youtube.com t.me/mychannel
 dd20fa7d1	📝 Write the note as: name content
 750db2552	rules Group rules...
@@ -19995,8 +20119,10 @@ ae2b984ac	💬 Message count:
 3e08d6dfd	┌📆 Daily: ⟨0⟩
 037b7c646	├📆 Weekly: ⟨0⟩
 9f577c2b5	├📆 Monthly: ⟨0⟩
+cf3b5cf8f	└Total: ⟨0⟩
 e1ed2556f	📊 Interaction details:
 0327b318b	┌🃏 Stickers: ⟨0⟩
+5ca7902a2	├🀄️ GIF: ⟨0⟩
 68fa09ce3	├📷 Photos: ⟨0⟩
 886e342ec	├🎥 Videos: ⟨0⟩
 a11d703a7	├💾 Files: ⟨0⟩
@@ -20182,6 +20308,7 @@ a37fbde9a	/get <name> — Get a note
 5ff3c9cb2	🎰 Fun
 b0d9549b8	/coin — Flip a coin
 3ab74dacf	/dice — Roll a dice
+304dfe62b	ℹ️ Other
 b4031dc89	/help — This menu
 6467c9dbe	/id — Show ID
 0af5bde71	/appeal <explanation> — Ban appeal (privately to the bot)
@@ -20526,6 +20653,7 @@ b35d597c9	📌 Keep previous
 207dc0f12	To add: <code>/schedule 6h message</code> (media/buttons supported)
 351e8911a	None yet.
 242c0f02c	Not found
+ec93a493c	⏸ Stopped
 e388dd558	▶️ Started
 d08a36466	➕ New scheduled message
 25cda8fe6	🚪 <b>Goodbye message</b> — ⟨0⟩
@@ -20610,7 +20738,9 @@ e5b1aac1e	Status: <b>⟨0⟩</b>
 c9606c43c	🏷 <b>Tag settings</b> — ⟨0⟩
 203ce8b22	<code>/tag message</code> tags members in batches. <code>/stoptag</code> stops it, members can leave the list with <code>/notag</code>.
 b86bf2507	Per message: <b>⟨0⟩ people</b> · Style: <b>⟨1⟩</b> · Who: <b>⟨2⟩</b>
+d2abd1ed8	Name
 1da63df5e	active in the last 7 days
+4b30ca4e3	everyone
 4e45e032a	People
 4dd25e398	⟨0⟩By name
 c39394400	⟨0⟩By emoji
@@ -20628,6 +20758,7 @@ a2c2bec19	📋 <b>Record</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
 0786218b9	🏷 Old names: ⟨0⟩
 14c5bccb9	🚩 Shared blacklist: ⟨0⟩
 38fd7e621	<b>banned in ⟨0⟩ groups</b>
+15ab6d34d	clean
 66b71c0f8	⚠️ listed
 5a25bd323	📊 Last ⟨0⟩ days: ⚠️ ⟨1⟩ warnings · 🔇 ⟨2⟩ mutes · 👢 ⟨3⟩ kicks · 🚫 ⟨4⟩ bans
 5f914853f	No recorded penalties.
@@ -20902,6 +21033,7 @@ c5de3cdae	⚠️ member (not admin)
 c86df7e48	📅 Registered: ⟨0⟩⟨1⟩
 079fe4cc3	💬 Last message: ⟨0⟩ · ⟨1⟩ messages in 7 days
 33a131ec1	🛡 Active protections: ⟨0⟩
+c215ada82	· Added by: ⟨0⟩
 cac2ce338	never
 d4f5955f6	🚪 Remove the bot
 84297554a	🗑 Delete the record
@@ -21086,7 +21218,6 @@ b30c05510	🔑 Write the bot token you got from @BotFather (e.g. <code>123456789
 0adaad0bb	To cancel: cancel
 a54c0e304	This clone isn't yours.
 8f8af330e	Invalid.
-ec93a493c	⏸ Stopped
 6a47f34ed	This clone was deleted.
 21d148b57	🗑 Delete the clone @⟨0⟩? The bot stops, settings in groups stay.
 e53f197f7	🗑 Yes, delete
@@ -21192,6 +21323,9 @@ a9826a4de	⟨0⟩ Security Bot
 4352d25d9	<blockquote expandable>⟨0⟩</blockquote>
 f52bff073	flood_notice_⟨0⟩_⟨1⟩
 d2cdf97e4	⟨0⟩<blockquote expandable>⟨1⟩</blockquote>⟨2⟩
+9c4385cbc	rapor:⟨0⟩
+add542f6d	rapor #⟨0⟩
+534d0f9e8	buton:⟨0⟩
 090ff92f5	<blockquote expandable>⟨0⟩</blockquote>⟨1⟩
 348974ec8	Captcha ⟨0⟩.
 070cf47b7	Captcha ⟨0⟩ | ⟨1⟩
@@ -21202,6 +21336,7 @@ d2cdf97e4	⟨0⟩<blockquote expandable>⟨1⟩</blockquote>⟨2⟩
 8290f7d5e	· <code>⟨0⟩</code>
 e9d283a8a	ID: ⟨0⟩
 eaf7ea115	<blockquote expandable>⟨0⟩⟨1⟩</blockquote>
+fccc7c16c	🆔 ID: ⟨0⟩
 b667cf812	├🙃 Emoji: ⟨0⟩
 3302869c8	Admin: ⟨0⟩ (<code>⟨1⟩</code>)
 ad9ead387	Bot: ⟨0⟩
@@ -21222,6 +21357,2133 @@ a4439e0c5	<a href="tg://user?id=⟨0⟩">⟨1⟩</a>
 cd8533168	• ⟨0⟩: <code>⟨1⟩</code> — ⟨2⟩
 4e4068d8f	bot_data_⟨0⟩.db
 176712105	⟨0⟩<pre>⟨1⟩</pre>
+'''
+
+I18N_RU = r'''
+a9826a4de	⟨0⟩ Security Bot
+89c80575f	⚡ Основной бот: @⟨0⟩
+d86fae223	✅ Язык установлен: ⟨0⟩
+972caaca5	🌍 <b>Язык</b>
+0c1e30399	Выберите язык:
+fea7d950e	✅ Язык группы: ⟨0⟩
+1b6f202bc	🌍 <b>Язык группы</b>
+9ab6017a5	Сейчас: ⟨0⟩
+9d13d74f6	Выберите язык бота для этой группы:
+448e35ffe	У вас нет прав!
+17665e8c1	🌍 Язык группы: ⟨0⟩ | ⟨1⟩
+4c9e57207	👑 Основатель
+bfa3235c4	🔱 Сооснователь
+ef61a4d09	⭐ Старший админ
+a5926dc01	🛡 Админ
+8d0d91abe	⚠️ Предупреждение
+9a83dd2de	🗑 Удаление сообщений
+d7d2f6eb2	🔇 Мут
+4acd35f89	👢 Кик
+41605b650	🔨 Бан / разбан
+1a7979b5e	↩️ Снятие предупреждений
+5b4929b15	📌 Закрепление
+6880a0676	🧹 Очистка / медленный режим
+1b5d5b3d1	📩 Заявки / апелляции
+6a285730c	📜 Правила / приветствие / заметки
+eab57b3ab	🚨 Экстренная блокировка (снятие)
+932bdd7e5	⚙️ Настройки защиты
+6628cf302	👑 Выдача / снятие рангов
+178f46a47	🧩 Фильтры (автоответы)
+5d856e480	🏷 Массовое упоминание (/tag)
+8c664bc3f	🔗 Ссылка-приглашение
+5fc826495	🚫 Ограничение / бан
+52e1acc4f	🎙 Голосовые чаты
+c264fb5af	💬 Управление темами
+5e74fa6f0	📖 Публикация историй
+1e9853465	✏️ Редактирование историй
+f56347abf	🗑 Удаление историй
+fc5b6f247	ℹ️ Информация о группе
+16f35c22f	⭐ Добавление админов
+5a2dcf161	У бота нет прав для этого. Сделайте бота админом с нужными правами.
+da1585078	Бот не может выдать право, которого нет у него самого.
+5f334b209	Этот человек — админ группы; к админам это действие применить нельзя.
+a34bdfc67	Пользователь не найден в группе.
+247a273bd	Сообщение не найдено (возможно, удалено).
+342d7a053	Это сообщение нельзя удалить (возможно, оно старше 48 часов).
+59b207012	Telegram сейчас получает слишком много запросов, попробуйте чуть позже.
+29072692d	Чат не найден. Бот есть в этом чате?
+9a9bee4a1	Это работает только в супергруппах.
+e99fefa09	Нет доступа к боту (бот заблокирован или удалён из чата).
+f6a39420d	Не удалось связаться с Telegram, попробуйте чуть позже.
+fce0709e2	❌ Действие не удалось, попробуйте ещё раз.
+c1a2c3bf9	Нельзя применить это к себе.
+58503ae82	Это действие нельзя применить к этому аккаунту.
+c93d8e442	⛔ У ⟨0⟩ такой же или более высокий ранг; вы не можете применить к нему действие.
+7c6c0a917	Этот человек
+980a088c1	⛔ У вас нет прав! (⟨0⟩ или выше)
+f78cc4201	⛔ Для этой команды нужно быть настоящим админом группы.
+1a089160e	⛔ Бот не является админом в этой группе или у него нет прав.
+ec502d773	⟨0⟩ ч
+1d683512c	⟨0⟩ мин
+e0250a8c0	⟨0⟩ сек
+4f52d88ec	Привет, {user}! Добро пожаловать в {group}!
+41006f31c	🙏 Спасибо! Бот добавлен: ⟨0⟩
+e89ec2f7d	Тип: ⟨0⟩
+484b4f591	Команды: /help
+fbb8f4be4	Бот добавлен: ⟨0⟩ (⟨1⟩) | владелец: ⟨2⟩
+417b3cc01	✅ Бот добавлен и зарегистрирован! Команды: /help, настройки: /settings.
+189f689b9	🌍 Язык: /setlang
+cde2bd7c8	предупреждение
+929d8360f	снятие предупреждения
+3c0ddc51a	мут
+9c030a691	снятие мута
+91787bcf5	кик
+b131626a5	разбан
+6838cf1a3	удаление
+b707492ec	временный бан
+6f1a328f6	снятие прав
+4f0282227	жалоба
+12c391a8f	кнопка
+b581541a3	чёрный список
+b01a6a6e8	голосование
+e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> предупреждений
+ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Предупреждение: ⟨3⟩/⟨4⟩ | ⟨5⟩
+9e23d2151	временный бан (⟨0⟩)
+953cd28f3	исключён из группы
+090d91568	📨 Для апелляции можно написать боту в личку /appeal.
+ddd70b55a	⟨0⟩ ⟨1⟩ набрал ⟨2⟩ предупреждений → <b>⟨3⟩</b> (⟨4⟩)⟨5⟩
+f05514a4b	🚫 ⟨0⟩ ⟨1⟩ | Причина: ⟨2⟩ | ⟨3⟩
+33762701b	🗑 ⟨0⟩ → сообщение ⟨1⟩ удалено | ⟨2⟩
+e83ba4992	🔇 ⟨0⟩ ⟨1⟩ → мут на ⟨2⟩
+4689a9495	👢 ⟨0⟩ ⟨1⟩ → исключён из группы
+24b70b24b	🚫 ⟨0⟩ ⟨1⟩ → забанен
+f881648dd	🗑 Сообщение удалено
+a1ce809b5	⚠️ Удалено + предупреждение
+4d4d20ba3	🔇 Удалено + мут на 1 час
+3a4a2408d	🚫 Удалено + бан
+184e9ea25	✅ Проигнорировано
+1cd1dbdf9	🗑 Удалить
+d193c645a	⚠️ Предупредить
+bb7ad37ac	🔇 Мут 1 ч
+ebe01fecc	🚫 Бан
+e7e0e2df9	✅ Игнорировать
+3397853de	Жалоба отправляется ответом на сообщение в группе: /report [причина]
+b61b50bf7	Ответьте на сообщение и напишите /report, чтобы пожаловаться.
+9cf259e34	На администрацию жаловаться нельзя.
+c5bbdb405	Вы жалуетесь слишком часто, подождите немного.
+bd7e0099e	На это сообщение уже пожаловались.
+896d1ca10	🚩 <b>Новая жалоба</b> #⟨0⟩
+cec4cf481	Группа: <b>⟨0⟩</b>
+c3a6b7566	Пожаловался: ⟨0⟩
+5083aeebb	Нарушитель: ⟨0⟩ (<code>⟨1⟩</code>)
+9b4b6cd06	<a href="⟨0⟩">Перейти к сообщению</a>
+679ec2d36	✅ ⟨0⟩, ваша жалоба отправлена администрации.
+008e3c181	⚠️ ⟨0⟩, жалоба получена, но сейчас никто из администрации недоступен.
+ad6b780a2	Жалоба не найдена.
+04f22133c	Эта жалоба уже обработана: ⟨0⟩
+94cea35e5	↩️ Отменить предупреждение
+2446ce8e3	🔊 Снять мут
+d3d996724	↩️ Предупреждение снято (⟨0⟩/⟨1⟩)
+2ffab4aa4	🔇 Мут на 1 час
+969014784	🔊 Мут снят
+96524e022	🚫 Забанен
+c1ef156c4	✅ Разбанен
+7181ac4be	Неверное действие.
+3461c44ea	Для этого нужно быть админом группы.
+74042fc88	Бот не является админом в этой группе или у него нет прав.
+aec9fe5ec	Нельзя применить к администрации.
+14fea3d87	👋 Привет, ⟨0⟩!
+b6ba013b6	Чтобы писать в группе, ответьте на вопрос ниже.
+30a234e49	⏰ Время: ⟨0⟩. При неверном ответе или по истечении времени вы будете удалены из группы.
+5941a96e3	⏰ Время капчи истекло → ID:⟨0⟩ удалён | ⟨1⟩
+47de968f7	Ошибка.
+371e8fa90	Это не ваша капча!
+4b056df52	Время капчи истекло.
+16a67ec53	✅ Верно!
+13e7c138f	✅ ⟨0⟩ прошёл проверку!
+d8c5044b0	✅ Капча пройдена: ⟨0⟩ | ⟨1⟩
+d4d19c221	❌ Неверный ответ!
+be0ff1965	❌ ⟨0⟩ ответил неверно и удалён.
+921ae23b1	❌ Капча не пройдена → ⟨0⟩ удалён | ⟨1⟩
+a1d75b185	🗑 ⟨0⟩ — сообщение от имени канала (⟨1⟩) удалено | ⟨2⟩
+c537f5f16	🆕 ⟨0⟩, новые участники не могут отправлять ссылки/медиа/пересылки в первые ⟨1⟩ мин. (осталось ~⟨2⟩ мин)
+df471627f	заблокированный стикерпак
+d3bfcdff9	заблокированное медиа
+c82923d6d	опасный файл (⟨0⟩)
+c83f1da6c	неприемлемый контент
+5fb084a5f	ИИ: ⟨0⟩
+51da96b93	неприемлемый контент (⟨0⟩)
+c5baa0aed	Неприемлемое медиа (⟨0⟩)
+acae614af	автоматически: неприемлемые медиа подряд (подозрение на атаку)
+f77a6df47	🚨 Обнаружена <b>медиа-атака</b>, отправка медиа в группе заблокирована.
+d6fc51018	пост без подписи
+93f2e53e1	🔞 <b>В канале удалено неприемлемое медиа</b>
+a99d18293	Отправитель: ⟨0⟩
+d6c8546a4	Канал: <code>⟨0⟩</code>
+cb902699f	Неприемлемые медиа подряд в канале (подозрение на попытку заблокировать канал)
+ade12807b	🔒 <b>Блокировка медиа</b>: фото, видео, стикеры, GIF и файлы отключены на ⟨0⟩.
+d21e8724d	Причина: ⟨0⟩
+0ca7ff868	🔓 Блокировка медиа снята, прежние права восстановлены.
+874318f86	🔓 Блокировка медиа снята | ⟨0⟩
+4bf6387ff	Используйте эту команду в группе, ответив на медиа, которое нужно заблокировать.
+b38691ea2	Ответьте на фото/видео/GIF/стикер/файл, который нужно заблокировать.
+19a0caff5	Ответьте на стикер, чтобы заблокировать его пак.
+a6fdf7132	стикерпак <code>⟨0⟩</code>
+478778014	(во всех группах)
+350c5b7db	🚫 ⟨0⟩ заблокировано. При повторной отправке будет удалено.
+3506ca524	Это уже заблокировано.
+4d19611fc	🚫 Медиа заблокировано (⟨0⟩) | ⟨1⟩
+63de95c9c	Сначала выберите группу командой /select!
+0d2990bb6	🔓 Блокировка медиа снята.
+5efbe835d	Блокировка медиа уже выключена.
+bc8817800	🔒 Медиа заблокированы.
+57dd35ab6	Не удалось заблокировать (возможно, активна блокировка от рейда или у бота нет прав).
+6fc9219df	⟨0⟩ д ⟨1⟩ ч
+184dd1447	⟨0⟩ ч ⟨1⟩ мин
+65f0ede73	⟨0⟩ мин
+c55e9eeb2	✏️ ⟨0⟩, сообщения старше ⟨1⟩ мин редактировать нельзя; ваше отредактированное сообщение удалено.
+e4ec4ef08	<i>нет записи (сообщение отправлено до включения защиты)</i>
+4f135e257	<a href="⟨0⟩">Место сообщения</a>
+a81c7ed8d	✏️ <b>Удалено поздно отредактированное сообщение</b>
+ff6af8a83	Пользователь: ⟨0⟩ (<code>⟨1⟩</code>)
+6c94268e3	Отправлено: ⟨0⟩ · изменено через ⟨1⟩
+eba784f45	<b>До:</b>
+817e491aa	<b>После:</b>
+ba4e72261	Пересылка
+330690bdd	пересылка (#⟨0⟩)
+a00507082	медиа-флуд (⟨0⟩/⟨1⟩ сек)
+a77f997a9	флуд (⟨0⟩ сообщений/⟨1⟩ сек)
+74c953a60	🔗 Ссылка удалена → ⟨0⟩ | ⟨1⟩
+427c1fec3	отправка ссылок
+794910b1f	Запрещённое слово
+8fb66aa89	запрещённое слово
+4e5efb06d	повторяющийся спам
+c91e153a9	Анти-пересылка сейчас: ⟨0⟩
+6d6d358e6	Использование: /antiforward on|off
+117ba2454	ВКЛ
+6a2055cc2	Анти-пересылка ⟨0⟩.
+596cfaf0b	Анти-пересылка ⟨0⟩ | ⟨1⟩
+d2102fa46	Анти-медиа сейчас: ⟨0⟩
+332b15c14	Использование: /antimedia on|off
+3227848c2	Анти-медиафлуд ⟨0⟩.
+48d9c6287	Анти-медиафлуд ⟨0⟩ | ⟨1⟩
+8cc0eba99	Анти-флуд сейчас: ⟨0⟩
+d1a5f38ec	Лимит: ⟨0⟩ сообщений / ⟨1⟩ сек
+3599fb42c	Использование: /antispam on|off
+64adfe1a4	Изменить лимит: /antispam on 10 5 (10 сообщений/5 секунд)
+1a836ee8e	Анти-флуд ⟨0⟩. (Лимит: ⟨1⟩ сообщений/⟨2⟩ сек)
+27867ef23	Анти-спам ⟨0⟩ | ⟨1⟩
+5a6f48edd	Анти-ссылки сейчас: ⟨0⟩
+d947593b7	Использование: /antilink on|off
+5ddc225c5	Блокировка ссылок ⟨0⟩. (На админов не действует)
+298cef31c	Анти-ссылки ⟨0⟩ | ⟨1⟩
+dc5c98faf	Капча сейчас: ⟨0⟩
+0742b23d4	Использование: /captcha on|off
+348974ec8	Капча ⟨0⟩.
+070cf47b7	Капча ⟨0⟩ | ⟨1⟩
+f8303f57c	✅ ⟨0⟩ больше не в администрации.
+eb3b60248	🗑 Ранг ⟨0⟩ снят | ⟨1⟩
+36a946671	Пользователь не найден!
+92274adac	📂 ⟨0⟩ теперь управляет папками!
+b7a687056	📂 ⟨0⟩ назначен управляющим папками | ⟨1⟩
+3b49b9b50	Причина не указана
+d34c44d0e	бессрочный бан
+42ca54745	🚫 ⟨0⟩ получил ⟨1⟩! Причина: ⟨2⟩
+023576cd7	Укажите пользователя! Ответьте на его сообщение или укажите ID/username.
+bad97a937	✅ ⟨0⟩ разбанен!
+b83344e83	✅ ⟨0⟩ разбанен | ⟨1⟩
+dee699309	👢 ⟨0⟩ исключён!
+16d07ca95	👢 ⟨0⟩ исключён | ⟨1⟩
+299422191	24 часа (лимит админа)
+b2fbfc457	🔇 ⟨0⟩ получил мут на ⟨1⟩!
+9247b48e0	🔇 ⟨0⟩ получил мут на ⟨1⟩ | ⟨2⟩
+b13185722	⟨0⟩ ⟨1⟩: мут снят!
+dd3fea678	⟨0⟩ ⟨1⟩: мут снят | ⟨2⟩
+08ccab800	ручное снятие мута
+f990c822c	Не удалось снять мут: ⟨0⟩
+fa5f86984	⟨0⟩ ⟨1⟩: предупреждение снято (⟨2⟩/⟨3⟩).
+e222d2c43	↩️ ⟨0⟩: предупреждение снято (⟨1⟩) | ⟨2⟩
+b26226e44	📊 Предупреждения ⟨0⟩: ⟨1⟩/⟨2⟩
+fcbd59f04	Ответьте на сообщение и напишите /pin, чтобы закрепить его!
+821dc813a	📌 Сообщение закреплено!
+f07ba3194	📌 Сообщение закреплено | ⟨0⟩
+84ce06e7a	✅ Откреплено!
+7a8e925ad	📍 Откреплено | ⟨0⟩
+a166505b1	Использование: /slowmode <секунды> (0 = выкл)
+5efa94a44	Пример: /slowmode 30
+d9e0a5f25	⏩ Медленный режим выключен.
+c9f3d97aa	🐢 Медленный режим: ⟨0⟩ сек.
+90fc9c4e8	🐢 Медленный режим ⟨0⟩ сек | ⟨1⟩
+04ee47e62	Введите корректное число секунд!
+ec7dc1340	Сначала выберите группу командой /select!
+ef6a75200	Используйте эту команду в группе, которую нужно очистить.
+8ab6d8456	Использование: /purge <количество> или /purge all
+f726b6834	Последние 20 000 сообщений
+ad1696ee9	Последние ⟨0⟩ сообщений
+09bed8e26	🧹 Удаляю сообщения, подождите...
+1f937217d	🧹 Очищено: ⟨0⟩.
+f6a3aa1c3	🧹 Очищено: ⟨0⟩ | ⟨1⟩
+ca1480b4e	📋 Список банов пуст.
+3df0209e0	🚫 <b>Список банов</b> (последние 20):
+a2ef54f04	📋 Список мутов пуст.
+f3ad3e028	🔇 <b>Список мутов</b> (последние 20):
+4d02c60e6	осталось ⟨0⟩ мин
+e9fa5b6c6	истёк
+50bd44457	Использование: /antispam on|off
+aaf3e3fa7	Защита от спама ⟨0⟩!
+032f12948	⚙️ Защита от спама ⟨0⟩ | ⟨1⟩
+db5c288ba	Использование: /wordban <слово>
+5ce049d2e	Неверное регулярное выражение: ⟨0⟩
+382054e7a	«⟨0⟩» добавлено в список запрещённых слов!
+a061e639e	«⟨0⟩» уже запрещено!
+c690df9b8	Фильтр запрещённых слов включён!
+a04bd920f	Фильтр запрещённых слов выключен!
+908cb2d50	Использование: /setautoaccept on|off
+ad89cff79	Автопринятие ⟨0⟩!
+8a77c7461	Использование: /setautoreject on|off
+de72bc915	Автоотклонение ⟨0⟩!
+f4661e0bb	Использование: /setautorejectbot on|off
+4f2789f4b	Отклонение ботов/фейков ⟨0⟩!
+19f41bbbf	Статистики приглашений пока нет!
+8618c4bd5	📈 Статистика приглашений:
+4dff67686	⟨0⟩: ⟨1⟩ участников
+fae5737f3	🚨 ОБНАРУЖЕН РЕЙД!
+7b14ac650	⟨0⟩ участников / ⟨1⟩ сек
+cf9fdec29	Группа заблокирована на ⟨0⟩ мин. Снять: /unlockdown
+1124ad26d	🔒 Группа заблокирована на ⟨0⟩ мин: ⟨1⟩
+93ff62fcf	Группа уже заблокирована.
+0182255e2	🚨 Экстренная блокировка: ⟨0⟩
+121e5db73	🔒 Группа заблокирована на ⟨0⟩ мин. Сооснователи и выше могут снять блокировку командой /unlockdown.
+2aadb84f8	Не удалось заблокировать (проверьте права бота).
+aff77f945	✅ Блокировка от рейда снята автоматически | ⟨0⟩
+8fcabef94	🔒 Сейчас ЗАБЛОКИРОВАНО
+94a774e51	🔓 Открыто
+376d9283f	🚨 Анти-рейд: ⟨0⟩
+8827355aa	Использование: /antiraid on|off
+f0e5d75da	Изменить лимит: /antiraid on 15 20 (15 участников/20 сек)
+ecbb4a7da	🚨 Анти-рейд ⟨0⟩.
+4f3192d13	Лимит: ⟨0⟩ участников / ⟨1⟩ сек
+bdf82e0b3	🚨 Анти-рейд ⟨0⟩ | ⟨1⟩
+cc103ac23	Группа не заблокирована.
+374c81aa3	✅ Блокировка от рейда снята, прежние права группы восстановлены.
+2551f6fe1	✅ Блокировка от рейда снята вручную | ⟨0⟩
+4918e916d	Ошибка: не удалось снять блокировку (проверьте права бота).
+bce49f901	Не удалось получить профиль!
+9131de73e	Пользователь не найден!
+45e118d05	Обычный
+0aaf03287	Забанен
+bf84ddcb3	Мут (осталось ⟨0⟩ ч ⟨1⟩ мин)
+08c52b8c6	Мут (осталось ⟨0⟩ мин)
+c5a6c0399	👤 <b>Профиль пользователя</b>
+8359545a8	Имя: ⟨0⟩
+0fd8daf31	ID: <code>⟨0⟩</code>
+16d1a3d6f	Статус: ⟨0⟩
+c90e09fec	Предупреждения: ⟨0⟩/⟨1⟩
+c6a441715	(Последнее: ⟨0⟩)
+f7b55484b	Последние действия:
+245846708	система
+1ebb0f458	Нет действий модерации.
+ea0db6b35	Запрещённые слова: ⟨0⟩
+67b2688cb	Запрещённых слов нет.
+ab2a94371	Добавить: /wordban <слово>
+bc50a233e	Удалить: ⟨0⟩
+ea1ef9198	Удалить все
+9e6ecd595	Закрыть
+d4ff2fcbb	Запрещённые слова: ⟨0⟩
+1e892c51e	Всего: ⟨0⟩ слов
+d6c5bc3c9	Для удаления используйте кнопки ниже:
+3e285778b	ВКЛ
+86fc112e5	ВЫКЛ
+3b9e05b52	Список слов закрыт.
+a9b768614	Все запрещённые слова удалены.
+baa6a8908	Все запрещённые слова удалены | ⟨0⟩
+f3b918935	Запрещённое слово удалено: ⟨0⟩ | ⟨1⟩
+09e3ab40d	Все слова удалены.
+4b153db82	Запрещённые слова: ВКЛ
+dbddb7434	Отправка сообщений
+399307b2e	Отправка медиа
+17dec3f5f	Отправка ссылок
+a6d462ad9	Отправка файлов
+b80944077	Сохранить
+b0bd84b1e	Отмена
+eec2005a5	Сначала выберите канал командой /select!
+056d48fa9	Ночной режим включён вручную.
+aad062b54	Ночной режим выключен вручную.
+511a5144a	Часы ночного режима установлены:
+cb1460461	Начало: ⟨0⟩:⟨1⟩
+771bcaf96	Конец: ⟨0⟩:⟨1⟩
+7989dd84a	Настроить ограничения: /nightmod
+79514002a	Ошибка формата. Использование: /nightmod 23:00 07:00
+204b48fc8	Настроить (в личке)
+42031a2a7	Ночной режим используется впервые! Напишите боту в личку, чтобы настроить его:
+89f29d42a	Активен
+3de48344f	Неактивен
+de1f5c130	Ночной режим: ⟨0⟩ (⟨1⟩)
+b1d3baa6d	Часы: ⟨0⟩:⟨1⟩ - ⟨2⟩:⟨3⟩ (UTC+3)
+b5356dbcd	Выберите права для ограничения и нажмите «Сохранить»:
+bc2943e26	🌙 Ночной режим начался. Ограничения действуют до ⟨0⟩:⟨1⟩ утра.
+86a8a2d6d	Ночной режим включён | ⟨0⟩
+2a8fea2da	☀️ Ночной режим закончился. Обычные права восстановлены.
+19d0c7302	Ночной режим закончился | ⟨0⟩
+5f5e93020	Настройка ночного режима отменена.
+9ca4e6abd	Медиа
+c0ceeb976	Голосовые/видеосообщения
+d0517071a	Ссылка
+02c5387be	Ограничения не выбраны
+8c6724096	Ночной режим сохранён!
+4c2f064b0	Ограничения: ⟨0⟩
+ec5110d51	Задать часы: /nightmod 23:00 07:00
+015f290e6	Ночной режим настроен | ⟨0⟩
+a6ff502b6	⟨0⟩ Временный бан истёк, но разбан не удался: <code>⟨1⟩</code>
+09caa25fa	⟨0⟩ Временный бан закончился → ⟨1⟩ разбанен
+45cdd1bd7	🔗 Ссылка
+a70e468cd	Удаляются сообщения со ссылками, скрытыми (встроенными) ссылками и кнопками-ссылками.
+a0c63db58	🔤 Запрещённые слова
+09f922f95	Слова из списка ловятся с учётом турецких букв, регистра и leetspeak.
+58c8ebdab	🔁 Повторяющийся спам
+61bbb7e24	Если большинство из последних 10 сообщений за 60 сек одинаковые — это спам.
+37f36cdb7	🌊 Флуд
+a8ee9b9f5	Больше сообщений, чем позволяет лимит, за короткое время.
+283d462ac	↪️ Пересылка
+93442a52b	Сообщения, пересланные из других чатов.
+4592320db	🖼 Медиа-флуд
+b65eef3f3	Больше фото/видео/стикеров, чем позволяет лимит, за короткое время.
+32d0d473e	🔞 Неприемлемые медиа
+cf1a8e3ca	Порно/обнажёнка (ИИ, если установлен), заблокированные медиа и стикерпаки, опасные файлы (.apk, .exe…).
+353ad5e39	Удалить
+a79d71fbf	Предупреждение
+229c67bd8	Мут
+0855009c4	Кик
+7f3fcf8f1	Бан
+bd3c8d60c	Временный бан
+7c65bba4a	⟨0⟩ сообщений
+5df501398	⟨0⟩ сек
+cf6293e00	⟨0⟩ медиа
+637c7d4eb	⟨0⟩ участников
+2a687b503	⟨0⟩ человек
+2dd4cbf18	⟨0⟩ действий/час
+d507ef055	Сообщения
+cc9e030d6	Голосовые/видеосообщения
+1949df42c	Превью ссылок
+01674713d	Файлы/музыка
+0a4ef3c95	✏️ Напишите новое приветствие или отправьте фото/видео/GIF (подпись станет текстом).
+a5e32e95a	Кнопки: по одной в строке  Текст - https://ссылка  (рядом: через &&)
+1ee44f2e2	Переменные: {user} {first} {username} {group} {count} · Случайно: разделяйте сообщения строкой %%%
+989ac76ce	Добро пожаловать, {user}!
+f4b119f84	✏️ Напишите прощальное сообщение (можно медиа и кнопки). Переменные: {first} {user} {group}
+3fffcf251	👋 {name} покинул(а) нас.
+e32be930c	📜 Напишите правила группы. Форматирование (жирный, ссылки) и кнопки сохраняются.
+8a546a91a	1) Уважайте друг друга  2) Без рекламы
+369899a51	📢 Укажите обязательный канал: @channel, t.me/channel или ID -100…. Бот должен быть там админом.
+ffb95707b	@channel
+0bf3f943d	⏰ Сначала интервал, затем сообщение. Например: 6h Не забудьте прочитать правила!
+b7be418c7	Интервал: 30m, 6h, 1d · Для медиа пишите в подписи к фото.
+dafcc65fa	6h Сообщение
+c1e570e92	🔤 Напишите слова для запрета (по одному в строке). Для regex начните с re:
+2038b8200	слов
+8031790fb	🔗 Напишите разрешённые домены (через пробел). Например: youtube.com t.me/mychannel
+dd20fa7d1	📝 Напишите заметку так: название содержание
+750db2552	rules Правила группы...
+2f50f0128	🧾 Укажите ID лог-канала/группы (например, -1001234567890). Бот должен иметь возможность писать туда.
+0a89e21a0	🛟 Укажите ID доверенного человека (его можно узнать, отправив боту /id).
+678669669	Выкл
+5e05f56cb	⬅️ Назад
+3425aebce	🛡 <b>Защита</b> — ⟨0⟩
+a9aa38570	Нажмите на защиту, чтобы включить/выключить её и настроить наказание и лимиты.
+dfc009e83	⟨0⟩ <b>защита</b> — ⟨1⟩
+196e11b00	Наказание: <b>⟨0⟩</b>
+3b58939e6	(лимит ⟨0⟩ → ⟨1⟩)
+e882e3937	Нарастающий мут: 10 мин → 30 мин → 5 часов
+10d361785	Защита ⟨0⟩
+24d948e4b	Лимит
+a92c81c26	🔗 Разрешённые ссылки ›
+05bd7ca2c	🔤 Список слов ›
+7bb491e04	🚪 <b>Вступление</b> — ⟨0⟩
+a956dd268	• <b>Капча</b>: новый участник не может писать в группе, пока не решит математический пример.
+29aad6032	• <b>Проверка в личке</b>: бот задаёт вопрос в личке тем, кто подал заявку на вступление; ответившие верно принимаются автоматически. В группе должно быть включено «Одобрение новых участников», а у бота — право приглашать.
+d33b884be	Капча (в группе)
+6fe48b7bb	Проверка в личке
+34c8b8ee3	Автопринятие
+747e46068	Автоотклонение
+eb973fe6c	Отклонять ботов / без username
+371ffa7fa	Мут новым участникам без username
+22be1b04d	🚨 Анти-рейд ›
+df3d708d0	🆕 Ограничение новичков ›
+119163a69	🚨 <b>Анти-рейд</b> — ⟨0⟩
+3d6f3a6ef	Если за заданное время вступит больше участников, чем позволяет лимит, группа блокируется на ⟨0⟩ мин, затем прежние права восстанавливаются.
+12e3f2f5a	🔒 Заблокировано
+78047dc1b	Анти-рейд
+5ebba95e7	🔓 Разблокировать сейчас
+80ea856ce	🆕 <b>Ограничение новичков</b> — ⟨0⟩
+983dcd824	Новые участники не могут отправлять ссылки, медиа и пересылки в течение заданного времени (сообщение удаляется, показывается уведомление).
+b55881f2f	⚠️ <b>Предупреждения</b> — ⟨0⟩
+979ac1fa7	Защиты с наказанием «Предупреждение» и команда /warn выдают предупреждения; при достижении лимита применяется выбранное наказание.
+cd70c61ed	Сейчас: <b>⟨0⟩</b> предупреждений → <b>⟨1⟩</b>
+e72447e76	Лимит предупреждений
+a380d0c65	Длительность наказания
+c601b3f5f	Мут от защиты
+6a05e68f4	🌙 <b>Ночной режим</b> — ⟨0⟩
+9ca9fb409	Статус: <b>⟨0⟩</b>⟨1⟩
+d772b08c3	Часы: <b>⟨0⟩:⟨1⟩ – ⟨2⟩:⟨3⟩</b> (UTC+3)
+145d44a73	В эти часы выбранные права отключаются, а после — восстанавливаются.
+4a4847e71	(сейчас активен)
+ed1a5ae4e	Ночной режим
+58910c4c5	Начало ⟨0⟩:⟨1⟩
+8e87dff1c	Конец ⟨0⟩:⟨1⟩
+586001e9d	🔗 <b>Разрешённые ссылки</b> — ⟨0⟩
+53a0c084e	Эти домены не затрагиваются защитой от ссылок (включая поддомены). Всего: ⟨0⟩
+0aa28d421	Нажмите, чтобы удалить.
+c619b874d	➕ Добавить
+20540dbc7	<b>Удалить все запрещённые слова?</b>
+b12c1611e	🔤 <b>Запрещённые слова</b> — ⟨0⟩
+cbdf733da	Фильтр: <b>⟨0⟩</b> · Всего: ⟨1⟩
+acb2cf3c1	Фильтр слов
+9de026dc8	🧹 Удалить все
+866ffe59a	📝 <b>Заметки</b> — ⟨0⟩
+8488244a4	Если написать в группе <code>#название</code>, бот покажет заметку. Всего: ⟨0⟩
+6e5864d9f	➕ Добавить заметку
+64d1a5476	🧩 <b>Фильтры</b> — ⟨0⟩
+75e34f897	Бот отвечает, когда в группе пишут ключевое слово. Всего: ⟨0⟩
+c8063c80c	Добавить в группе: <code>/filter</code> · Нажмите, чтобы удалить.
+7cb292fe4	🧾 <b>Лог-канал</b> — ⟨0⟩
+399fb6ff5	Сюда отправляются все записи модерации.
+6a7bdfba4	Сейчас: <code>⟨0⟩</code>
+e76134e13	Изменить может только владелец группы.
+d92dcb23a	✏️ Указать лог-канал
+c62c45415	🗑 Убрать
+512ba4fe4	🚨 Рейд
+07210c024	⚙️ <b>⟨0⟩ — Настройки группы</b>
+9006cb8f1	🛡 Активные защиты: ⟨0⟩
+16ccea6ec	🚪 Капча: ⟨0⟩ · Проверка в личке: ⟨1⟩
+cc096b5a7	⚠️ Предупреждения: ⟨0⟩ → ⟨1⟩
+06292addb	🌙 Ночной режим: ⟨0⟩
+e5044a295	🛡 Защита
+82a6a709d	🌙 Ночной режим
+2eed1225e	🔗 Ссылки
+d38c4e47a	🔤 Слова
+6828b98dc	🧩 Фильтры
+7956a13a3	⏰ Сообщения по расписанию
+81bddc593	🏷 Упоминания
+5961a42e8	✏️ Правки и жалобы
+1ff65156a	🧾 Лог-канал
+f1a57e125	🌐 Сеть групп
+f5c96387f	🛟 Восстановление
+5244ca690	🌍 Язык: ⟨0⟩
+1bd24917c	✖️ Закрыть
+e38a49a6f	Настройки защиты канала
+f81ca3a77	Эту настройку может изменить только основатель группы.
+4081e665c	Неверная настройка
+ce432606a	✅ Включено
+ca037fcc4	❌ Выключено
+a006b158d	⚙️ Наказание ⟨0⟩ → ⟨1⟩ | ⟨2⟩
+0ebfd3ac6	Наказание: ⟨0⟩
+286a11648	Наказание за лимит: ⟨0⟩
+c32110889	Список изменился, обновлено
+cf6b53ca2	🗑 ⟨0⟩ удалено: ⟨1⟩ | ⟨2⟩
+64e48562d	Разрешённая ссылка
+ed6b18d70	🗑 ⟨0⟩ удалено
+36a8cc3d4	🧹 Все запрещённые слова удалены | ⟨0⟩
+5db717ed8	Все слова удалены
+0f2ad553f	Фильтр удалён
+3247c21b8	🌙 Ночной режим ⟨0⟩
+672441418	включено
+ba4dc20d1	выключено
+d3d694451	Сохранено
+95bf688eb	Лог-канал убран
+e413c4b9e	Правила удалены
+0f514bbde	✅ Блокировка от рейда снята через панель | ⟨0⟩
+8e6a20f22	🔓 Разблокировано
+f5014f259	Не удалось разблокировать (права бота?)
+7f0e2a142	Группа не найдена.
+f41c17d41	Чтобы пользоваться этой панелью, нужно быть админом группы.
+8213d6575	<i>Отмена: cancel</i>
+1465f36fd	Напишите ответ как ответ на открывшееся сообщение.
+3035a6b30	⏰ Время вышло, попробуйте снова из панели.
+18363eae4	Отменено.
+3a22b8f74	❌ Правила не могут быть пустыми.
+fa98ef9b6	Приветствие
+a9e0c5b00	✏️ ⟨0⟩ обновлено | ⟨1⟩
+074e8897f	✅ ⟨0⟩ обновлено (⟨1⟩). Проверить можно кнопкой 👁 Предпросмотр в панели.
+4f4799ddf	✅ Обязательный канал включён: <b>⟨0⟩</b>
+9dc44c973	❌ Напишите сообщение после интервала. Например: <code>6h Прочитайте правила!</code>
+564247ab5	✅ Сообщение по расписанию #⟨0⟩: каждые ⟨1⟩.
+390237a11	✅ Добавлено слов: ⟨0⟩, фильтр слов включён.
+28ebadbf6	❌ Неверное регулярное выражение: ⟨0⟩
+8d642d759	✅ Добавлено доменов: ⟨0⟩.
+f6b268d0d	❌ Формат: <code>название содержание</code> (название: буквы, цифры, - или _)
+1b6abf7f2	✅ Заметка сохранена: <code>#⟨0⟩</code>
+d872c76cd	Лог-канал может изменить только владелец группы.
+1731f9a98	❌ Неверный ID. Пример: <code>-1001234567890</code>
+e84190fc5	✅ Лог-канал ULUS подключён: ⟨0⟩
+9d4e14027	❌ Не могу отправлять сообщения в этот чат. ⟨0⟩
+d8947ff95	✅ Лог-канал установлен.
+7f9f8fabc	Неизвестное действие.
+c3ecef83d	сек
+e3a725f35	Только участники
+fb155ed20	Участники + админы
+5e998efe4	Участники + админы + старшие админы
+431e199fa	Все, кроме основателя
+8b3606b03	🤖 ИИ-проверка⟨0⟩
+2abda5f05	(не установлено)
+af96fe25f	📦 Опасные файлы (.apk .exe …)
+c977dbc41	🔒 Автоблокировка медиа при атаке
+1c409b726	Длительность блокировки
+e4b73af2e	🚫 Список заблокированных медиа ›
+a5265e3d7	🔓 Снять блокировку медиа
+c1a903ce0	🔒 Заблокировать медиа сейчас
+678507459	вкл
+c293fc85c	выкл
+8dd94c76e	не установлено (на сервере: <code>pip install nudenet</code>)
+043b96df1	🔒 Блокировка медиа активна до ⟨0⟩
+059a31b37	ИИ-проверка: ⟨0⟩
+c77da8b2d	Чтобы заблокировать, ответьте на медиа <code>/blockmedia</code> · стикерпак: <code>/blockpack</code>⟨0⟩
+a54dfcd87	🚫 <b>Заблокированные медиа</b> — ⟨0⟩
+b1fe46387	Удаляются при повторной отправке того же медиа. Всего: ⟨0⟩
+2d00f3347	Нажмите, чтобы убрать. Добавить: ответьте на медиа <code>/blockmedia</code>
+0c575feaa	✏️ <b>Правки и 🚩 жалобы</b> — ⟨0⟩
+fe3d0969d	• <b>Защита от поздних правок</b>: сообщение, изменённое позже чем через ⟨0⟩ мин после отправки, удаляется; старая и новая версии отправляются в личку основателю группы и тому, кто добавил бота (они должны были запустить бота в личке).
+48166d583	• <b>Жалобы</b>: участники отвечают на сообщение <code>/report</code> или <code>@admin</code>; администрация получает уведомление с кнопками.
+9a9d43302	👥 Действует на: <b>⟨0⟩</b> (нажмите кнопку, чтобы изменить; только основатель)
+60543a144	Защита от поздних правок
+2719eae25	👥 Действует на: ⟨0⟩
+8173539b7	Длительность
+a95a8ac50	Уведомлять основателя/добавившего
+337b927c6	Система жалоб
+283ea618d	🌍 <b>Язык</b> — ⟨0⟩
+ecfd0b504	Сообщения, кнопки и уведомления бота в этой группе будут на выбранном языке. Ваши приветствие, правила и заметки не меняются.
+b04edf4df	👮 <b>Аудит админов</b> — ⟨0⟩
+46926b2fa	• <b>Ежедневная сводка</b>: каждый вечер основатель и добавивший бота получают, кто сколько сделал банов, мутов, предупреждений и удалений.
+9e35dc551	• <b>Лимит действий</b>: если сотрудник (не основатель) сделает больше ⟨0⟩ банов/киков/мутов за 1 час, его права приостанавливаются, а вы получаете уведомление с кнопками (его баны можно отменить одним нажатием).
+dbc65734d	• <b>Журнал удалённых</b>: сообщения, удалённые через /del и /purge, копируются в лог-канал. (Telegram не сообщает ботам о сообщениях, удалённых вручную в приложении.)
+fef769989	Сводка сейчас: <code>/audit 7</code> · История сообщения: ответьте на сообщение <code>/edits</code>
+5d565355a	Приостановленные сотрудники: ⟨0⟩
+fbe3b7863	Эти настройки может менять только основатель.
+011f51955	Ежедневная сводка по админам
+f8f216c2d	Лимит действий админов
+c1017ac8a	Лимит
+75d76fc04	Копировать удалённые сообщения в лог-канал
+b91937b6d	🌐 <b>Сеть групп</b> — ⟨0⟩
+e26434728	Эта группа в сети ⟨0⟩ (групп: ⟨1⟩):
+4515b950e	Пока синхронизация банов включена, забаненный в одной группе банится во всех группах сети (кики — нет); снятие бана тоже действует везде.
+2a41a6019	Синхронизация банов
+7b9394ab7	📋 Скопировать списки слов и ссылок в сеть
+35c1578b6	⚙️ Скопировать настройки защиты в сеть
+a0ec7c7bd	➖ Убрать эту группу из сети
+db918b20f	Эта группа не в сети. Если добавить ваши группы в сеть, баны распространяются на все, а настройки можно копировать одним нажатием. (Нужен основатель / сооснователь.)
+e44c5b572	➕ Добавить эту группу в мою сеть
+1c979a8ff	пока нет
+9f41d74fa	🛟 <b>Восстановление админов</b> — ⟨0⟩
+62477adfc	Список админов сохраняется каждые 6 часов. Если кто-то за короткое время снимет права у 3+ админов, админы и доверенные лица получат уведомление с кнопкой восстановления. Доверенные лица могут восстановить админов, отправив боту в личку <code>/recover</code>.
+092c6482f	Последний снимок: ⟨0⟩
+ba8991412	Доверенные лица (⟨0⟩/3) — нажмите, чтобы убрать:
+5729ee3a9	➕ Добавить доверенное лицо
+72e9b014a	Восстанавливать автоматически
+cdfef870d	📸 Сохранить сейчас
+521787de8	♻️ Восстановить ›
+c578b31d8	Снимок не найден.
+b5e5e7de1	Неверный язык
+a85ca0330	Изменить может только основатель группы.
+43ce9c01e	✏️ Область защиты правок: ⟨0⟩ | ⟨1⟩
+446ff86ee	Действует на: ⟨0⟩
+59e922883	🔒 Медиа заблокированы
+dd43607b8	Не удалось заблокировать (блокировка от рейда или права бота)
+650f54e0c	🔓 Блокировка медиа снята
+a6220f5d4	Блокировка уже выключена
+1d4e3c6c4	Блокировка снята
+de91565ff	Чтобы добавить группу в сеть, нужно быть её основателем.
+6b85bac2e	🌐 Группа добавлена в сеть ⟨0⟩
+6c4e9120a	Добавлено в сеть
+b605b46d7	Эта группа не в сети
+4f36e2321	Удалено из сети
+bd4ac87bb	Это может сделать только владелец сети.
+f9a34a2ad	Синхронизация банов ⟨0⟩
+78a09a0ea	🌐 Настройки скопированы в ⟨0⟩ групп сети | ⟨1⟩
+eacfa093c	Скопировано в ⟨0⟩ групп
+c39c747b1	Настройки восстановления может менять только основатель.
+95e917987	Убрано
+87f3326f9	📸 Сохранено
+49c866e1e	Не удалось сохранить (бот админ?)
+b13ed05bb	♻️ Восстановлено админов: ⟨0⟩⟨1⟩
+8670a3a46	, ошибок: ⟨0⟩
+c3b595125	Добавлять доверенных лиц может только основатель.
+32cb829ea	❌ Человек не найден. Укажите его ID (его можно узнать, отправив боту /id).
+89f663ce6	Можно добавить не больше 3 доверенных лиц.
+dfe9ba864	✅ ⟨0⟩ добавлен как доверенное лицо. Он должен был запустить бота в личке.
+a4167566b	Сначала выберите группу командой /select!
+2ba2862f6	группа
+62d623326	канал
+3fca554f2	люди
+ffd1ee882	📝 черновик
+4bf27d98f	⏰ запланировано
+4c10fb3fc	📤 отправляется
+2467aa607	✅ готово
+578b9744b	❌ отменено
+71db82dfe	Укажите время так: -time 20:00
+c3cd977ee	Укажите название шаблона так: /broadcast -save update "сообщение"
+530791023	нет получателей
+9a2c72e2d	🔕 Отключить рассылки
+9f242a754	🗳 Голосов пока нет
+37e3719ed	🗳 Голосов: ⟨0⟩: ⟨1⟩
+186e99c6e	✅ <b>Рассылка #⟨0⟩ завершена</b>
+53acfe01d	⏹ <b>Рассылка #⟨0⟩ остановлена</b>
+8fa7a67a9	📊 Обработано ⟨0⟩/⟨1⟩
+6b12880d0	✅ Доставлено: <b>⟨0⟩</b>
+ddb6da67b	🚫 Заблокировали / не запускали бота: ⟨0⟩ (будут пропущены в следующих рассылках)
+814224bfc	⚠️ Не удалось отправить (бот удалён / нет прав): ⟨0⟩
+d4d2773cb	📌 Закреплено: ⟨0⟩
+53ffa3f09	👆 Клики по кнопкам видны в /broadcasts
+0d709ac7c	🗳 Результаты опроса видны в /broadcasts
+dd370224e	Остановить: /stopbroadcast
+be085c333	📢 <b>Рассылка</b>
+0b7be0b19	<code>/broadcast "сообщение"</code> — группы + каналы
+1e622cf6b	<code>/broadcast -users "сообщение"</code> — те, кто пользуется ботом в личке
+25a35b0aa	<code>/broadcast -users -channels "сообщение"</code> — люди + каналы (можно сочетать)
+0b87fef23	<code>/broadcast all "сообщение"</code> — все
+bc83a4f15	Опции: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (последние 7 дней; <code>-active 30</code>) · <code>-test</code> (только вам) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+1aca894ba	🎯 В предпросмотре можно выбрать конкретные группы/каналы.
+9fa263da2	🗳 Опрос: <code>/broadcast -poll -users "Вопрос?
+735ec279d	Вариант 1
+98805337f	Вариант 2"</code> — все голоса собираются в одном опросе
+aaa59ea0d	💾 Шаблон: <code>/broadcast -save название "сообщение"</code> → <code>/broadcast -users #название</code> · /templates
+a3caa1df0	💡 Если ответить на сообщение (картинка, видео, с кнопками или премиум-эмодзи) командой <code>/broadcast -users</code>, оно будет отправлено как есть. В тексте можно писать и строки кнопок: <code>Канал - https://t.me/channel</code> (клики считаются)
+fb071e726	/broadcasts — история, клики, результаты опросов · /stopbroadcast — остановить отправку
+344eb221b	⚠️ Telegram превратил премиум-эмодзи в обычные (боты не могут отправлять премиум-эмодзи текстом). Решение: напишите сообщение сами и ответьте на него /broadcast — в копии они сохранятся.
+f87763b78	👆 <b>Предпросмотр рассылки #⟨0⟩</b>
+3790c85e6	🎯 Получатели: ⟨0⟩
+d46292455	🔥 Только активные за последние ⟨0⟩ дн.
+019c9cc1b	✅ Выбрано групп/каналов: ⟨0⟩
+14d962307	👤 Люди: те, кто пользуется ботом в личке; Telegram не позволяет писать тем, кого видели в группах, но кто не запускал бота (одна попытка, затем пропуск).
+f7bcd6c82	⏱ Примерное время: ~⟨0⟩ сек
+aaca2bf64	⏰ Время отправки: ⟨0⟩
+4046d6be5	📌 Будет закреплено в группах и каналах
+c3eded236	🔕 Без звука
+cffb2a880	👆 Клики по кнопкам будут считаться
+251fac5c6	🗳 Опрос будет переслан; голоса собираются в этом опросе
+ba70fe09b	⏰ Запланировать
+8241e1495	✅ Отправить
+86f2e67ab	❌ Отмена
+d53523fb6	Отправлять некому.
+2882de09f	🎯 Выбрать группы/каналы
+78f17fac4	❌ Закрыть
+e6b5975cd	◀️ Назад
+b84641c59	Далее ▶️
+9a4dab900	🔄 Сбросить выбор
+6044624ae	✅ Готово
+786000738	🎯 <b>Рассылка #⟨0⟩: выбор групп/каналов</b> (стр. ⟨1⟩/⟨2⟩)
+8273973d4	Выбрано: <b>⟨0⟩</b> — если ничего не выбрано, отправится всем.
+0b988bbef	Эту команду может использовать только владелец бота!
+4b64d112c	Напишите сообщение или ответьте на сообщение для шаблона.
+9cc026c97	💾 Шаблон сохранён: #⟨0⟩
+12933b18c	Использовать: /broadcast -users #⟨0⟩
+dcba9eba6	Шаблона #⟨0⟩ нет. Список: /templates.
+c3b81b13d	Напишите опрос так:
+185c6d7a9	/broadcast -poll -users "Вопрос?
+27ced0bf8	Вариант 2"
+9de509dc5	Не удалось создать опрос: ⟨0⟩
+e8c8a3987	🧪 Тестовый опрос отправлен только вам.
+f6c39b561	Не удалось отправить тест: ⟨0⟩
+3ccbd9c93	🧪 Тестовая рассылка отправлена только вам.
+305ee0f9a	(в личке)
+cb34b252b	Не удалось отправить предпросмотр: ⟨0⟩
+68aa08ebf	🔕 Рассылки отключены. Включить снова: /subscribe
+ead4b09a2	🗑 Удалено
+6fc68153b	Нет доступа или неверные данные.
+5027629e8	Эта рассылка уже обработана.
+1b315a09e	⏰ Рассылка #⟨0⟩ запланирована: ⟨1⟩
+08d8e26cc	Посмотреть можно в /broadcasts.
+d236ce6c8	📤 Отправка рассылки #⟨0⟩…
+e15ad036b	Отменено
+8c0a53753	❌ Рассылка #⟨0⟩ отменена.
+32ff8287a	Не запланировано.
+95d0599f3	⏹ Останавливаю…
+a96302489	Сейчас не отправляется.
+7afa989da	📢 Рассылок пока нет.
+b0b0b34ae	📢 <b>Последние рассылки</b>
+a2148c2a7	🗳 опрос
+771c7f3fb	👆 Кликов: ⟨0⟩⟨1⟩
+8139aea8f	(⟨0⟩ человек)
+71fc8c6a3	❌ Отменить #⟨0⟩
+6b91bce73	⏹ Остановить #⟨0⟩
+55b4c1882	💾 Сохранённых шаблонов нет.
+4dc8bf919	Сохранить: <code>/broadcast -save название "сообщение"</code> или ответьте на сообщение <code>/broadcast -save название</code>
+a5f43a44d	💾 <b>Шаблоны рассылок</b>
+bd5b7fec5	📋 скопированное сообщение
+8ebf8c6d8	Использование: <code>/broadcast -users #название</code>
+d9ecd93d0	⏹ Останавливаю рассылку…
+e6989213d	Сейчас никакая рассылка не отправляется.
+1d2937461	🔔 Рассылки включены.
+b75b13003	➕ <b>Меня добавили: ⟨0⟩</b>
+862253052	· ⟨0⟩ участников
+7171ced0d	👤 Добавил: ⟨0⟩⟨1⟩
+b0c699f59	🔐 Админ
+7505ec5cf	⚠️ Пока не админ (напоминание придёт через 24 часа)
+93e256834	➖ <b>Меня удалили из:</b> ⟨0⟩
+f6cedb404	👤 Удалил: ⟨0⟩ · <code>⟨1⟩</code>
+545d22c19	⚠️ Я всё ещё не админ в <b>⟨0⟩</b>, поэтому защита не работает.
+e7c66ff8b	Настройки группы → Администраторы → Добавить админа → @⟨0⟩ (достаточно удаления сообщений и ограничения участников) или нажмите кнопку ниже.
+519fdb65c	⚡ Сделать меня админом
+977c42cf0	📈 <b>Еженедельный отчёт ⟨0⟩</b> (⟨1⟩ – ⟨2⟩)
+075c08a00	👥 Группы: <b>⟨0⟩</b> · 📢 Каналы: <b>⟨1⟩</b>
+626db2ea3	➕ Добавлен в: <b>⟨0⟩</b> · ➖ Удалён из: <b>⟨1⟩</b>
+3b300252b	👤 Пользователи в личке: <b>⟨0⟩</b> (за неделю +⟨1⟩)
+8ebb70df7	💬 Сообщения: <b>⟨0⟩</b>⟨1⟩ · активных: <b>⟨2⟩</b>
+179fe6c75	🚪 Вступили в группы: <b>⟨0⟩</b> · вышли: <b>⟨1⟩</b>
+171919cd0	🆕 <b>Новые чаты</b>
+8298e9706	… и ещё ⟨0⟩
+7ba765796	🏆 <b>Самые активные группы</b>
+03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ сообщений
+57d75c0ab	🛠 У бота короткое техобслуживание; скоро вернётся. Защита продолжает работать.
+fc94758f1	🛠 Режим обслуживания <b>включён</b>⟨0⟩
+588994912	— закончится в ⟨0⟩
+35ea18ef8	✅ Режим обслуживания выключен
+e1a334ce2	(бессрочно)
+e7103f4b6	<code>/maintenance 30</code> — 30 минут · <code>/maintenance on</code> — бессрочно · <code>/maintenance off</code>
+c05840eb1	Добавьте в конце <code>-duyur</code>, чтобы отправить короткое уведомление в группы.
+fe8a047fd	Во время обслуживания команды и кнопки отключены для всех (кроме вас); защита от спама, ссылок, флуда и капча продолжают работать.
+9fd9dff45	✅ Режим обслуживания выключен.
+280c2df8e	Режим обслуживания уже выключен.
+a476c76e4	✅ Обслуживание закончено, бот полностью работает.
+5a2d5c21d	🛠 Режим обслуживания включён, он выключится автоматически в ⟨0⟩.
+321af0468	🛠 Режим обслуживания включён (бессрочно). Выключить: /maintenance off
+81851cbcd	Использование: /maintenance 30 · /maintenance on · /maintenance off
+0d8f36bae	Команды и кнопки отключены для всех (кроме вас); защита работает.
+0e64031cc	/invite используется в группе: выдаёт вашу личную ссылку-приглашение и считает приведённых вами людей.
+882848490	Конкурс приглашений в этой группе выключен.
+b5811c1fa	Не удалось создать ссылку-приглашение: нужно право «приглашать пользователей».
+c2dee7686	Не удалось создать ссылку-приглашение, попробуйте чуть позже.
+24b1d9ce7	🔗 ⟨0⟩, ваша ссылка-приглашение:
+1dafe45ec	👥 Вы привели: <b>⟨0⟩</b> человек⟨1⟩
+6f74b2ba9	🏆 Рейтинг: /invites
+060348723	(вышли: ⟨0⟩)
+cb5bdaa5f	/invites используется в группе.
+1db2cf152	🏆 По приглашениям пока никто не вступил. Получите свою ссылку командой /invite!
+4ba6e3c96	🏆 <b>Рейтинг приглашений</b>⟨0⟩
+d7ee0f9c5	(последние 7 дней)
+b71ab530b	⟨0⟩ ⟨1⟩ — <b>⟨2⟩</b> человек
+e309c956d	Своя ссылка: /invite⟨0⟩
+ff021375b	· за неделю: /invites 7
+db6ff4fd5	🚫 Заблокировать
+ead127c24	📨 Ваше сообщение передано администратору бота. Ответ придёт сюда.
+b3be121db	✅ Ответ доставлен.
+6a71974f7	❌ Не доставлено: пользователь заблокировал бота.
+29d8bcae2	❌ Не доставлено: ⟨0⟩
+a299e6f40	Нет доступа!
+67149866b	нет username
+e9d283a8a	ID: ⟨0⟩
+546855b2f	Всего сообщений: ⟨0⟩
+4caedc905	🚫 Заблокирован: его сообщения больше не будут пересылаться.
+aa1be6bef	✅ Разблокирован.
+05fe7a9ae	✅ Разблокировать
+347667dc7	💬 Сообщения, которые вы пишете боту в личку, передаются администратору бота; ответ тоже придёт сюда.
+fb6c079d1	💬 Линия поддержки: <b>⟨0⟩</b>
+29ab6a683	За 7 дней: ⟨0⟩ сообщений, ⟨1⟩ человек
+d3a86e2ed	Сообщения, которые пользователи пишут боту в личку, пересылаются вам; если <b>ответить</b> на такое сообщение, ответ уйдёт пользователю (вы остаётесь анонимны). Кнопка 🚫 под сообщением блокирует человека.
+2e8d13df7	/support off — выключить
+b9d5c0506	/support on — включить
+fb9c9edb1	🔨 бан
+69750b260	👢 кик
+ba949e0b3	🔇 мут
+499389526	⚠️ предупреждение
+2146683b0	🗑 удаление
+29c555d38	✅ разбан
+2adb56b78	🔊 снятие мута
+be630c265	↩️ снятие предупреждения
+4a1bf66db	исключён
+804ba7661	удаление
+324073880	🔻 Его права админа в Telegram тоже сняты.
+cf9b454c2	⚠️ Не удалось снять его права админа в Telegram (возможно, его назначил не бот); при необходимости снимите их вручную в настройках группы. (⟨0⟩)
+b55e087a5	🚨 <b>Превышен лимит действий админа</b> — ⟨0⟩
+427b5c6c1	⟨0⟩ сделал <b>⟨1⟩</b> банов/киков/мутов за последний час (лимит ⟨2⟩). Его права приостановлены⟨3⟩.⟨4⟩
+95dbff4c7	(ранг: ⟨0⟩)
+1f08073ce	♻️ Вернуть права
+007e62b21	↩️ Отменить его баны за 2 часа
+62523d9c0	✅ OK, оставить приостановленным
+edef2b326	Это может сделать только основатель группы.
+c2ee2c9d8	↩️ Разбанено человек: ⟨0⟩
+91b30283d	↩️ Последние баны ⟨0⟩ отменены (⟨1⟩) | ⟨2⟩
+9ed54f7b6	Не приостановлен (уже решено).
+65e104036	(права в Telegram восстановить не удалось: ⟨0⟩)
+fdec34132	♻️ Права восстановлены⟨0⟩
+e44b14d39	♻️ Права ⟨0⟩ восстановлены | ⟨1⟩
+caddb66f3	✅ Права остаются снятыми
+a9968a219	⛔ ⟨0⟩: права приостановлены
+5d7617657	👮 <b>Ежедневная сводка по админам</b> — ⟨0⟩
+053473339	<i>Telegram не сообщает ботам о сообщениях, удалённых вручную в приложении; в удалениях учитываются только сделанные через /del и /purge.</i>
+46faeb5b0	Сначала выберите группу командой /select!
+c1c404194	Эта команда для основателя и сооснователей.
+3960d6a99	За этот период действий администрации нет.
+42c00ba90	👮 <b>Аудит админов</b> — ⟨0⟩ (последние ⟨1⟩ дн.)
+5cb08e285	Число дней: <code>/audit 7</code>
+3de0d27b9	📩 Сводка аудита отправлена в личку.
+57a762312	Не могу написать вам в личку: сначала отправьте боту /start.
+6accc9fd5	… и ещё ⟨0⟩ сообщений
+37de34f22	🗑 <b>Удалённые сообщения</b>⟨0⟩ | Удалил: ⟨1⟩
+9a1505c99	/del используется в группе ответом на сообщение, которое нужно удалить.
+d223e7b03	Ответьте на сообщение, которое нужно удалить, командой /del.
+9fada83b0	🗑 <b>Сообщение удалено</b> | Автор: ⟨0⟩ | Удалил: ⟨1⟩
+a1c331d8e	/edits используется в группе ответом на сообщение.
+5f93a0deb	Ответьте командой /edits на сообщение, историю которого хотите увидеть.
+250e055ba	Для этого сообщения нет истории правок (хранится за последние ⟨0⟩ дн.).
+36da7c07e	📝 <b>История правок</b> — ⟨0⟩ · правок: ⟨1⟩
+27ec83d6a	оригинал
+afea26f62	правка #⟨0⟩
+39562283b	🌐 Вступил пользователь из глобального бан-листа и был забанен: ⟨0⟩
+b42c13323	🤖 Подозрительный аккаунт ограничен: ⟨0⟩ → ⟨1⟩
+3c4fe05e5	👋 ⟨0⟩ вступил → ⟨1⟩
+aa9673f91	СЕГОДНЯ
+fe5b02de1	ЗА НЕДЕЛЮ
+05e451c40	ЗА МЕСЯЦ
+a65b592d7	ЗА ВСЁ ВРЕМЯ
+fa5c481c7	Пользователь → Сообщения
+11a5c6c19	├ Всего активных: ⟨0⟩
+d8524730d	└ Всего сообщений: ⟨0⟩
+cd18a00ba	Ваше ⟨0⟩ : ⟨1⟩
+8b57b7048	Эта группа не зарегистрирована! Если вы в личке, сначала выберите группу командой /select.
+d2fc8f52c	15 самых активных за месяц в вашей группе:
+10710d7e5	📊 Это рейтинг за этот месяц.
+0bffc9609	15 самых активных за всё время в вашей группе:
+5552d868e	📊 Рейтинг за всё время.
+9d75c68d7	Статистики сообщений пока нет!
+54dbc7053	15 самых активных за день в вашей группе:
+86767b480	📊 Это рейтинг за последние сутки.
+25670a03f	15 самых активных за неделю в вашей группе:
+17af6b262	📊 Это рейтинг за последнюю неделю.
+43d197ca4	📅 День
+f70fa8d28	📅 Неделя
+1b9326b3c	📅 Месяц
+c9c0e3bcd	📊 Всё время
+d4d0010bd	📋 Подробно
+f939c661d	🌐 Глобально
+674ed30af	👥 Выберите тип рейтинга для этой группы.
+0f3a59f6a	Это меню открыл ⟨0⟩.
+bbf0e9940	👥 ⟨0⟩ самых активных в вашей группе:
+62e79a0f9	Активность вашей группы с момента, как бот стал админом:
+f55378a92	👥 Активные пользователи:
+503794387	💬 Всего сообщений:
+ef5bd5de0	📊 Всего взаимодействий:
+c6c4664dd	Для конкретного пользователя: /info @user или ответьте на его сообщение.
+7e811e0d2	👱 Имя: ⟨0⟩
+9b0e7b293	🌐 Username: ⟨0⟩
+14ed29970	👥 В скольких группах вы состоите: ⟨0⟩
+ba33e26dc	💬 Всего сообщений в ваших группах:
+8cb7f31a3	├📆 За день: ⟨0⟩
+5ee653a06	🔍 Итого в ваших группах:
+0df3dab20	├🃏 Стикеры: ⟨0⟩
+e93a634c3	📊 Статистика ⟨0⟩:
+ae2b984ac	💬 Количество сообщений:
+3e08d6dfd	┌📆 За день: ⟨0⟩
+037b7c646	├📆 За неделю: ⟨0⟩
+9f577c2b5	├📆 За месяц: ⟨0⟩
+cf3b5cf8f	└Всего: ⟨0⟩
+e1ed2556f	📊 Подробности активности:
+0327b318b	┌🃏 Стикеры: ⟨0⟩
+5ca7902a2	├🀄️ GIF: ⟨0⟩
+b667cf812	├🙃 Эмодзи: ⟨0⟩
+68fa09ce3	├📷 Фото: ⟨0⟩
+886e342ec	├🎥 Видео: ⟨0⟩
+a11d703a7	├💾 Файлы: ⟨0⟩
+0afb08ea1	├🎙 Голосовые: ⟨0⟩
+5199486f9	└📼 Музыка: ⟨0⟩
+7d244b585	🏆 Общее место: #⟨0⟩
+9394cb52f	Восстановить всех админов
+846fa3804	Восстановить всех, кроме спамера
+ea0ec5a8c	Подозреваемый: ⟨0⟩
+40ab78429	🚨 <b>РЕЖИМ ЗАЩИТЫ КАНАЛА АКТИВЕН</b>
+65bfd4f34	⟨0⟩Канал: <code>⟨1⟩</code>
+d5d022cd9	Все права админов сняты, кроме основателя и админа, добавившего бота.
+11b7596d5	Восстановлено админов: ⟨0⟩
+19c35e8f0	🌐 Сетевой бан снят: ⟨0⟩ (во всех группах сети)
+c2e7013a3	🌐 Сетевой бан: ⟨0⟩ распространён ещё на ⟨1⟩ групп сети
+9fe755831	запись не найдена
+d121e65b8	не удалось получить данные бота: ⟨0⟩
+463126054	♻️ Восстановление админов: восстановлено ⟨0⟩⟨1⟩
+90d9a6b20	, ошибок: ⟨0⟩
+caa60fdc5	🚨 <b>Массовое снятие админов</b>
+8ba5e6709	Группа/канал: <b>⟨0⟩</b>
+5d095f637	⟨0⟩ (<code>⟨1⟩</code>) снял права у ⟨2⟩ админов за 10 минут.
+8d21e12ea	Последний хороший снимок: ⟨0⟩
+9ba30f2ce	♻️ Восстановить админов
+a96545d83	♻️ Восстановлено автоматически: ⟨0⟩ админов⟨1⟩
+a556aedb4	(ошибок: ⟨0⟩)
+ee38d1474	Нет подходящего снимка админов.
+d94586a2d	Нет группы/канала, которые вы можете восстановить. Владелец группы должен добавить вас как «доверенное лицо» в панели.
+a186abeb7	Админов какой группы/канала восстановить?
+358350243	Для этой группы пока нет снимка админов (снимки делаются каждые 6 часов).
+e0f04d2e3	⟨0⟩ · ⟨1⟩ админов
+629844d31	<b>⟨0⟩</b> — выберите снимок для восстановления:
+b5ad3a8e7	Нет прав или снимка.
+0644770db	♻️ Будут восстановлены админы из снимка ⟨0⟩:
+700b3ac82	Подтверждаете?
+1ca35b0e1	✅ Да, восстановить
+e6a5e85cd	❌ Отмена
+805c38798	Восстанавливаю...
+cf63ea900	♻️ Восстановлено админов: ⟨0⟩.⟨1⟩
+b8058c528	❌ Ошибка: ⟨0⟩
+e82edc1de	(Бот не может выдать права, которых у него нет, и не может менять админов, назначенных другими.)
+f13124b3b	Список админов восстановлен (⟨0⟩ админов).
+400c018e5	медиа-флуд
+60ff56604	⟨0⟩ сообщений / ⟨1⟩ сек
+97268aded	2+ админа заспамили за 30 мин
+d739884a3	⚠️ <b>Обнаружен спам от админа!</b>
+3302869c8	Админ: ⟨0⟩ (<code>⟨1⟩</code>)
+3cbc92eef	Действие: ⟨0⟩
+3d7963ca4	Режим защиты канала: не активен
+72f491ffe	Бан + снятие прав
+35cf8f7fb	Права сняты
+b6331605b	🤖 Добавление бота заблокировано
+ad9ead387	Бот: ⟨0⟩
+a7c242666	Добавил: ⟨0⟩
+9b75f55a2	⚠️ Обнаружено несанкционированное назначение админа!
+e97409070	Назначил: ⟨0⟩ (<code>⟨1⟩</code>)
+c065dbd5f	Назначен: ⟨0⟩ (<code>⟨1⟩</code>)
+17a403bbb	Обнаружен массовый бан: ⟨0⟩ (⟨1⟩) ⟨2⟩ банов / ⟨3⟩ сек
+e21052fad	Название: «⟨0⟩» → «⟨1⟩»
+eb38d7d1c	Описание изменено
+b2209389a	Сработала защита от клонирования канала!
+85a87d615	Изменения отменены:
+b79ccad39	📋 <b>Еженедельный лог-отчёт канала</b>
+546658b9b	Бан + снятие прав
+2c124f337	Только снятие прав
+a5505fdbd	⟨0⟩ Защита от спама админов
+183b4aa2e	Действие при спаме: ⟨0⟩
+5d5673266	⟨0⟩ Медиа-флуд админов
+652974e14	Действие при медиа: ⟨0⟩
+9123863e2	⟨0⟩ Защита от ссылок
+3d1465b74	⟨0⟩ Защита от клонирования
+a03517abc	⟨0⟩ Защита от добавления ботов
+b27f8f968	⟨0⟩ Защита от массовых банов
+006229c38	👥 Доверенные админы
+ec411a6b8	💾 Сохранить название/описание канала
+a8d6a7aa4	🔙 Закрыть
+e0a90af5c	Канал не найден!
+9abd1a97e	Эта команда для настроек канала. Для настроек группы используйте /settings.
+d63cd9886	Сохранено: ⟨0⟩
+c3d254196	Список доверенных админов:
+ff4ef369c	(Можно публиковать ссылки)
+5243a71a1	Посты канала
+f6489e475	админ канала
+29bb8c58f	Одобряю заявки, подождите...
+218960722	Ожидающих заявок на вступление нет.
+1b385aeaa	✅ Одобрено заявок: ⟨0⟩.
+fb8bc6b23	(Не удалось одобрить заявок: ⟨0⟩; возможно, они истекли или были отозваны)
+05d63d7c6	Одобрение заявок: одобрено ⟨0⟩ | ⟨1⟩
+9ea0064d2	Вам заблокирован доступ к этому боту.
+db8a1871b	Использование: /membertag @user <тег> или ответ + /membertag <тег>
+584a09e9f	Нужны пользователь и тег!
+84aa89869	Тег — не длиннее 32 символов!
+fcd61489e	⛔ Нельзя дать тег тому, у кого ваш ранг или выше.
+5f53e65d3	⟨0⟩ не админ! Теги можно давать только админам.
+f4fc9906d	🏷 Тег выдан: ⟨0⟩ → ⟨1⟩
+be06d3d2f	Назначать сооснователей может только основатель.
+0ef49a704	Пользователь не найден! Используйте ID, @username или ответ.
+4de20141f	Использование: /⟨0⟩ @user [тег]
+e1b55fb8a	Тег: ⟨0⟩
+b60f7c81a	⟨0⟩ назначен: ⟨1⟩⟨2⟩
+9adcfd5da	Использование: /block <id> [причина]
+dd3f79560	Неверный ID!
+b53956227	✅ ⟨0⟩ заблокирован.
+68a3942e7	Использование: /unblock <id>
+7f14d47f5	✅ ⟨0⟩ разблокирован.
+a07c6c04c	Текущий лимит предупреждений: ⟨0⟩
+eeceb0ee6	Использование: /setwarnlimit <2-20>
+68cb7aa9e	Лимит должен быть от 2 до 20!
+7fdd7a44f	Лимит предупреждений: ⟨0⟩.
+32cb8952a	Список исключений из антиспама пуст.
+804f32102	Добавить: /whitelist @user.
+7ec4b51e6	Исключения из антиспама:
+c0c03c505	⟨0⟩ удалён из списка исключений.
+e6695a6db	⟨0⟩ добавлен в исключения из антиспама.
+9e5f1a353	Закрытая группа
+e9312bd1b	Капча
+688f939e9	Фильтр слов
+cbabb7d8b	Нет
+28b8f5479	👥 Участники: ⟨0⟩
+ceb987630	👮 Админы: ⟨0⟩
+af72a68a6	📈 Статистика
+28086b0d5	├ Всего сообщений: ⟨0⟩
+01c7b8d8a	├ Активных пользователей: ⟨0⟩
+12279a365	├ Всего банов: ⟨0⟩
+74d4fdeab	├ Всего предупреждений: ⟨0⟩
+69516a922	└ Лимит предупреждений: ⟨0⟩
+c77739311	Активная защита: ⟨0⟩
+58b3e5e14	Орёл! 🪙
+561c75012	Решка! 🪙
+1a786e9bf	⟨0⟩ Кубик: ⟨1⟩
+e7e394f96	🤖 ⟨0⟩ — команды владельца бота
+f4e511a55	/panel — Группы и статистика вашего бота
+94da61b33	/broadcast — Рассылка в группы, каналы и людям (напишите /broadcast, чтобы увидеть инструкцию)
+5d08c9107	/broadcasts — История рассылок, клики, результаты опросов
+cbbbbd1fd	/templates — Шаблоны рассылок
+70215bc5f	/growth — Еженедельный отчёт о росте (приходит сам каждый понедельник)
+7a7fa1e0f	/support — Линия поддержки (сообщения в личку пересылаются вам)
+0d05bfd3b	/gban <id|@user> [причина] — Бан во всех группах вашего бота
+1db86c395	/ungban <id|@user> — Снять бан
+2eb535697	/gbanlist — Список банов
+eeedac8d1	/select — Выбрать группу
+98b86d999	🤖 Команды владельца бота
+6e9bfe3b7	/clones — Управление клонами (стоп/старт/удаление)
+e48ef6b31	/clone — Ваш собственный клон бота
+3f50c5d54	/panel — Панель управления (группы/каналы, удалить бота, 🧹 очистка)
+5e0335772	/perf — Производительность: медленные операции, память, очередь
+6d08e2352	/maintenance — Режим обслуживания (команды выкл, защита вкл)
+f160302c5	/block <id> [причина] — Заблокировать
+b1c36dc93	/unblock <id> — Разблокировать
+647651cb8	/gban <id|@user> [причина] — Бан во всех группах
+86ee8d200	/ungban <id|@user> — Снять глобальный бан
+d094b4c43	/gbanlist — Глобальный бан-лист
+d729d3ba2	/backup — Резервная копия базы данных
+0e556fad9	/gblockmedia — Заблокировать медиа из ответа во всех группах
+8af5e8c17	/recover — Восстановление админов
+f0032f0c7	/select — Выбрать канал
+97a1889ae	/channelsettings — Настройки канала
+def1847f5	⟨0⟩/start — Запуск
+f467f5a12	/menu — Показать меню
+579f051c8	/settings — Панель настроек выбранной группы
+0ecfed5c8	/help — Помощь
+d1d491df3	/select — Подключить группу/канал
+a64b799ed	/appeal <пояснение> — Отправить апелляцию на бан
+3aaf39bd7	/recover — Восстановление админов (для доверенных лиц)
+e8a9f2564	💬 Сообщения, которые вы пишете боту, пересылаются его администратору; ответ придёт сюда.
+90b35c202	/clone — Создать клон бота со своим именем
+53ff31717	👤 Команды пользователя
+a6ac25fa6	📊 Статистика и профиль
+7c1cddd9b	/profile — Ваш профиль
+4794e486d	/daily — Рейтинг сообщений за день
+9304026c3	/weekly — Рейтинг за неделю
+0f2144ac5	/monthly — Рейтинг за месяц
+dab273f01	/alltime — Рейтинг за всё время
+ffca95898	/top — Меню рейтингов с кнопками
+f6859df4f	/info @user — Статистика пользователя
+f739f3e69	/chatinfo — Информация о группе
+96d41dfbc	/rules — Правила группы
+cf6de9a2b	/afk [причина] — Уйти в AFK (упомянувшим вас сообщат; снимается, когда вы напишете)
+427ccde79	/votemute — Начать голосование за мут того, на чьё сообщение вы ответили
+f2f9f9eaf	/notag — Выйти из списка /tag (повторите, чтобы вернуться)
+6de9402ed	/invite — Ваша личная ссылка-приглашение (приведённые считаются) · /invites — рейтинг
+82789607f	📝 Заметки
+f9f2a17b9	/notes — Сохранённые заметки
+46ba4fefd	#заметка — Получить заметку (пример: #rules)
+a37fbde9a	/get <название> — Получить заметку
+5ff3c9cb2	🎰 Развлечения
+b0d9549b8	/coin — Подбросить монету
+3ab74dacf	/dice — Бросить кубик
+304dfe62b	ℹ️ Прочее
+b4031dc89	/help — Это меню
+6467c9dbe	/id — Показать ID
+0af5bde71	/appeal <пояснение> — Апелляция на бан (боту в личку)
+aff60c67d	/report [причина] или @admin — Пожаловаться администрации на сообщение из ответа
+15575b067	👮 Команды администрации — ваш ранг: ⟨0⟩
+d955391ce	Порядок рангов: 👑 Основатель > 🔱 Сооснователь > ⭐ Старший админ > 🛡 Админ
+cb1ecf135	🛡 Админ и выше
+ba31c6e75	/warn @user [причина] — Предупреждение
+9db2b48b7	/mute @user [время] — Мут (админы: не более 24 часов)
+0d7e990d0	/unmute @user — Снять мут
+258592394	/kick @user — Исключить из группы
+40e58c981	/warns · /banlist · /mutelist — Списки
+07722765d	/giveaway · /endgiveaway — Розыгрыш
+faabdc38a	/filter — Автоответ (например, привет → Здравствуйте; можно медиа и кнопки)
+0e48d2662	/filters · /stop <слово> · /stopall — Список / удаление фильтров
+a295c1d2b	/tag <сообщение> · /stoptag — Упомянуть участников порциями / остановить
+43f5db5d3	/record @user — История наказаний и старые имена во всех группах бота (в личку)
+4268b44a9	/giveaway 1d 3 Приз | channel=@channel messages=20 days=7 — Розыгрыш с условиями и сроком
+f9892b61b	/myrank — Ваш ранг и права
+10ead6ab1	⭐ Старший админ и выше
+667e625bc	/ban @user [время] [причина] · /unban — Бан
+387e5f34e	/unwarn @user — Снять 1 предупреждение
+48c85c764	/purge <число/all> · /slowmode <сек> — Очистка, медленный режим
+2454c2b92	/pin · /unpin — Закрепление
+d0ffce66f	/lockdown [мин] · /lockmedia [мин] — Экстренная блокировка
+f6b07290c	/approveall — Одобрить заявки на вступление
+f252c350e	/setrules · /setwelcome · /setgoodbye · /save · /clear — Правила, приветствие, прощание, заметки
+7bf273598	(поддерживаются медиа, кнопки, форматирование и случайные сообщения; справка: /setwelcome)
+8c7cbbe68	/welcome · /goodbye · /resetwelcome — Предпросмотр / сброс к стандартному
+df2e5eccc	/schedule 6h <сообщение> · /schedules — Сообщения по расписанию (повторяющиеся)
+de546f6e8	🔱 Сооснователь и выше
+d18538a2d	/settings — Панель настроек с кнопками (все настройки защиты)
+00043ba1c	/setup — Быстрая настройка (пресет + приветствие + защита)
+bfe1425f8	/forcesub @channel — Чтобы писать, нужно вступить в канал (выключить: /forcesub off)
+886d570db	/unlockdown · /unlockmedia — Снять блокировки
+5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
+443a00692	/setwarnlimit · /setwarnaction · /captchatime
+3d2493394	/blockmedia · /blockpack — Блокировка медиа/паков
+20abda0cf	/admin (/addadmin) · /senioradmin @user [тег] — Выдать ранг
+3c7389596	/remove @user — Снять ранг
+a83e94dc8	/perms — Панель личных прав (в личке бота)
+13accc070	/membertag @user <тег> — Тег админа
+775ec46f0	/reload — Обновить список админов из Telegram (права, выданные вручную/другим ботом)
+9a654a567	👑 Только основатель
+f0d85c250	/cofounder @user — Назначить сооснователем
+aed09d232	/setlog — Лог-канал · Сеть групп · Резервное восстановление админов
+81fcecc0c	📊 Информация
+99e6db648	/stats · /chatinfo · /leaderboard · /staff
+a475e9c96	Формат времени: 30m, 2h, 7d
+78f33d7b8	Админ Telegram
+5a0e84cda	⚙️ Панель настроек
+f910032f2	🌍 Язык: /setlang⟨0⟩
+215259316	⚙️ Настройки
+96fccfef2	🛡 Мои группы
+5e167ed13	📊 Статистика
+4ab530c07	❓ Помощь
+3f15c0b6a	🤖 Клон бота
+a2c4fcfa1	🔗 Выбрать группу
+ed11ea7cd	📢 Выбрать канал
+d7f837819	Выберите в меню или введите команду…
+2ac5318f5	➕ Добавить в группу
+7357057be	📢 Добавить в канал
+2dadb70db	Меню ниже 👇
+71aa20a4d	Сначала выберите группу: кнопка 🛡 Мои группы или 🔗 Выбрать группу.
+3224664d6	Бот не админ в этом чате. Добавьте бота туда админом и выберите снова.
+78ad7212f	У вас нет прав в этом чате.
+2216a64f4	✅ Выбрано: <b>⟨0⟩</b>
+e107177fc	Меню помощи
+9e88862d9	Правила группы
+07efa78b4	Сохранённые заметки
+cf90a04f1	Ваш профиль и предупреждения
+b79df54d5	Рейтинг активности
+a0d54db08	Статистика пользователя
+c3da965fe	Информация о группе
+aa6b818af	Показать ID
+c23bc7fa5	Бросить кубик
+cbd34c9f1	Подбросить монету
+1a6e6af53	Пожаловаться на сообщение из ответа
+61e89c9ef	Уйти в AFK
+c51b37c71	Выйти из списка упоминаний
+d1076c2fa	Язык группы
+03811f00b	Голосование за мут (ответом на сообщение)
+ef4e5e596	Ваша личная ссылка-приглашение
+1db922722	Рейтинг приглашений
+53d58e1ac	Панель настроек с кнопками
+0c4051b76	Обновить список админов
+c55aa4167	Предупредить
+cec03bba0	Снять 1 предупреждение
+263cc2188	Посмотреть предупреждения
+76f0023be	Снять мут
+9d1a81717	Разбанить
+6118dce5a	Исключить из группы
+18bbd14ee	Массовое удаление сообщений
+2d7017ef2	Закрепить сообщение
+d7722a3e3	Открепить
+a263e4e53	Медленный режим
+9da046535	Список банов
+6d6c46eda	Список мутов
+a84a2a1e7	Сохранить заметку
+385c7d8ec	Удалить заметку
+a60cb06d0	Быстрая настройка
+d2dd24bcc	Добавить автоответ
+364057e43	Список фильтров
+5d24c4032	Удалить фильтр
+e46d6d528	Приветствие (медиа/кнопки)
+2c1419a05	Прощальное сообщение
+27f1ba342	Написать правила
+3d5b58779	Добавить сообщение по расписанию
+943458e1e	Сообщения по расписанию
+2331d765c	Упомянуть участников
+b0d7d4f3d	Остановить упоминания
+e912877cd	Обязательный канал
+29cc4c872	Досье пользователя
+8871a3c02	Начать розыгрыш
+dfae805ce	Завершить розыгрыш
+1945bd345	Экстренно: заблокировать группу
+c0559b5cc	Разблокировать группу
+422c89bec	Ваш ранг и права
+fa7d4e18f	Список администрации
+84be9db5d	Статистика группы
+3a085165d	Заблокировать медиа из ответа
+414c8153f	Заблокировать стикерпак
+c3e7837f2	Заблокировать отправку медиа
+956c0ce19	Снять блокировку медиа
+4e382259e	Запуск и меню
+1c4ce1da4	Показать меню
+7e27a3b5a	Выбрать группу/канал
+dc6cac394	Настройки выбранной группы
+e78fa8e35	Отправить апелляцию на бан
+eaba0a794	Помощь
+cbad220d3	Восстановление админов (доверенные лица)
+fcea72bad	Быстрая настройка выбранной группы
+495825a5e	Веб-панель (все настройки на одной странице)
+9674953cf	Отключить рассылки бота
+99ab93b21	Язык
+333895635	Написать администратору (поддержка)
+0d0187ac4	Группы и статистика вашего бота
+8938961a5	Рассылки в группы, каналы, людям
+be4f2dea9	История рассылок
+0c8b2de83	Шаблоны рассылок
+ecced9e02	Еженедельный отчёт о росте
+52b5b2176	Включить/выключить поддержку
+32791cc9a	Бан в группах вашего бота
+a7b61f397	Управление клонами
+205162f9b	Статистика производительности
+5d22ead7d	Панель управления
+84c0cbd02	Глобальный бан
+68cd0b7eb	Снять глобальный бан
+a38b6848f	Глобальный бан-лист
+45a767875	Заблокировать пользователя/чат
+4902bf286	Разблокировать
+cfc719f1d	Резервная копия базы
+efdd2ee59	Режим обслуживания
+bf65fdcd0	Заблокировать медиа во всех группах
+385efb5c0	⚡ Основной бот: @⟨0⟩
+8f13119d3	⟨0⟩ — бот защиты групп и каналов: спам, ссылки, флуд, рейды и капча.
+63edd3296	🛡 ⟨0⟩ Security Bot
+7ebe2ab6b	Защищает вашу группу и канал от спама, ссылок, флуда, рейдов и фейковых аккаунтов. Все настройки — в панели с кнопками.
+287dec170	Начать: /start⟨0⟩
+1a42073da	⚙️ Панель
+81daf5632	Ваша заявка на вступление в <b>⟨0⟩</b> получена. Ответьте на вопрос, чтобы её одобрили:
+784db6bac	⏰ Время: ⟨0⟩
+90d0b5f0a	🔐 Отправлена проверка в личке: ⟨0⟩ | ⟨1⟩
+49349d70e	Срок этой проверки истёк.
+6af257079	Заявка больше недействительна (возможно, уже обработана).
+d7eff8c3b	✅ Проверка пройдена! Вы приняты в <b>⟨0⟩</b>.
+69af7d417	✅ Прошёл проверку в личке и принят: ⟨0⟩ | ⟨1⟩
+99c1bac07	❌ Неверный ответ. Ваша заявка в <b>⟨0⟩</b> отклонена; можно подать новую.
+86e28712b	❌ Проверка в личке не пройдена, отклонён: ⟨0⟩ | ⟨1⟩
+9dbf30953	⏰ Время вышло, ваша заявка отклонена. Можно подать новую.
+2ec5e8129	⏰ Время проверки в личке истекло → ID:⟨0⟩ отклонён | ⟨1⟩
+12ae98fff	⚠️ Обнаружен флуд в канале! ⟨0⟩ постов за 10 секунд
+f271bb123	🌐 Отклонена заявка пользователя из глобального бан-листа: ⟨0⟩
+7b944f9a5	❌ Бот/фейк отклонён: ⟨0⟩ → ⟨1⟩
+d5d491f80	✅ Принят автоматически: ⟨0⟩ → ⟨1⟩
+5f7e623cd	❌ Отклонён автоматически: ⟨0⟩ → ⟨1⟩
+f8cddb848	📩 Новая заявка: ⟨0⟩ → ⟨1⟩
+a984efcca	Вы не можете применить действие к этому человеку.
+30a92b565	⛔ Управление рангами требует ⟨0⟩ или выше.
+f57eaa44e	⛔ Нельзя редактировать того, у кого ваш ранг или выше.
+c8857eea2	⛔ Ранг ⟨0⟩ может выдать только более высокий ранг.
+fd71ebc88	Пользователь не найден.
+fa5ded262	❌ Бот не может назначать админов!
+889786c65	❌ Пользователь не найден в группе!
+3c0a7e1f2	⚙️ Права
+e9e94dc59	У этого человека нет ранга. Сначала выдайте ранг командой /admin или /senioradmin.
+627b90668	⚠️ ⟨0⟩ (у бота нет)
+ae8f6f509	📡 Права Telegram
+033d23563	🤖 Права бота
+3d3a3d682	→ 📡 Права Telegram
+8bff101a7	→ 🤖 Права бота
+daddb4f0e	❌ Снять ранг
+12ec1558f	✅ Закрыть
+8f4a3cad6	👤 <b>Редактирование прав:</b> ⟨0⟩
+2a138f61a	Ранг: <b>⟨0⟩</b>
+9d0d28c34	✅ вкл · ❌ выкл · 🔒 недостаточный ранг
+bc2ec6c27	<i>Изменения применяются сразу. Кнопки рангов меняют ранг.</i>
+4dd50d885	Неверная кнопка.
+2f00bbdcd	Это право выше его ранга.
+da5fcba10	Неверный ранг.
+8ba8423be	Уже ⟨0⟩.
+aac33021a	⟨0⟩ назначен: ⟨1⟩ | ⟨2⟩
+d37ea2c16	Ранг: ⟨0⟩
+222dfbc00	Ранг снят.
+f97fd51ad	✅ Ранг ⟨0⟩ снят.
+570da29a3	У вас нет прав.
+c119667e9	✅ Панель прав закрыта. Изменения сохранены.
+cf9f2e455	⟨0⟩ не входит в администрацию этой группы.
+d4df62038	🔒 Это право выше вашего ранга или его нет у бота.
+ca3e89467	Нет сотрудников, которых вы можете редактировать. Чтобы выдать ранг, напишите в группе /admin @человек.
+9befd0808	👑 <b>Управление правами</b>
+6fcfd3b55	Выберите человека для редактирования:
+770d8a43d	Настройка ночного режима
+0d3da9061	Выберите права для ограничения и нажмите «Сохранить»:
+3014d10c7	Изменить часы: /nightmod 23:00 07:00
+8b386c8fe	Ошибка настройки ночного режима.
+441634b34	🛡 ⟨0⟩ активен! Настройки: /settings, команды: /help.
+f9f826fff	🛡 <b>⟨0⟩ Security Bot</b>
+a299d1e4f	Защита от спама, ссылок, флуда, рейдов и капча для ваших групп и каналов.
+b40285a71	1️⃣ Добавьте бота в группу с нужными правами кнопкой ниже.
+15b8ba9ba	2️⃣ Выберите группу в меню ниже и управляйте всем через ⚙️ Настройки.
+eae59de08	💬 Поддержка
+81e22b47b	Неверная ссылка прав.
+5af6c10c1	Группа зарегистрирована! Теперь её можно выбрать в личке через 🛡 Мои группы.
+425ac7c01	ID группы: ⟨0⟩
+60a03153e	Не удалось зарегистрировать: сначала сделайте бота админом этой группы.
+08cdd8869	Эта группа зарегистрирована (ID: ⟨0⟩)
+7b80705e1	Напишите /select в личке, чтобы перейти в панель управления.
+c6668e444	Ваших зарегистрированных групп/каналов не найдено.
+489f886fe	Выберите чат кнопкой 🔗 Выбрать группу / 📢 Выбрать канал ниже: если бот там админ, он распознается автоматически. Если бот ещё не добавлен, сначала нажмите «Добавить в группу».
+529f5b296	Выберите канал/группу для управления:
+3b561f5ba	✅ Выбрано: ⟨0⟩
+e537ee79f	Теперь можно пользоваться командами в личке.
+5da9ca5b4	Ваш ID: <code>⟨0⟩</code>
+758b4fa2f	ID человека из ответа: <code>⟨0⟩</code>
+a52056450	Пример:
+8db290527	Канал не найден!
+d7db3c4cf	Текущий лог: ⟨0⟩
+354f04cc0	Использование: /setlog -1001234567890
+9cc790504	✅ Лог-канал обновлён: ⟨0⟩
+f40d6696a	АДМИНИСТРАЦИЯ ГРУППЫ
+511c4973a	Всего: ⟨0⟩ сотрудников
+284837aa3	Использование: /gban <id|@user> [причина] (или ответом на сообщение)
+e2d4f8ab8	Этого человека нельзя забанить.
+01c3bd4a0	во всех ботах
+cb8da44a3	в группах ⟨0⟩
+49aed1394	🌐 Баню ⟨0⟩ ⟨1⟩...
+73497703d	🌐 ⟨0⟩ забанен ⟨1⟩.
+a960dfa59	✅ ⟨0⟩ чатов | ❌ ⟨1⟩ (нет прав/не участник)
+ffc42c25d	Использование: /ungban <id|@user>
+ad983fea1	✅ ⟨0⟩: ⟨1⟩бан снят.
+63de87994	Бан-лист пуст.
+d65a4bee5	Глобальный бан-лист
+c58c96fc0	Бан-лист ⟨0⟩
+6d34fa6d2	🌐 <b>⟨0⟩</b> (последние 50):
+15db0d20b	Сейчас: ⟨0⟩ (⟨1⟩)
+08771c47b	Использование:
+9ebd56f1c	✅ Наказание при достижении лимита предупреждений: ⟨0⟩⟨1⟩
+bd06580b1	Ограничение новичков: ⟨0⟩
+d8eaa4a1a	Использование: /newbie <минуты> или /newbie off
+4986c7002	Введите от 0 до 1440 минут или off.
+7e4bdbce0	✅ Ограничение новичков выключено.
+d5a3095ed	✅ Новые участники не могут отправлять ссылки/медиа/пересылки первые ⟨0⟩ мин.
+d4c80a6a7	🔗 Исключения для ссылок:
+f3425da9b	/allowlink add youtube.com
+71399725d	/allowlink del youtube.com
+99d71c223	(можно добавлять и пути вроде t.me/mychannel)
+d555eadad	(пусто)
+4bcfe1994	✅ ⟨0⟩ добавлен в исключения для ссылок.
+e6dffb4e9	✅ ⟨0⟩ удалён из списка.
+c22e23f31	Использование: /captchatime 2m (от 30s до 60min)
+b4b2c0b74	✅ Время капчи: ⟨0⟩
+42cf26778	Чтобы подать апелляцию, напишите мне в личку: /appeal <пояснение>
+ef023696b	Использование: /appeal <почему ваш бан следует снять?>
+294f98c41	У вас нет записанного бана.
+78158a307	Для какой группы апелляция?
+0072d91b7	Подавать апелляцию для этой группы можно раз в 24 часа.
+0799f76c1	✅ Снять бан
+1358a154b	❌ Отклонить
+6d20aaa15	📨 <b>Апелляция на бан</b> #⟨0⟩
+1040c08fa	Группа: <code>⟨0⟩</code>
+fae78e9bb	Причина бана: ⟨0⟩
+76700df28	✅ Ваша апелляция отправлена админам. О результате сообщим здесь.
+53667435f	Время вышло, напишите /appeal снова.
+6486efe3d	Отправляю...
+6c9744f83	Апелляция не найдена.
+e2457d551	Эта апелляция уже обработана: ⟨0⟩
+07b34dcdd	✅ Ваша апелляция принята, бан снят. Вы можете снова вступить в группу.
+ed103ceb6	❌ Ваша апелляция отклонена.
+f7480a2b3	<b>Итог:</b> ⟨0⟩ — ⟨1⟩
+b497d1353	✅ Принята
+6c25e020d	❌ Отклонена
+97239bc70	📨 Апелляция #⟨0⟩ ⟨1⟩ | ⟨2⟩
+7a80eefec	🖼 без медиа
+573052e01	🔘 ⟨0⟩ кнопок
+b81be0f7f	🎲 ⟨0⟩ вариантов
+d542cb1c4	💎 точная копия
+03cb45a36	Фото
+bc17c1f01	Видео
+638bbfe15	Файл
+867b291d2	Музыка
+e8bff35ea	Голосовое
+2e9d0e77a	Стикер
+966648de4	Видеосообщение
+7d472b473	ч
+f4a9f3249	Эта кнопка больше не действует.
+30dc00c2e	Эта ссылка больше не действует.
+c9910a305	Этой заметки больше нет.
+0e89955b2	👋 {name} покинул(а) нас. Всего доброго!
+e41edf275	📜 <b>Правила ⟨0⟩</b>
+3f1696378	<b>Форматирование:</b> сообщение сохраняется так, как вы пишете его в Telegram (жирный, курсив, ссылки, спойлеры, цитаты).
+06c164645	<b>Медиа:</b> ответьте на фото/видео/GIF/стикер и напишите команду.
+6a1a1a0ad	<b>Кнопки</b> (каждая строка — ряд, рядом через <code>&amp;&amp;</code>):
+a1c3d2c0b	<code>Наш канал - https://t.me/channel &amp;&amp; Поддержка - @support</code>
+3424e60cc	<code>Прочитать правила - rules</code> · <code>Инфо - popup:Текст</code> · <code>Заметка - #название</code>
+dd3608634	Цвет: в конце строки <code>#green</code> <code>#red</code> <code>#blue</code> · Стиль Rose: <code>[Канал](buttonurl://t.me/channel)</code>
+90f26740a	<b>Переменные:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
+23adc295f	<b>Случайно:</b> разделите несколько сообщений строкой, содержащей только <code>%%%</code>.
+7d75ab43e	Это сообщение нельзя использовать в каналах.
+93a792a44	Приветствие
+06ba336bf	Прощание
+ff0fe91d4	Правила
+86eca05aa	✏️ <b>Сообщение: ⟨0⟩</b>
+0d20c41d6	Использование: <code>/⟨0⟩ текст</code> или ответ на сообщение/медиа: <code>/⟨1⟩</code>
+ee9b02bb7	💎 Премиум-эмодзи сохраняются: сообщение копируется точно. Не удаляйте исходное сообщение (если оно удалено, отправится с обычными эмодзи).
+d54d1a799	✅ Сообщение «⟨0⟩» сохранено (⟨1⟩).⟨2⟩
+32bc1141c	Предпросмотр:
+a4fd88326	✏️ Сообщение «⟨0⟩» обновлено | ⟨1⟩
+f2ecba035	В этой группе ещё не заданы правила.
+f6d49a8a4	Добавить их можно командой /setrules.
+3dadf54ab	Сообщение «⟨0⟩»: ⟨1⟩ · ⟨2⟩
+42b967a7b	Изменить: /set⟨0⟩
+6d2d95e97	👋 Приветствие
+46af570c5	🚪 Прощание
+6413cb724	✅ Приветствие сброшено к стандартному.
+14324da2a	Формат интервала: <code>30m</code>, <code>6h</code>, <code>1d</code>
+a44cbb972	Интервал — от 10 минут до 7 дней.
+7e69525ad	В группе может быть не больше ⟨0⟩ сообщений по расписанию.
+ee86ab412	⏰ <b>Сообщение по расписанию</b>
+8dada6c44	Использование: <code>/schedule 6h Не забудьте прочитать правила!</code>
+82c791f2c	или ответом на сообщение/медиа: <code>/schedule 6h</code>
+7939ca797	Список и удаление: /schedules
+62c97be15	✅ Сообщение по расписанию #⟨0⟩: будет отправляться каждые ⟨1⟩ (первое через ⟨2⟩). Список: /schedules
+bd18601d1	⏰ Добавлено сообщение по расписанию (каждые ⟨0⟩) | ⟨1⟩
+e2d35adb1	⟨0⟩ <b>#⟨1⟩</b> каждые ⟨2⟩ · следующее ⟨3⟩
+76c241937	🧹 Удалять предыдущее
+b35d597c9	📌 Оставлять предыдущее
+225f856c3	⏰ <b>Сообщения по расписанию</b>
+207dc0f12	Добавить: <code>/schedule 6h сообщение</code> (поддерживаются медиа/кнопки)
+351e8911a	Пока нет.
+242c0f02c	Не найдено
+ec93a493c	⏸ Остановлен
+e388dd558	▶️ Запущено
+d08a36466	➕ Новое сообщение по расписанию
+25cda8fe6	🚪 <b>Прощание</b> — ⟨0⟩
+b61184fea	Статус: <b>⟨0⟩</b> · ⟨1⟩
+0eec2952d	Отправляется только тем, кто вышел сам (не исключённым/забаненным). Время автоудаления такое же, как у приветствия.
+b0037f2fb	👋 <b>Приветствие</b> — ⟨0⟩
+611ef08d1	Приветствие: <b>⟨0⟩</b> · ⟨1⟩
+a4530174c	📜 Правила: ⟨0⟩ · 🚪 Прощание: ⟨1⟩ · ⏰ По расписанию: ⟨2⟩
+d0b1d849f	Для медиа, кнопок и переменных нажмите ✏️ Изменить (или напишите в группе /setwelcome, чтобы увидеть справку).
+2b7ced272	Вкл
+e5b4e786e	есть
+68b8326a2	нет
+2bae1a721	✏️ Изменить
+894e0e55f	👁 Предпросмотр
+099ae3d9c	🖼 Убрать медиа
+8bb5bb494	↩️ Сбросить к стандартному
+adcf7aa93	🧹 Удалять старое
+1eaf255d1	👥 Одно сообщение на многих
+7ef1d92b8	⏱ Автоудаление
+e0454a0ce	📩 Отправлять в личку
+060b7f669	📜 Написать правила
+ee89e73e1	👁 Правила
+b6669596d	🚪 Прощание ›
+0c2dc5967	⏰ Сообщения по расписанию ›
+9a8a538db	Чёрный список: ⟨0⟩
+0eed14a22	Нет правил
+a6aea5676	👁 Предпросмотр отправлен
+eb9f11f93	↩️ Сброшено к стандартному
+14af210b4	🖼 Медиа убрано
+f615cd8f5	⏹ Упоминания остановлены
+ce76be77d	✅ Упоминания завершены
+98452c88d	⟨0⟩: упомянуто ⟨1⟩/⟨2⟩ человек.
+7f535520c	/tag используется в группе.
+59b9ad51d	⏳ В этой группе уже идут упоминания. Остановить: /stoptag
+46a8f403f	⏳ Между упоминаниями есть пауза, чтобы не спамить группу. Попробуйте через ⟨0⟩ мин.
+02343ede4	Некого упоминать. (Бот знает участников, которые писали или вступали в группу.)
+29099e290	🏷 Упоминания начались: <b>⟨0⟩</b> человек, по ⟨1⟩ в сообщении · примерно ⟨3⟩ мин
+5a101718d	Остановить: /stoptag
+f64e607e0	⏹ Стоп
+87e8dab7e	🏷 /tag запущен (⟨0⟩ человек) | ⟨1⟩
+93e9f8e23	Сейчас упоминания не идут.
+de3fd2d6f	⏹ Останавливаю упоминания…
+6e637aa42	⏹ Останавливаю
+a0fd2c146	Упоминания уже завершены.
+60c103470	Напишите это в группе, где вас не нужно упоминать.
+170599775	🔔 Вы снова в списке /tag.
+3812eb431	🔕 В этой группе вас больше не будут упоминать через /tag. Чтобы отменить, снова напишите /notag.
+21946f144	⚠️ Не удаётся проверить обязательный канал: бот админ в канале? (задайте снова через /forcesub)
+8e87bf498	Вступить в канал
+cbb50c7c3	✅ Я вступил
+0ca6d0da1	📢 ⟨0⟩, чтобы писать в этой группе, сначала вступите в канал <b>⟨1⟩</b>.
+c0ec4b2f3	Эта кнопка не для вас.
+aaed7d345	✅ Спасибо, теперь можно писать!
+bd2685273	Вы ещё не вступили в канал. Сначала вступите кнопкой 📢, затем нажмите снова.
+1886b3d17	Укажите канал как <code>@username</code>, <code>t.me/channel</code> или ID <code>-100…</code>.
+f02d79616	Канал не найден или бота нет в канале. ⟨0⟩
+87bee0af3	Это не канал.
+4171be67d	Сначала добавьте бота в канал как <b>админа</b> (нужно, чтобы видеть участников).
+9d38f82c5	Вкл — <b>⟨0⟩</b>
+4adcca7b1	📢 <b>Обязательный канал</b>: ⟨0⟩
+a3407edfd	Задать: <code>/forcesub @channel</code>
+95acb52af	Выключить: <code>/forcesub off</code>
+045928d81	Бот должен быть админом в канале. Админы и владелец бота не проверяются.
+fe929a5d7	📢 Обязательный канал выключен.
+53a5e40c2	Сообщения тех, кто не вступил в канал, удаляются, и показывается кнопка вступления.
+cef984319	📢 Обязательный канал: ⟨0⟩ | ⟨1⟩
+d48d5b5ae	недолго
+05260e946	⟨0⟩ дн.
+b04fc7f5d	только что
+21aaa5a62	уже ⟨0⟩ мин
+7448bebe4	уже ⟨0⟩ ч
+5ba98ca40	уже ⟨0⟩ дн.
+ad5b41977	💤 ⟨0⟩ теперь AFK⟨1⟩
+44c5de771	👋 ⟨0⟩ вернулся (был AFK ⟨1⟩).
+e117178d7	💤 ⟨0⟩ сейчас AFK (⟨1⟩)⟨2⟩
+44140939f	📢 <b>Обязательный канал</b> — ⟨0⟩
+e5b1aac1e	Статус: <b>⟨0⟩</b>
+0716f7bc2	Канал: ⟨0⟩
+0d5b480e5	Сообщения участников, не вступивших в канал, удаляются, и появляется уведомление с кнопками «📢 Вступить в канал / ✅ Я вступил». Админы не проверяются. Бот должен быть админом в канале.
+7d73e8088	не задан
+6ba5f155e	✏️ Задать канал
+c9606c43c	🏷 <b>Настройки упоминаний</b> — ⟨0⟩
+203ce8b22	<code>/tag сообщение</code> упоминает участников порциями. <code>/stoptag</code> останавливает, участники могут выйти из списка командой <code>/notag</code>.
+b86bf2507	В сообщении: <b>⟨0⟩ человек</b> · Стиль: <b>⟨1⟩</b> · Кого: <b>⟨2⟩</b>
+5090a9e78	Эмодзи
+d2abd1ed8	Имя
+1da63df5e	активных за последние 7 дней
+4b30ca4e3	все
+4e45e032a	Человек
+4dd25e398	⟨0⟩По имени
+c39394400	⟨0⟩Эмодзи
+b48e5cb08	Только активных за последние 7 дней
+b1d807974	Уведомить
+ca39fe0f8	забанен в ⟨0⟩ других группах бота
+9872ca74d	в спам-списке CAS
+9396a2730	🚩 ⟨0⟩ в чёрном списке (⟨1⟩) → <b>забанен</b>.
+545b1c5c1	🚩 ⟨0⟩ в чёрном списке (⟨1⟩) → <b>мут</b>. Админы могут его освободить.
+07441d924	🚩 Внимание: ⟨0⟩ ⟨1⟩.
+45358021b	✏️ Смена имени: ⟨0⟩ (ID <code>⟨1⟩</code>)
+281b2747a	Было: ⟨0⟩
+059547382	Стало: ⟨0⟩
+a2c2bec19	📋 <b>Досье</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
+0786218b9	🏷 Старые имена: ⟨0⟩
+14c5bccb9	🚩 Общий чёрный список: ⟨0⟩
+38fd7e621	<b>забанен в ⟨0⟩ группах</b>
+15ab6d34d	чисто
+04a2454bb	🌐 CAS: ⟨0⟩
+66b71c0f8	⚠️ в списке
+5a25bd323	📊 За последние ⟨0⟩ дн.: ⚠️ ⟨1⟩ предупреждений · 🔇 ⟨2⟩ мутов · 👢 ⟨3⟩ киков · 🚫 ⟨4⟩ банов
+5f914853f	Записанных наказаний нет.
+05d9f273c	Использование: /record @user, /record ID или /record ответом на сообщение
+f3ac03616	📩 Досье отправлено в личку.
+5d8b9aade	📩 Чтобы получить досье в личку, сначала отправьте мне /start в личке.
+2e3efd222	🤖 Перейти к боту
+859b5bb09	🔇 Мут (⟨0⟩/⟨1⟩)
+4d8231ce2	❌ Отменить (админ)
+39229bf11	/votemute используется в группе ответом на сообщение.
+6a2b8f19c	Голосование за мут в этой группе выключено.
+61afc3c7f	Ответьте командой /votemute на сообщение того, кого нужно замутить.
+89cfeb825	Для этого человека нельзя начать голосование.
+77053150c	Новые участники не могут начинать голосование (нужно быть в группе хотя бы 1 день).
+ebb86ddce	Вы недавно начинали голосование, подождите немного.
+2848c7501	Голосование по этому человеку уже идёт.
+97509d3a2	🗳 <b>Голосование за мут</b> для ⟨0⟩ (⟨1⟩)
+49efb6ab2	Начал: ⟨0⟩ · нужно голосов: ⟨1⟩ · в течение ⟨2⟩ мин
+dc6640321	Это голосование истекло.
+608b293ec	Голосование отменено
+0fdae78cf	❌ Голосование отменил ⟨0⟩.
+a0e2f43f9	Нельзя голосовать за себя.
+ffff3ff40	Новые участники не могут голосовать (нужно быть в группе хотя бы 1 день).
+fe7fa73cc	Вы уже проголосовали.
+e0e085981	✅ Ваш голос учтён
+73e49db75	Не удалось выдать мут (права бота?)
+aa6350471	🔇 Мут выдан
+75f1001f2	🔇 ⟨0⟩ получил мут на ⟨2⟩ по итогам ⟨1⟩ голосов.
+8555c063c	🗳 Голосование: ⟨0⟩ получил мут на ⟨2⟩ по итогам ⟨1⟩ голосов | ⟨3⟩
+18fb9aaaa	🧑‍⚖️ <b>Защита сообществом</b> — ⟨0⟩
+f1deffa09	🚩 <b>Общий чёрный список:</b> когда сюда вступает человек, забаненный в другой группе бота, применяется выбранное действие.
+43a185211	🌐 <b>CAS:</b> ловятся и аккаунты из всемирного спам-списка.
+6e4660beb	✏️ <b>Отслеживание имён:</b> смены имени/username пишутся в лог-канал (история в /record).
+adabf49fe	🗳 <b>Голосование за мут:</b> участники могут проголосовать командой /votemute на сообщении, чтобы временно замутить человека (новички голосовать не могут, на администрацию не действует).
+b800b8e5f	🚩 Общий чёрный список
+97bceca81	✏️ Отслеживание имён
+c5772d4e7	🗳 Голосование
+f12c4aec5	Нужно голосов
+662158acd	Мут
+5c4935039	🎁 <b>Розыгрыш</b>⟨0⟩
+0dad0ba32	🏆 Количество победителей: <b>⟨0⟩</b>
+7c606f70b	⏰ Окончание: <b>⟨0⟩</b>
+92b031d27	📢 быть участником канала ⟨0⟩
+1a822445f	💬 не менее ⟨0⟩ сообщений в группе (за последние ⟨1⟩ дн.)
+d9e82561c	📅 быть в группе не менее ⟨0⟩ дн.
+d0610eddb	🛡 настоящий аккаунт с фото профиля или username
+208622235	📋 <b>Условия</b>
+99c8d7297	👥 Участники: <b>⟨0⟩</b>
+cadb40104	🎁 Участвовать (⟨0⟩)
+5ccfb1128	Канал
+eb533cc4f	В этой группе идёт розыгрыш. Завершить: /endgiveaway
+10870143e	Длительность — от 1 минуты до 30 дней.
+9c50f1ba5	❌ Условие по каналу: ⟨0⟩
+ec58b461d	✅ Розыгрыш начался.⟨0⟩
+9d6e7b1e0	Пример с условиями: /giveaway 1d 3 Приз | channel=@channel messages=20 days=7
+8a942b576	Завершить: /endgiveaway [число победителей]
+05fd915f2	🎉 ⟨0⟩ начал розыгрыш: ⟨1⟩ | ⟨2⟩
+30f5e7aae	Боты не могут участвовать.
+f03d1a2cb	Сначала вступите в группу.
+b5417cc27	Не удалось проверить ваше членство в группе.
+004bfc204	Аккаунты без фото профиля и username не могут участвовать (защита от фейков).
+39a47e334	Сначала вступите в ⟨0⟩.
+99797f0e4	Нужно не менее ⟨0⟩ сообщений в группе (сейчас ⟨1⟩).
+f21f9c94c	Нужно быть в группе не менее ⟨0⟩ дн.
+ff2167b09	Этот розыгрыш завершён.
+b5116fff1	Вы уже участвуете, удачи! 🍀
+5c88f09bc	🎉 Вы участвуете в розыгрыше, удачи!
+b05652dd1	✅ <b>Розыгрыш завершён</b>
+4cc381328	🎉 Розыгрыш завершён! Ни один участник не выполнил условия.
+8e2d564a7	🎉 <b>Розыгрыш завершён!</b>⟨0⟩
+5aa86da43	🏆 Победитель⟨0⟩: ⟨1⟩
+e9ade43fd	👥 Участники: ⟨0⟩
+7438ab083	🏆 Розыгрыш завершён: ⟨0⟩ | ⟨1⟩
+1e5f2647b	нет победителя
+12a0187af	Нет активного розыгрыша.
+9de1a5b57	✅ Розыгрыш завершён.
+ff647517b	Сообщения по дням — последние 30 дней
+34673a626	Сообщения по часам (время Турции, 30 дней)
+fa46923fb	Вступили / вышли — последние 30 дней
+0edbd3fce	Вступили (⟨0⟩)
+03822ea5b	Вышли (⟨0⟩)
+5b09123ba	Самые активные участники — последние 7 дней
+8faf5f37f	Пока нет данных
+c68b2a090	💬 Сообщения: 7 дней <b>⟨0⟩</b> · 30 дней <b>⟨1⟩</b> · активных участников (7 дней): <b>⟨2⟩</b>
+efd6992e0	👥 За 30 дней вступили <b>⟨0⟩</b> · вышли <b>⟨1⟩</b>
+980151f9d	🛡 Всего: 🚫 ⟨0⟩ банов · 🔇 ⟨1⟩ мутов · 👢 ⟨2⟩ киков · 🔁 ⟨3⟩ спама · 🙋 ⟨4⟩ заявок
+8b3ad8463	⟨0⟩ — статистика
+afd536817	Наказание
+74a1b4f70	🌊 Флуд: лимит сообщений
+7d5fdce06	🌊 Флуд: окно времени
+6eec7f346	🖼 Медиа-флуд: лимит медиа
+188dc2ac4	🖼 Медиа-флуд: окно времени
+4cb84b51a	🔇 Длительность мута
+3b723e30f	🕊 Исключения из антиспама
+62af570a8	По одному ID пользователя в строке. Защита от спама, флуда и ссылок на этих людей не действует.
+97559aa34	🛡 Защита
+eaecb6e7c	🔤 Списки слов и ссылок
+50e7fc41b	Запрещённые слова
+5d70efcb4	По одному слову в строке. Для regex начните с re:
+a59a817c8	Разрешённые домены
+98ae8882f	По одному домену в строке (например, youtube.com).
+17dfd3589	🚪 Вступление
+47bc3cee8	Время капчи
+31a22d269	📩 Проверка в личке для заявок на вступление
+51640d5b4	Рейд: лимит участников
+33500eff3	Рейд: окно времени
+bcd337aa1	🐣 Ограничение новичков
+b7e0a1cb1	Мут пользователям без username
+3fe9d6820	✅ Автопринятие заявок
+876437b88	❌ Автоотклонение заявок
+94dd4d1bd	🤖 Отклонять ботов / без username
+b582c2d59	🖼 Неприемлемые медиа
+ca770c605	🤖 ИИ-проверка на 18+
+737b0637b	Проверяются фото, стикеры и GIF (на сервере должен быть установлен nudenet).
+1903d3d63	📦 Удалять опасные файлы
+9c0ff36ee	файлы вроде .apk .exe .bat .scr
+c79ee4fbb	Если за короткое время приходит много неприемлемых медиа, медиа в группе временно блокируются.
+b43510a81	✏️ Правки и жалобы
+e97c80f7b	✏️ Защита от поздних правок
+7f9f3195d	Сообщение, изменённое через некоторое время после отправки, удаляется; старая и новая версии уходят основателю.
+5e74ca845	👥 Действует на
+ddd26077d	Невыбранные ранги не проверяются. Изменить может только основатель.
+66613016d	Лимит времени на правку
+e0d3940a6	📨 Уведомлять основателя / добавившего
+9b1e938f3	🚩 Система жалоб (/report, @admin)
+44d53d26e	⚠️ Предупреждения
+70d607de5	Лимит предупреждений
+a8dd080ee	При достижении лимита
+453982208	Длительность временного наказания
+bfbfead91	👋 Приветствие
+e8a88eb95	🧹 Удалять старое при вступлении нового
+5c2fbdfa8	👥 Одно сообщение при массовом вступлении
+90de79bd5	🚪 Прощание
+0f39f1096	📜 Правила
+f9c17c1f0	🏷 Упоминания и канал
+4f7b4fd4f	/tag: в одном сообщении
+4aa6ce6cc	Стиль /tag
+6b93199e3	По имени
+aa42b8748	Эмодзи
+1d365363e	📢 Обязательный канал
+7b7afd285	Задайте канал командой /forcesub @channel.
+87bb0ff1a	🔗 Конкурс приглашений
+1c0fda956	Участники получают свою ссылку через /invite, рейтинг — /invites.
+c8d05f85f	🧑‍⚖️ Защита сообществом
+33af72703	Когда вступает человек, забаненный в другой группе бота.
+25347c8be	Действие для чёрного списка
+f7e588100	🌐 Спам-список CAS
+4a02f552b	✏️ Отслеживание смены имени
+32a52c44c	🗳 Голосование за мут
+9b96d57aa	Длительность мута по голосованию
+d51893a35	🌍 Язык
+8d6c8a4a5	Язык бота в этой группе
+45ac69c17	Сообщения, кнопки и уведомления бота будут на этом языке. Написанный вами контент не меняется.
+a53ce8e7e	👮 Аудит админов
+d06ffe7b8	📋 Ежедневная сводка по админам
+79c2f9928	Каждый вечер: кто сколько сделал банов, мутов, предупреждений и удалений (основателю и добавившему бота).
+c1b823489	🚨 Лимит действий админов
+b05a27d38	Если сотрудник (не основатель) сделает больше банов/киков/мутов, чем лимит, за 1 час, его права приостанавливаются.
+2a6b6f7f9	Лимит в час
+99f28dbae	🗑 Копировать удалённые сообщения в лог-канал
+704d44996	Удалённые через /del и /purge. Telegram не сообщает ботам о ручных удалениях.
+bf952a57c	🛟 Восстановление админов
+c4395cbb9	Доверенные лица (не больше 3)
+94f3d0e2c	По одному ID в строке. При массовом снятии админов эти люди могут отправить боту /recover.
+44ada5469	♻️ Автоматически восстанавливать после массового снятия
+fe85b70c6	#green
+485f81ade	#red
+9cfcbc726	Неверный выбор
+4094a1250	Слишком длинно: ⟨0⟩…
+3994c99a9	Неверный ID: ⟨0⟩ (только цифры)
+5055a2323	Не больше ⟨0⟩ человек
+abe802098	Неверно
+43936b588	Сообщение не может быть пустым
+45313b745	Неизвестное поле
+98d2db628	Каждые 30 минут
+15ff62ef8	Каждый час
+3ff28dc87	Каждые 2 часа
+b7b8f6424	Каждые 3 часа
+b5416f932	Каждые 6 часов
+d74bcca07	Каждые 12 часов
+e07f13000	Раз в день
+f1868872f	Каждые 3 дня
+b09892476	Раз в неделю
+fe3e896af	📦 Стикерпак: ⟨0⟩
+cce0f0bc2	У вас нет прав
+b91959e41	Формат времени: ЧЧ:ММ
+6ed0b041b	🌙 Ночной режим сохранён
+04f474277	Название заметки: буквы, цифры, - или _ (не больше 32)
+064f4b29e	Содержание заметки не может быть пустым
+a918fc143	📝 #⟨0⟩ сохранена
+8af22b61d	🗑 Заметка удалена
+bdf64f16d	Заметка не найдена
+2550a4e51	Неверный триггер (не больше 100 символов; *слово* — совпадение внутри сообщения)
+65d904f46	Ответ не может быть пустым
+543b45aca	Фильтров может быть не больше ⟨0⟩
+75dac4689	🧩 Фильтр ⟨0⟩: ⟨1⟩
+833cd7a4f	обновлён
+8421922af	🗑 Фильтр удалён
+d52273a24	Фильтр не найден
+737953689	Неверный интервал
+8f07eb02e	⏰ Сообщение по расписанию добавлено
+4a5a1fa05	✅ Обновлено
+e10b8c2a9	🗑 Блокировка снята
+e750a9371	Неизвестное действие
+233235be6	Неизвестная настройка
+64198f47f	Сначала задайте канал командой /forcesub @channel
+794ac0486	🖥 Изменено через веб-панель: ⟨0⟩ | ⟨1⟩
+c5340e8d3	Не удалось проверить сессию. Откройте панель внутри Telegram.
+650c37e3f	Группа не найдена
+ed8d9ddd6	Вы не админ этой группы (или бот не смог связаться с Telegram).
+d1d4f67c2	Бот на обслуживании, попробуйте чуть позже.
+e2d7c5c97	Требуется POST
+33edae1a5	Слишком большой запрос
+bcde64b8a	Неверный запрос
+0429402e5	Неверная ссылка
+ed8c751c4	Неподдерживаемый запрос
+a5bfc246e	Ошибка сервера
+6b75a37b8	🖥 Открыть веб-панель
+b76f92e63	Веб-панель для этого бота не включена (WEBAPP_URL в .env пуст).
+61267ecf8	🖥 Веб-панель открывается в личном чате с ботом:
+1503ed392	🖥 Открыть в личке
+f6dcc8f07	🖥 <b>Веб-панель</b>
+ffdbfe849	Все настройки на одной странице: защита, защита правок, неприемлемые медиа, вступление, приветствие, списки, ночной режим, заметки, фильтры, сообщения по расписанию, заблокированные медиа, администрация и статистика группы. Изменения доходят до бота за несколько секунд.
+72019bbac	основной
+62ca31689	⟨0⟩: ⟨1⟩ в ожидании⟨2⟩
+3f8811338	, ⟨0⟩ в работе
+e5136258e	⚡ <b>Производительность</b> — время работы ⟨0⟩
+be1d477f1	💬 Обработано обновлений: <b>⟨0⟩</b> · очередь: ⟨1⟩
+fdd4f90c1	🧠 Память: <b>⟨0⟩ МБ</b> (пик ⟨1⟩ МБ) · CPU: ⟨2⟩ сек
+3da2a45ed	🧠 CPU: ⟨0⟩ сек
+3d0951b3b	🗄 База данных: ⟨0⟩ МБ · пакетных записей: ⟨1⟩, строк: ⟨2⟩ · в ожидании: ⟨3⟩
+22a8d336d	⏱ Задержка цикла: средн. ⟨0⟩ · макс. ⟨1⟩ (больше 100 мс = какая-то операция тормозит бота)
+7f78c41d0	👥 Группы: ⟨0⟩ · Каналы: ⟨1⟩ · Клоны: ⟨2⟩
+a860ce1ad	🐢 <b>Самые медленные (в среднем)</b>
+6ea19cdf0	⟨0⟩. <code>⟨1⟩</code> — средн. ⟨2⟩ · макс. ⟨3⟩ · ⟨4⟩ раз
+b46e47f18	⏳ <b>Больше всего времени</b>
+5d3700941	⟨0⟩. <code>⟨1⟩</code> — всего ⟨2⟩ · ⟨3⟩ раз
+3e186b7ac	🔄 Обновить
+0b681bc34	🧹 Сбросить
+9db9059a2	🔙 Панель
+7866cfd7a	🧹 Измерения сброшены
+8ed3799c7	🔄 Обновлено
+e8f595afe	🪦 Бот удалён / недоступен
+fbd3f68b8	⚠️ Бот не админ
+7950587b4	🕳 Пусто (≤⟨0⟩ участников)
+c7417acd3	💤 Тишина ⟨0⟩ дн.
+b2d73a5b7	🤖 <b>Панель ⟨0⟩ Security Bot</b>
+6dcd06cc1	📊 Статистика:
+2934c79d8	├ Всего групп: ⟨0⟩
+e11665156	├ Всего каналов: ⟨0⟩
+98ee4dccc	├ Всего пользователей: ⟨0⟩
+2cdc2cc48	└ Пользователей в личке: ⟨0⟩
+f93b0152d	📢 Каналы
+774aa2184	👥 Группы
+de09056f1	🧹 Очистка
+d03041124	📊 Статистика
+9782862bd	🚫 Заблокированные
+c5249c21a	⚡ Производительность
+9e1bd9726	Каналы
+009c2e489	Группы
+43dd9b917	⟨0⟩ <b>⟨1⟩</b> (⟨2⟩) — стр. ⟨3⟩/⟨4⟩
+1e4e3b199	Нажмите на название: информация · 🚪: удалить бота
+7035c59fd	📢 Нет зарегистрированных каналов.
+a6492303c	👥 Нет зарегистрированных групп.
+e5b94ef1a	🔙 Назад
+8b1164c1a	🔙 Назад к списку
+6abf2b290	У этого чата нет записи (удалена).
+deacf11c1	✅ админ
+19ae8c1fe	✅ владелец
+c5de3cdae	⚠️ участник (не админ)
+6d25c19b2	❌ не в группе
+9f9a5ad1c	❌ исключён
+84ba3029b	👥 Участники: ⟨0⟩ · 🤖 Бот: ⟨1⟩
+c86df7e48	📅 Зарегистрирована: ⟨0⟩⟨1⟩
+079fe4cc3	💬 Последнее сообщение: ⟨0⟩ · ⟨1⟩ сообщений за 7 дней
+33a131ec1	🛡 Активные защиты: ⟨0⟩
+c215ada82	· Добавил: ⟨0⟩
+cac2ce338	никогда
+d4f5955f6	🚪 Удалить бота
+84297554a	🗑 Удалить запись
+5b1da6456	📋 Применить её настройки к другим группам
+f9c565e5d	🧹 <b>Проверка для очистки</b> — проверено чатов: ⟨0⟩
+9309c9a8c	🗑 Удалить записи
+f9dc0c92a	🚪 Выйти + удалить
+3939c3aa3	📋 Показать
+4fd13b5b2	✅ Очищать нечего.
+71017a253	Примечание: «Выйти + удалить» удаляет бота из этих чатов и стирает их настройки.
+78c3f116c	🔄 Проверить снова
+f73473dc3	Эта команда работает только в личке!
+42c9a2045	📋 Применить настройки <b>⟨0⟩</b> к остальным <b>⟨1⟩</b> группам?
+3e1a4c661	Копируются: настройки защиты, наказания, капча, ночной режим, лимит предупреждений и т. д.
+ac2c708cc	Не копируются: приветствие/прощание/правила, обязательный канал, блокировки, списки конкретной группы.
+46d884196	<b>+ списки</b>: запрещённые слова и разрешённые ссылки тоже добавляются (существующие не удаляются).
+cc53a5889	✅ Применить + списки
+4bbf7625d	У исходной группы нет записи.
+8b18be741	✅ Применено к ⟨0⟩ группам
+a27027da6	📋 Настройки этой группы применены к ⟨0⟩ группам | ⟨1⟩
+584db30d0	🚪 Удалить бота из <b>⟨0⟩</b>?
+5cb08b81f	• <b>Сохранить настройки</b>: если бота добавят снова, настройки вернутся.
+c988453c1	• <b>Удалить и запись</b>: настройки, ранги и статистика удаляются.
+29f10e48b	🚪 Выйти, сохранить настройки
+874976382	🗑 Выйти и удалить запись
+1a6229583	Не удалось выйти: ⟨0⟩
+c8614638e	✅ Вышел⟨0⟩
+588b8a501	и запись удалена
+4dd5e9778	Проверяю…
+f127b4d7a	🧹 Проверяю чатов: ⟨0⟩, это может занять время…
+c04373159	Проверка устарела, проверьте снова.
+f3c33c83f	🔙 Назад к проверке
+1a3a3e54d	удалить записи
+84c117afe	выйти и удалить записи
+1f67427da	⚠️ ⟨0⟩: <b>⟨1⟩</b> чатов — ⟨2⟩? Это нельзя отменить.
+eb3f9ab14	✅ Да
+33889c985	Обработка…
+5ac06101c	✅ Очищено чатов: ⟨0⟩⟨1⟩
+73500e336	Только для владельца основного бота.
+6a8179ecc	Список заблокированных доступен только владельцу основного бота.
+7ec9c6536	🚫 <b>Заблокированные</b>
+2f8268ac0	Никто не заблокирован.
+13f3c860d	📊 <b>Статистика бота</b>
+25fdf74b3	├ Всего записей сообщений: ⟨0⟩
+31d1735c8	└ Всего банов: ⟨0⟩
+511d1c70c	Использование: /save <название> <текст>  (или ответом на сообщение: /save <название>)
+b9050868c	Содержание заметки не может быть пустым.
+fe73e61b7	✅ Заметка сохранена: #⟨0⟩
+e2c814129	Использование: /get <название>
+6d1ba3c3a	Такой заметки нет. Список: /notes.
+fdb9a02af	Сохранённых заметок нет. Добавить: /save.
+da2bf5ed4	📝 <b>Заметки</b>
+755923919	Чтобы посмотреть, напишите в группе #название.
+80841e69d	Использование: /clear <название>
+41afe3456	✅ Заметка удалена.
+bd44e9b93	Такой заметки нет.
+c74724c97	🔗 Блок ссылок
+a6085267b	🧩 Капча
+a2e8d7dd3	↪️ Блок пересылок
+65984a6d2	🚨 Защита от рейдов
+64de715c0	🐣 Ограничение новичков (60 мин)
+da5934c57	🔤 Фильтр слов
+90879408f	🟢 Мягкий
+b042dc5d1	🟡 Обычный
+79b39bda7	🔴 Строгий
+58c29a09a	⚡ <b>Быстрая настройка</b> — ⟨0⟩
+bf650f464	<b>1/3</b> Выберите пресет защиты. Каждую защиту можно изменить потом.
+51a1926be	🟢 <b>Мягкий</b>: ссылки + флуд
+14630f04b	🟡 <b>Обычный</b>: + повторяющийся спам, капча, неприемлемые медиа
+b89411ab4	🔴 <b>Строгий</b>: + ограничение новичков, блок пересылок, защита от рейдов
+ce91c6e00	⚙️ Выберу сам
+e45f19110	✖️ Пропустить пока
+d6c79520c	Стандартное
+e62d3857f	Свой текст
+3c5a1bd73	<b>2/3</b> Отправлять приветствие новичкам?
+4a80c8576	Сейчас: <b>⟨0⟩</b>
+f4b2ad895	🚫 Выкл
+b8723d469	👋 Стандартное
+5566ef1f3	✏️ Напишу свой текст
+0a255f736	<b>3/3</b> Какие защиты включить? Нажимайте, чтобы включить/выключить.
+b229f24f3	➡️ Продолжить
+39c7bad60	стандартный текст
+05c1aeb32	свой текст
+d405d7c75	<b>Итог</b>
+5618672c1	👋 Приветствие: ⟨0⟩
+f2adce74f	Нажмите «Применить», чтобы сохранить. Всё можно изменить позже через /settings.
+77676a86d	✅ Применить
+eebb82b20	🛡 Изменить защиту
+2e80a5fce	Эта группа не зарегистрирована. Сначала сделайте бота админом.
+762cfa3fa	⚡ Быстрая настройка проходит в личке с ботом:
+32f93f6ae	⚡ Открыть настройку
+ab8bc5e3f	Сначала выберите группу в 🛡 Мои группы, затем напишите /setup.
+008c8e774	Настройка пропущена. Открыть её можно в любой момент командой /setup.
+6f6bec44f	✅ Настройки сохранены
+5dc655d64	✅ <b>Настройка завершена!</b> — ⟨0⟩
+46d73ff37	Подробные настройки: /settings · Автоответы: /filter в группе
+d9a9eba4a	⚡ Быстрая настройка применена | ⟨0⟩
+161bbf828	🧩 <b>Как пользоваться фильтрами</b>
+8344bd8fb	• Ответом на сообщение: <code>/filter Здравствуйте</code> (триггер — сообщение, на которое вы ответили)
+7e201996f	• Без ответа: <code>/filter привет Здравствуйте</code>
+cf1db6a05	• Несколько слов: <code>/filter "спокойной ночи" И вам спокойной ночи!</code>
+812fb6d89	• Если встречается внутри сообщения: <code>/filter *привет* Привет!</code>
+206f91a6d	• Ответ стикером/фото/GIF: ответьте на медиа → <code>/filter привет</code>
+b0b395569	• Кнопки: под ответом, по одной в строке <code>Канал - https://t.me/channel</code>
+380f07344	Переменные: <code>{user}</code> <code>{first}</code> <code>{group}</code> · Форматирование (жирный, ссылки…) сохраняется
+528d066d4	Список: /filters · Удалить: /stop привет · Удалить все: /stopall
+7315f262e	⚠️ В группе может быть не больше ⟨0⟩ фильтров. Удалите старые командой /stop.
+cf56cd5da	когда встречается в сообщении
+0272debab	когда его пишут
+3045102b7	✅ Фильтр ⟨0⟩: <b>⟨1⟩</b> — отвечу, ⟨2⟩.
+67c264f1a	добавлен
+c64b0c3ca	🧩 Фильтр добавлен: ⟨0⟩ | ⟨1⟩
+830911851	В этой группе нет фильтров. Добавить: /filter
+32a5d5ddb	🧩 <b>Фильтры</b> (⟨0⟩)
+3b8b66dd5	Удалить: /stop &lt;триггер&gt;
+8b3a30608	Использование: /stop <триггер>
+f2ba0c77b	✅ Фильтр удалён.
+77a5db13d	Такого фильтра нет. Проверьте список: /filters.
+b7301e99a	В этой группе нет фильтров.
+bd0505102	⚠️ Удалить все <b>⟨0⟩</b> фильтров в этой группе?
+8d8252e68	🗑 Да, удалить все
+9b6fcea87	↩️ Отмена
+272826aad	Отменено.
+cf9d69e94	🗑 Удалено фильтров: ⟨0⟩.
+13c07c249	🧹 Все фильтры удалены (⟨0⟩) | ⟨1⟩
+0451d6399	🏷 Название бренда
+93077ebd5	Напишите имя, которое ваш бот будет показывать в сообщениях (например, Alpha Guard).
+efbbbb435	👋 Приветственный текст
+4e2fd1f48	Напишите приветственный текст, который увидят после /start.
+e840e51a6	🔗 Ссылка поддержки
+2236aa076	Напишите ссылку на группу/канал поддержки (https://t.me/...). Убрать: -
+74af46bea	❓ Заголовок помощи
+ce0e0d6dc	Напишите заголовок меню помощи.
+07075bae9	Пользователь
+8c59b527c	🤖 <b>Одобрение клона бота</b> #⟨0⟩
+673f5ba81	👤 Кто хочет открыть бота: ⟨0⟩ — ID: <code>⟨1⟩</code>
+286285872	🔑 Токен бота: <code>⟨0⟩</code>
+140e8742e	🏷 Имя бота: ⟨0⟩ (@⟨1⟩)
+bbde0b439	Токен недействителен или отозван.
+2f1be69b6	Токен принадлежит другому боту.
+b8261ca98	⚠️ Ваш клон @⟨0⟩ остановлен: ⟨1⟩
+5b74bc345	Получите новый токен у BotFather и перезапустите через <b>Сменить токен</b> в меню 🤖 Клон.
+15f0441be	недействительный токен (⟨0⟩)
+c079ca840	⏳ <b>@⟨0⟩</b> ждёт одобрения владельца бота. Запустится после одобрения.
+aa2e8a82e	🤖 <b>Клон бота</b>
+f3fc6979c	Откройте бота защиты со своим именем, работающего на движке ULUS.
+4fbf35472	1) Создайте бота командой /newbot в @BotFather
+632cbf17b	2) Отправьте полученный токен кнопкой ниже
+883193ad7	3) Когда владелец бота одобрит, ваш бот начнёт работать⟨0⟩
+3a5be4fd4	🔑 Отправить токен
+e76ac71f1	🟢 Работает
+f8a7fde2a	⚠️ Неверный токен
+b535c1e0c	🤖 <b>Ваш клон бота</b>: @⟨0⟩
+0bc0356ba	Статус: ⟨0⟩ · Групп/каналов: ⟨1⟩
+47500a892	🏷 Бренд: <b>⟨0⟩</b>
+ca0fe8e9a	🔗 Поддержка: ⟨0⟩
+b07ee01ba	❓ Заголовок помощи: ⟨0⟩
+8e9727f2e	👋 Приветствие: ⟨0⟩⟨1⟩
+de54dae36	стандартное
+53f82bc49	⏸ Остановить
+b8abb05fb	▶️ Запустить
+60446c88d	↩️ Отозвать заявку
+ded7cc646	🔑 Сменить токен
+d3fb29907	🗑 Удалить клон
+367b6aa51	Действия с клоном выполняются в личке с ботом.
+a51f7d30f	Эта заявка уже обработана.
+c862658b2	Заявка из старой версии; пользователь должен отправить токен через /clone.
+a102e834e	🤖 Система клонов обновлена: напишите /clone и отправьте токен своего бота; бот запустится после одобрения владельцем.
+982a0150c	Не удалось запустить: ⟨0⟩
+447501409	⚠️ Не удалось запустить: ⟨0⟩
+64fbe849e	⚠️ Ваш клон бота не удалось запустить: ⟨0⟩
+03718599d	Новый токен можно отправить через /clone.
+ba7f6e886	✅ Одобрено, бот запущен
+705bd8131	❌ Отклонено
+744d07117	✅ <b>Ваш клон бота одобрен и запущен!</b> @⟨0⟩
+90edeb341	Имя, приветствие и ссылка поддержки: /clone
+172a66fda	❌ Ваша заявка на клон @⟨0⟩ отклонена.
+dffc58eb3	Разрешение больше не нужно: отправьте токен, бот запустится после одобрения владельцем.
+7269890c3	Это может сделать только владелец бота.
+741c29704	У вас нет ожидающей заявки.
+a353b8903	↩️ Пользователь отозвал заявку
+cb7da55c2	↩️ Заявка отозвана
+b30c05510	🔑 Напишите токен бота, полученный у @BotFather (например, <code>123456789:ABC...</code>).
+0adaad0bb	Отмена: cancel
+a54c0e304	Это не ваш клон.
+8f8af330e	Неверно.
+6a47f34ed	Этот клон удалён.
+21d148b57	🗑 Удалить клон @⟨0⟩? Бот остановится, настройки в группах сохранятся.
+e53f197f7	🗑 Да, удалить
+cb1a5e233	🗑 Ваш клон бота @⟨0⟩ удалён владельцем бота.
+19e55244e	Ссылка должна начинаться с https://t.me/. Напишите снова или cancel.
+6e97fcc27	✅ ⟨0⟩ обновлено.
+feae94615	❌ Это не похоже на токен бота. Отправьте полный токен из @BotFather.
+19769e756	❌ Это токен основного бота.
+d305390e4	❌ Неверный токен. Скопируйте правильный токен из @BotFather.
+82a945d00	❌ Этот бот уже чей-то клон.
+d190f37f5	❌ На этого бота уже есть чужая ожидающая заявка.
+fa9063dd4	❌ Не удалось запустить бота: ⟨0⟩
+8ffa38acb	✅ <b>Ваш клон бота готов!</b> @⟨0⟩
+9b90f4091	Добавить в группу: https://t.me/⟨0⟩?startgroup=ulus&admin=⟨1⟩
+34ed30a8e	↩️ Вместо неё отправлена новая заявка
+98545fdcd	✅ Одобрить
+b3bf17908	📨 Ваша заявка на <b>@⟨0⟩</b> отправлена владельцу бота.
+988ee3c22	После одобрения ваш бот запустится, и я сообщу вам.
+eb51d0e12	Этот бот уже чей-то клон.
+dfe2324b4	⟨0⟩ @⟨1⟩ — владелец <code>⟨2⟩</code>
+1cd8c4513	⏳ @⟨0⟩ — запросил <code>⟨1⟩</code>
+92021a063	🤖 <b>Клоны ботов</b> (⟨0⟩) · Ждут одобрения: ⟨1⟩
+21bb22c3f	Клонов пока нет.
+32f6170ef	<b>Ждут одобрения</b>
+f666e1d93	🗄 Резервная копия базы · ⟨0⟩ МБ (в архиве ⟨1⟩ МБ)
+9cfd9973e	Для восстановления положите .db-файл из архива в папку бота под именем bot_data.db.
+391c8e6d0	🗄 Копия сделана, но не помещается в Telegram (⟨0⟩ МБ): ⟨1⟩
+c3fcc95df	🗄 Делаю резервную копию...
+103ec5f85	Чат: ⟨0⟩
+0f97d9633	⚠️ Ошибка бота
+15781d4a0	⚠️ Эта кнопка устарела или недействительна. Откройте меню снова.
+043246756	⚠️ Что-то пошло не так, действие не выполнено. Попробуйте ещё раз.
+4e9b13c4d	⛔ Эту команду могут использовать только админы.
+af7654ae4	⏳ Список админов только что обновлён. Попробуйте через ⟨0⟩ сек.
+7117a9ab8	⚠️ Не удалось получить список админов. Бот админ в этой группе?
+48b81ffc1	🔄 <b>Список админов обновлён</b> — админов: ⟨0⟩
+10701ad0a	➕ Выдан ранг: ⟨0⟩
+7eed3b278	➖ Ранг снят (больше не админ): ⟨0⟩
+3ffb1dffa	Записи уже актуальны.
+be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
+2a8ec5530	🟢 ULUS запущен
+82459fdce	База данных: <code>⟨0⟩</code> (⟨1⟩ КБ)
+d2e59a824	Зарегистрировано групп/каналов: <b>⟨0⟩</b>
+6c20c0dd0	⚠️ База данных открылась пустой и была восстановлена из последней копии: <code>⟨0⟩</code>
+0e4276ce2	⚠️ Нет зарегистрированных чатов. Если это число падает при перезапуске бота, возможно, файл базы удалён или бот запущен из другой папки.
+3831f1221	Не удалось связаться с сервером
+ca576aa9b	Ошибка ⟨0⟩
+44d8a56f0	Сохранить (⟨0⟩)
+8c5f53f0b	🖼 ⟨0⟩ прикреплено — отметьте, чтобы убрать
+6050fb2fa	Обязательный канал: ⟨0⟩
+2101bb05d	Удалить ⟨0⟩?
+210266e99	Вкл/выкл
+ac3d94f38	Сообщения (7 дней)
+251aa63e3	Активные люди
+7782d329c	Вступили (7 дней)
+f515fefde	Предупреждены
+b32121bc6	Забанены
+4136a9068	📋 Лог-канал: ⟨0⟩
+1f589ad54	не задан (используйте /setlog в боте)
+91e55d41e	🌙 Ночной режим
+5a572078e	· активен сейчас
+db433084f	· вкл
+841c11292	В эти часы выбранные права отключаются, а после — восстанавливаются (UTC+3).
+587308129	Начало
+2a2a44bc3	Конец
+e07763331	Отключить:
+fb5b6de88	Сохранить ночной режим
+626b1b386	📝 Заметки (⟨0⟩)
+9ba887ab0	Заметок пока нет. Если написать в группе #название, бот отправит заметку.
+0ebe5615b	Название заметки (например, rules)
+83fff7c73	Содержание заметки (форматирование: <b>жирный</b>, кнопки: Текст - https://ссылка)
+0c4734df9	🧩 Фильтры / автоответы (⟨0⟩/⟨1⟩)
+40d6aee5f	💬 содержит: ⟨0⟩
+25ea7b948	Фильтров пока нет.
+8e0bb1fb8	Триггер (совпадение внутри сообщения: *слово*)
+db212635d	Ответ (переменные {user} {first} {group}, строки кнопок)
+75a77232d	➕ Добавить фильтр
+ed3622d45	Для ответа с медиа (стикер/фото) ответьте на медиа в группе командой /filter.
+aa7a25249	⏰ Сообщения по расписанию (⟨0⟩)
+3eb72af09	Каждые ⟨0⟩ · следующее: ⟨1⟩
+240088248	Вкл/выкл
+f479b96fd	Это сообщение по расписанию
+158f37bff	Сообщений по расписанию пока нет.
+38f7fb835	Сообщение (поддерживаются строки кнопок и случайные варианты через %%%)
+67866ebd3	Интервал
+039052532	➕ Добавить сообщение по расписанию
+ec1ffce3d	🚫 Заблокированные медиа (⟨0⟩)
+39590ef60	Эту блокировку
+35fb023cf	Чтобы добавить, ответьте на медиа в группе командой /blockmedia, или /blockpack для стикерпака.
+2de76a779	👮 Администрация (⟨0⟩)
+bf3bc5b16	Ранги выдаются/снимаются командами /admin, /senioradmin, /cofounder в группе; личные права — /perms в боте.
+3a5e96d47	Загрузка…
+7419f16f9	✅ Сохранено
+69efe9b3e	Изменений нет
+4c12da56f	Группы, которыми вы управляете
+b57672cb0	Вы не управляете ни одной группой
+03396c6dd	Не найдено групп, где бот админ, а вы в администрации.
+274139b9d	Отменить несохранённые изменения?
+67b14047c	Кнопки: по одной в строке  Текст - https://ссылка  (рядом: &&) · Правила - rules · Инфо - popup:текст · Переменные: {user} {first} {group} {count} · Случайное сообщение: строка %%% между ними · Для жирного/курсива используйте теги <b> <i>. Медиа добавляйте через бота командой /setwelcome.
 '''
 
 _i18n_load()
