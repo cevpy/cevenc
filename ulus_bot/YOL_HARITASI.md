@@ -86,6 +86,22 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
 - 🛠 Bakım modu: `/bakim 30|ac|kapat [-duyur]`
 - 💬 Destek hattı: özelden gelen mesaj sahibine, yanıt kullanıcıya; `/destek ac|kapat`
 
+## Admin denetimi ✅ (tamamlandı)
+- ✏️ Geç düzenleme koruması kapsamı: üyeler / +admin / +üst admin / kurucu hariç herkes (sadece kurucu değiştirir)
+- 📋 Günlük admin özeti (`/denetim`): kim kaç ban, susturma, uyarı, silme yaptı
+- 🚨 Admin işlem sınırı: 1 saatte sınırı aşan yetkilinin yetkileri askıya alınır, banları tek tuşla geri alınır
+- 🗑 `/del` ve `/purge` ile silinen mesajların log kanalına kopyası (Telegram elle silmeleri botlara bildirmez)
+- 🕓 `/gecmis`: mesaj düzenleme geçmişi
+
+## Çok dil ✅ (tamamlandı)
+- Ana dil Türkçe; `/start` altında İngilizce kısa açıklama ve `/setlang` ipucu
+- 15 dil: English, Русский, Українська, Azərbaycan, Oʻzbek, Қазақ, العربية, فارسی, Español, Português,
+  Indonesia, Deutsch, Français, Italiano, हिन्दी
+- Dil seçimi: özelde kişiye, grupta gruba (`/setlang`, ayar paneli, web panel); log kanalı bağlı grubun dilinde
+- Komut menüsü Telegram uygulamasının diline göre; İngilizce komut adları (Türkçe adlar da çalışır)
+- Yöneticilerin yazdığı içerik (hoş geldin, kurallar, notlar, filtreler) çevrilmez
+- Katalogda olmayan satır İngilizceye düşer
+
 ## Önerildi, şimdilik seçilmedi
 - Davet yarışması (haftalık/aylık davet sıralaması)
 - Hesap güven puanı (hesap yaşı, profil fotoğrafı, biyografideki link, premium)
