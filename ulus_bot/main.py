@@ -296,19 +296,32 @@ def _i18n_load():
 def available_langs() -> dict:
     return {k: v for k, v in LANG_LABELS.items() if k == DEFAULT_LANG or k in _I18N_TR}
 
+# Değişken yeri bir HTML öğesini ortadan bölemez (isim boşluk içerse de <a …>Ali Veli</a> tek parça kalır)
+_PH_UNIT = (r'(?:<a\b[^>]*>.*?</a>|<b>.*?</b>|<i>.*?</i>|<u>.*?</u>|<s>.*?</s>|<code>.*?</code>'
+            r'|<tg-spoiler>.*?</tg-spoiler>|<[^>]*>|[^<])')
+_TAG_PAIRS = (('<a ', '</a>'), ('<b>', '</b>'), ('<i>', '</i>'), ('<u>', '</u>'), ('<s>', '</s>'), ('<code>', '</code>'),
+              ('<blockquote', '</blockquote>'), ('<tg-spoiler>', '</tg-spoiler>'), ('<pre>', '</pre>'))
+_TAGS = re.compile(r'<[^>]+>')
+
 def _i18n_index():
-    """Şablonlardan tam eşleşme sözlüğü ve kalıp (regex) kovaları kurar. HTML kaçışlı hâller de eklenir."""
+    """Şablonlardan tam eşleşme sözlüğü ve kalıp (regex) kovaları kurar. HTML kaçışlı ve etiketsiz hâller de eklenir."""
     if _I18N_IDX:
         return _I18N_IDX
     exact, buckets, wild = {}, {}, []
     for k, src in _I18N_SRC.items():
-        variants = {(src, False)}
+        variants = [(src, None)]
         esc = html.escape(src, quote=False)
         if esc != src:
-            variants.add((esc, True))
-        for text, escaped in variants:
+            variants.append((esc, 'esc'))
+        escq = html.escape(src)
+        if escq != esc:
+            variants.append((escq, 'escq'))
+        plain = _TAGS.sub('', src).strip()
+        if plain != src and _LETTERS.search(_PH.sub('', plain)):
+            variants.append((plain, 'plain'))
+        for text, form in variants:
             if not _PH.search(text):
-                exact.setdefault(text, (k, escaped))
+                exact.setdefault(text, (k, form))
                 continue
             parts = _PH.split(text)          # [sabit, no, sabit, no, ...]
             rx, order = '', []
@@ -317,14 +330,14 @@ def _i18n_index():
                     rx += re.escape(p)
                 else:
                     order.append(int(p))
-                    rx += '(.*?)' if i < len(parts) - 2 or parts[-1] else '(.*)'
+                    rx += f'({_PH_UNIT}*?)' if i < len(parts) - 2 or parts[-1] else f'({_PH_UNIT}*)'
             static = ''.join(parts[0::2])
-            entry = (re.compile(rx, re.S), k, escaped, order, len(static))
+            entry = (re.compile(rx, re.S), k, form, order, len(static))
             if parts[0][:3].strip() and len(parts[0]) >= 3:
                 buckets.setdefault(('p', parts[0][:3]), []).append(entry)
             elif len(parts[-1]) >= 3 and parts[-1][-3:].strip():
                 buckets.setdefault(('s', parts[-1][-3:]), []).append(entry)
-            elif re.search(r'[^\W\d_]{2,}', static):
+            elif _LETTERS.search(static):
                 wild.append(entry)
     for v in buckets.values():
         v.sort(key=lambda e: -e[4])
@@ -332,17 +345,33 @@ def _i18n_index():
     _I18N_IDX.update(exact=exact, buckets=buckets, wild=wild)
     return _I18N_IDX
 
-def _tr_dst(lang: str, k: str, escaped: bool) -> str | None:
+def _tr_dst(lang: str, k: str, form: str | None) -> str | None:
     t = _I18N_TR.get(lang, {}).get(k)
+    if t is None and lang != 'en':
+        t = _I18N_TR.get('en', {}).get(k)  # bu dilde henüz çevrilmemiş satır: Türkçe yerine İngilizcesi
     if t is None:
         return None
-    return html.escape(t, quote=False) if escaped else t
+    if form == 'esc':
+        return html.escape(t, quote=False)
+    if form == 'escq':
+        return html.escape(t)
+    if form == 'plain':
+        return _TAGS.sub('', t).strip()
+    return t
+
+def _balanced(v: str) -> bool:
+    if '<' not in v:
+        return True
+    return all(v.count(o) == v.count(c) for o, c in _TAG_PAIRS)
 
 _DECOR_WRAP = re.compile(r'^((?:<(?:b|i|u|s|code|tg-spoiler|blockquote(?: expandable)?)>)+)(.*?)'
                          r'((?:</(?:b|i|u|s|code|tg-spoiler|blockquote)>)*)$', re.S)
 _DECOR_CLOSE = re.compile(r'^(.*?)((?:</(?:b|i|u|s|code|tg-spoiler|blockquote)>)+)$', re.S)
 _DECOR_LEAD = re.compile(r'^([^\w<&{(\[/@#"\'«]+)(.+)$', re.S)
-_SEPS = (' · ', ' | ', ' — ', ' – ', ': ')
+_DECOR_TRAIL = re.compile(r'^(.*?[^\s])(\s*[^\w\s<>&;()\[\]{}"\'«»%/@#.,!?…+\-]+)$', re.S)
+_DECOR_MENTION = re.compile(r'^(<a\b[^>]*>.*?</a>[\s,:]*)(.+)$', re.S)
+_DECOR_PAREN = re.compile(r'^(.*?)(\s*\()([^()]+)(\)[.!]?)$', re.S)
+_SEPS = (' · ', ' | ', ' — ', ' – ', ': ', ' → ')
 _LETTERS = re.compile(r'[^\W\d_]{2,}')
 
 def _tr_core(s: str, lang: str, depth: int) -> str | None:
@@ -351,12 +380,14 @@ def _tr_core(s: str, lang: str, depth: int) -> str | None:
     hit = idx['exact'].get(s)
     if hit:
         return _tr_dst(lang, *hit)
+    if len(s) > 1500:
+        return None
     cands = idx['buckets'].get(('p', s[:3]), []) + idx['buckets'].get(('s', s[-3:]), []) + idx['wild']
-    for rx, k, escaped, order, _ in cands:
+    for rx, k, form, order, _ in cands:
         m = rx.fullmatch(s)
-        if not m:
+        if not m or not all(_balanced(g) for g in m.groups()):
             continue
-        dst = _tr_dst(lang, k, escaped)
+        dst = _tr_dst(lang, k, form)
         if dst is None:
             return None
         vals = {}
@@ -370,7 +401,7 @@ def _tr_value(v: str, lang: str, depth: int) -> str:
     if depth > 3 or not v or not _LETTERS.search(v) or len(v) > 600:
         return v
     s = v.strip()
-    t = _tr_core(s, lang, depth) or _tr_decor(s, lang, depth, seps=False)
+    t = _tr_any(s, lang, depth)
     if t is None and ', ' in s:
         parts = s.split(', ')
         tp = [(_tr_core(p.strip(), lang, depth) or p) for p in parts]
@@ -379,33 +410,128 @@ def _tr_value(v: str, lang: str, depth: int) -> str:
         return v
     return v[:len(v) - len(v.lstrip())] + t + v[len(v.rstrip()):]
 
-def _tr_decor(s: str, lang: str, depth: int, seps: bool = True) -> str | None:
-    """Süslemeleri (kalın/alıntı etiketleri, baştaki emoji/madde işaretleri) ayırıp tekrar dener; ayraçlardan böler."""
+_WORDS = re.compile(r'[^\W\d_]{2,}')
+
+def _residue(out: str, src: str) -> int:
+    """Çeviride kaynaktan aynen kalan kelime sayısı (iki adaydan iyisini seçmek için; isimler ikisinde de aynıdır)."""
+    sw = set(_WORDS.findall(_TAGS.sub(' ', src)))
+    return sum(1 for w in _WORDS.findall(_TAGS.sub(' ', out)) if w in sw)
+
+def _tr_any(s: str, lang: str, depth: int, seps: tuple = _SEPS, level: int = 0) -> str | None:
+    """Kalıp eşleşmesi ile süs/ayraç ayrıştırmasından daha çok kelimeyi çevireni seçer
+    ('Koruma susturması: 60 dk' → 'Koruma ⟨0⟩' kalıbı yerine 'Koruma susturması' + '60 dk')."""
+    t = _tr_core(s, lang, depth)
+    if t is not None and not _residue(t, s):
+        return t
+    alt = _tr_decor(s, lang, depth, seps, level)
+    if t is None or (alt is not None and _residue(alt, s) < _residue(t, s)):
+        return alt
+    return t
+
+def _lead_splits(prefix: str):
+    """'❌ 🚩 ' → ['❌ ', '❌ 🚩 '] (önce kısa önek: katalogdaki satır emojiyle başlayabilir)"""
+    cuts = [i + 1 for i, ch in enumerate(prefix) if ch.isspace() and i + 1 < len(prefix)]
+    return [prefix[:i] for i in cuts] + [prefix]
+
+def _tr_decor(s: str, lang: str, depth: int, seps: tuple = _SEPS, level: int = 0) -> str | None:
+    """Süslemeleri (kalın/alıntı etiketleri, baştaki/sondaki emoji ve madde işaretleri, baştaki @bahsetme, sondaki
+    parantez) ayırıp tekrar dener; ayraçlardan (· | — : →) böler. Adaylardan en çok kelimeyi çevireni seçilir."""
+    if level > 6:
+        return None
+    best = [None, None]
+
+    def offer(t):
+        if t is None:
+            return False
+        r = _residue(t, s)
+        if best[0] is None or r < best[1]:
+            best[0], best[1] = t, r
+        return r == 0
+
+    sub = lambda x, sp=seps: _tr_any(x, lang, depth, sp, level + 1)
     m = _DECOR_WRAP.match(s)
     if m and m.group(2).strip():
-        t = _tr_core(m.group(2).strip(), lang, depth) or _tr_decor(m.group(2).strip(), lang, depth, seps)
-        if t is not None:
-            return m.group(1) + t + m.group(3)
+        t = sub(m.group(2).strip())
+        if t is not None and offer(m.group(1) + t + m.group(3)):
+            return best[0]
     m = _DECOR_CLOSE.match(s)
     if m and m.group(1).strip():
-        t = _tr_core(m.group(1).strip(), lang, depth) or _tr_decor(m.group(1).strip(), lang, depth, seps)
-        if t is not None:
-            return m.group(1)[:len(m.group(1)) - len(m.group(1).lstrip())] + t + m.group(2)
+        t = sub(m.group(1).strip())
+        if t is not None and offer(m.group(1)[:len(m.group(1)) - len(m.group(1).lstrip())] + t + m.group(2)):
+            return best[0]
+    m = _DECOR_MENTION.match(s)
+    if m and _LETTERS.search(m.group(2)):
+        t = sub(m.group(2))
+        if t is not None and offer(m.group(1) + t):
+            return best[0]
     m = _DECOR_LEAD.match(s)
     if m and _LETTERS.search(m.group(2)):
-        rest = m.group(2)
-        t = _tr_core(rest, lang, depth) or (_tr_decor(rest, lang, depth, seps) if rest != s else None)
-        if t is not None:
-            return m.group(1) + t
-    if seps:
-        for sep in _SEPS:
-            if sep in s:
-                parts = s.split(sep)
-                out = [(_tr_core(p.strip(), lang, depth) or _tr_decor(p.strip(), lang, depth, False) or p.strip())
-                       if _LETTERS.search(p) else p.strip() for p in parts]
-                if out != [p.strip() for p in parts]:
-                    return sep.join(out)
-    return None
+        whole = m.group(1)
+        for pre in _lead_splits(whole):
+            rest = s[len(pre):]
+            if not rest.strip() or rest == s:
+                continue
+            t = _tr_core(rest, lang, depth) if pre != whole else sub(rest)
+            if t is not None and offer(pre + t):
+                return best[0]
+    m = _DECOR_TRAIL.match(s)
+    if m and _LETTERS.search(m.group(1)):
+        t = sub(m.group(1))
+        if t is not None and offer(t + m.group(2)):
+            return best[0]
+    m = _DECOR_PAREN.match(s)
+    if m and _LETTERS.search(m.group(3)):
+        head = sub(m.group(1)) if _LETTERS.search(m.group(1)) else None
+        inner = sub(m.group(3).strip(), _SEPS)
+        if (head is not None or inner is not None) and offer(
+                (head if head is not None else m.group(1)) + m.group(2) + (inner if inner is not None else m.group(3))
+                + m.group(4)):
+            return best[0]
+    for i, sep in enumerate(seps):
+        if sep in s:
+            parts = s.split(sep)
+            rest = seps[i + 1:]
+            out = [(sub(p.strip(), rest) or p.strip()) if _LETTERS.search(p) else p.strip() for p in parts]
+            if out != [p.strip() for p in parts] and offer(sep.join(out)):
+                return best[0]
+            break
+    return best[0]
+
+def _plural_slavic(n: int, forms: tuple) -> str:
+    """1 день · 2 дня · 5 дней"""
+    n = abs(n) % 100
+    if 11 <= n <= 14:
+        return forms[2]
+    n %= 10
+    return forms[0] if n == 1 else forms[1] if 2 <= n <= 4 else forms[2]
+
+_RU_FORMS = [('день', 'дня', 'дней'), ('час', 'часа', 'часов'), ('минута', 'минуты', 'минут'), ('мин', 'мин', 'мин'),
+             ('секунда', 'секунды', 'секунд'), ('сообщение', 'сообщения', 'сообщений'), ('участник', 'участника', 'участников'),
+             ('человек', 'человека', 'человек'), ('предупреждение', 'предупреждения', 'предупреждений'),
+             ('раз', 'раза', 'раз'), ('неделя', 'недели', 'недель'), ('месяц', 'месяца', 'месяцев'), ('год', 'года', 'лет'),
+             ('кнопка', 'кнопки', 'кнопок'), ('вариант', 'варианта', 'вариантов'), ('группа', 'группы', 'групп'),
+             ('канал', 'канала', 'каналов'), ('действие', 'действия', 'действий'), ('голос', 'голоса', 'голосов'),
+             ('победитель', 'победителя', 'победителей'), ('клик', 'клика', 'кликов'), ('ссылка', 'ссылки', 'ссылок')]
+_UK_FORMS = [('день', 'дні', 'днів'), ('година', 'години', 'годин'), ('хвилина', 'хвилини', 'хвилин'),
+             ('секунда', 'секунди', 'секунд'), ('повідомлення', 'повідомлення', 'повідомлень'),
+             ('учасник', 'учасники', 'учасників'), ('людина', 'людини', 'людей'),
+             ('попередження', 'попередження', 'попереджень'), ('раз', 'рази', 'разів'), ('тиждень', 'тижні', 'тижнів'),
+             ('місяць', 'місяці', 'місяців'), ('рік', 'роки', 'років'), ('кнопка', 'кнопки', 'кнопок'),
+             ('група', 'групи', 'груп'), ('канал', 'канали', 'каналів'), ('дія', 'дії', 'дій')]
+
+def _slavic_fixer(table):
+    by_word = {f: forms for forms in table for f in forms}
+    rx = re.compile(r'(?<![\d.,])(\d+) (' + '|'.join(sorted(by_word, key=len, reverse=True)) + r')\b')
+    return lambda t: rx.sub(lambda m: f"{m.group(1)} {_plural_slavic(int(m.group(1)), by_word[m.group(2)])}", t)
+
+_EN_ONE = re.compile(r'(?<![\d.,])\b1 (minute|hour|day|second|message|member|warning|time|week|month|year|channel|group|'
+                     r'user|button|option|link|action|admin|ban|mute|report|vote|winner|click|sticker|photo|video|file|'
+                     r'reply|word|note|filter|request|clone|chat|invite|join|entry)s\b')
+_POSTFIX = {
+    'en': lambda t: _EN_ONE.sub(r'1 \1', t).replace('1 people', '1 person').replace('1 entries', '1 entry'),
+    'ru': _slavic_fixer(_RU_FORMS),
+    'uk': _slavic_fixer(_UK_FORMS),
+}
 
 def tr_line(line: str, lang: str) -> str:
     if not line or lang not in _I18N_TR or not _LETTERS.search(line):
@@ -414,7 +540,9 @@ def tr_line(line: str, lang: str) -> str:
     if key in _tr_cache:
         return _tr_cache[key]
     s = line.strip()
-    t = _tr_core(s, lang, 0) or _tr_decor(s, lang, 0)
+    t = _tr_any(s, lang, 0)
+    if t is not None and lang in _POSTFIX:
+        t = _POSTFIX[lang](t)
     out = line if t is None else line[:len(line) - len(line.lstrip())] + t + line[len(line.rstrip()):]
     if len(_tr_cache) > 20000:
         _tr_cache.clear()
@@ -4754,8 +4882,8 @@ async def profil(update: Update, context):
                 by = mention_html(row['by_user_id'], row['by_username'] or str(row['by_user_id']))
             else:
                 by = "sistem"
-            sebep = f" - {html.escape(row['reason'])}" if row['reason'] else ""
-            msg += f"  {tarih} {html.escape(row['action'])} by {by}{sebep}\n"
+            sebep = f" · {html.escape(row['reason'])}" if row['reason'] else ""
+            msg += f"  {tarih} · {html.escape(row['action'])} · {by}{sebep}\n"
     else:
         msg += "\n\nHic moderasyon islemi yok."
 
@@ -6146,8 +6274,10 @@ _DY_TARGET_FLAGS = {
     '-kisiler': 'u', '-kişiler': 'u', '-kisi': 'u', '-kişi': 'u', '-kullanicilar': 'u', '-kullanıcılar': 'u',
     '-ozel': 'u', '-özel': 'u', '-gruplar': 'g', '-grup': 'g', '-kanallar': 'c', '-kanal': 'c',
     'all': 'all', '-all': 'all', '-hepsi': 'all', 'hepsi': 'all', '-herkes': 'all',
+    '-users': 'u', '-people': 'u', '-groups': 'g', '-channels': 'c',  # İngilizce
 }
-_DY_OPT_FLAGS = {'-test': 'test', '-sabitle': 'pin', '-pin': 'pin', '-sessiz': 'silent', '-anket': 'poll'}
+_DY_OPT_FLAGS = {'-test': 'test', '-sabitle': 'pin', '-pin': 'pin', '-sessiz': 'silent', '-anket': 'poll',
+                 '-silent': 'silent', '-poll': 'poll'}
 DUYURU_ACTIVE_DAYS = 7
 _DY_QUOTES = [('"', '"'), ('&quot;', '&quot;'), ('“', '”'), ('«', '»'), ("'", "'"), ('&#x27;', '&#x27;')]
 _DY_KIND_LABEL = {'g': "grup", 'c': "kanal", 'u': "kişi"}
@@ -6203,13 +6333,13 @@ def parse_duyuru(m) -> dict:
             targets |= {'g', 'c', 'u'} if v == 'all' else {v}
         elif w in _DY_OPT_FLAGS:
             opts.add(_DY_OPT_FLAGS[w])
-        elif w in ('-aktif', '-aktifler'):
+        elif w in ('-aktif', '-aktifler', '-active'):
             active = DUYURU_ACTIVE_DAYS
             if nxt and nxt.group(1).isdigit() and 1 <= int(nxt.group(1)) <= 365:
                 active = int(nxt.group(1))
                 i += tok.end() + nxt.end()
                 continue
-        elif w in ('-saat', '-zaman'):
+        elif w in ('-saat', '-zaman', '-time', '-at'):
             hm = re.fullmatch(r'(\d{1,2})[:.](\d{2})', nxt.group(1)) if nxt else None
             if not hm or int(hm.group(1)) > 23 or int(hm.group(2)) > 59:
                 err = "Saat şöyle yazılır: -saat 20:00"
@@ -6221,7 +6351,7 @@ def parse_duyuru(m) -> dict:
             at = when.timestamp()
             i += tok.end() + nxt.end()
             continue
-        elif w in ('-kaydet', '-sablon', '-şablon'):
+        elif w in ('-kaydet', '-sablon', '-şablon', '-save'):
             name = nxt.group(1).lstrip('#').lower() if nxt else ''
             if not re.fullmatch(r'\w{1,32}', name):
                 err = "Şablon adı şöyle yazılır: /duyuru -kaydet guncelleme \"mesaj\""
@@ -11087,6 +11217,8 @@ async def cmd_linkizin(update: Update, context):
     if not chat_id:
         return
     wl = channel['settings'].setdefault('link_whitelist', [])
+    if context.args and context.args[0].lower() in ('add', 'del', 'remove'):  # İngilizce
+        context.args[0] = {'add': 'ekle'}.get(context.args[0].lower(), 'sil')
     if len(context.args) < 2 or context.args[0].lower() not in ('ekle', 'sil'):
         await update.effective_message.reply_text(
             "🔗 Link muaf listesi:\n" + ("\n".join(f"• {d}" for d in wl) if wl else "(boş)") +
@@ -11407,6 +11539,11 @@ def fill_rich_vars(text: str, users=(), title: str | None = None, count=None) ->
         'uye_sayisi': esc(count if count is not None else '?'), 'üye_sayısı': esc(count if count is not None else '?'),
         'tarih': now.strftime('%d.%m.%Y'), 'saat': now.strftime('%H:%M'),
     }
+    # İngilizce adlar (diğer dillerdeki yardım metinleri bunları gösterir)
+    for en, trk in (('name', 'ad'), ('first', 'ad'), ('first_name', 'ad'), ('last', 'soyad'), ('last_name', 'soyad'),
+                    ('surname', 'soyad'), ('count', 'uye_sayisi'), ('members', 'uye_sayisi'), ('date', 'tarih'),
+                    ('time', 'saat'), ('title', 'grup')):
+        vals[en] = vals[trk]
     return re.sub(r'\{(\w+)\}', lambda m: vals.get(m.group(1).lower(), m.group(0)), text or '')
 
 def rich_action_id(chat_id: str, kind: str, value: str) -> int:
@@ -12431,7 +12568,7 @@ def _ago(sec: float) -> str:
     if t == "kısa süre":
         return "az önce"
     n, unit = t.split()
-    return f"{n} " + {'dakika': "dakikadır", 'saat': "saattir", 'gün': "gündür"}[unit]
+    return {'dakika': f"{n} dakikadır", 'saat': f"{n} saattir", 'gün': f"{n} gündür"}[unit]
 
 def afk_get(user_id: int):
     with get_db() as conn:
@@ -12918,11 +13055,11 @@ def parse_giveaway_args(text: str):
     for item in cond_part.split():
         k, _, v = item.partition('=')
         k = k.lower().replace('ü', 'u')
-        if k == 'kanal' and v:
+        if k in ('kanal', 'channel') and v:
             conds['kanal'] = v
-        elif k in ('mesaj', 'msg') and v.isdigit():
+        elif k in ('mesaj', 'msg', 'messages', 'msgs') and v.isdigit():
             conds['min_msgs'] = min(int(v), 100000)
-        elif k in ('gun', 'gn') and v.isdigit():
+        elif k in ('gun', 'gn', 'days', 'day') and v.isdigit():
             conds['min_days'] = min(int(v), 3650)
     return duration, winners, " ".join(tokens)[:200], conds
 
@@ -14621,7 +14758,7 @@ def _panel_list(kind: str, page: int):
                      ibtn(f"{page + 1}/{pages}", f"panel|ls|{kind}|{page}"),
                      ibtn("Sonraki ▶️", f"panel|ls|{kind}|{(page + 1) % pages}")])
     if not items:
-        text = f"{icon} Kayıtlı {name.lower()[:-3]} yok."
+        text = "📢 Kayıtlı kanal yok." if kind == 'c' else "👥 Kayıtlı grup yok."
     rows.append([ibtn("🔙 Geri", "panel|back")])
     return text, InlineKeyboardMarkup(rows)
 
@@ -16620,10 +16757,4471 @@ def web_request_cli(out_path: str):
     with open(out_path, 'w', encoding='utf-8') as f:
         json.dump({'status': st['status'], 'headers': st['headers'], 'body': base64.b64encode(data).decode()}, f)
 
+# ── Çeviri kataloğu bakımı: koddan metin çıkarma ──
+def i18n_id(template: str) -> str:
+    import hashlib
+    return hashlib.sha1(template.encode('utf-8')).hexdigest()[:9]
+
+def i18n_extract(src: str) -> list:
+    """Kaynak koddan kullanıcıya görünen Türkçe metin satırlarını şablon olarak çıkarır (⟨0⟩ = değişken yeri).
+    Kayıt (logger), SQL, sözlük anahtarı, karşılaştırma, callback verisi gibi iç metinler atlanır."""
+    import ast
+    tree = ast.parse(src)
+    parents = {}
+    for node in ast.walk(tree):
+        for ch in ast.iter_child_nodes(node):
+            parents[ch] = node
+    tr_chars = re.compile(r'[çğıöşüÇĞİÖŞÜ]')
+    emoji = re.compile(r'[\U0001F300-\U0001FAFF☀-➿⬀-⯿←-⇿]')
+    sql = re.compile(r'^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|PRAGMA|ALTER|WITH|DROP|BEGIN|REPLACE)\b|\bFROM\b.*\bWHERE\b'
+                     r'|\bVALUES\s*\(', re.S)
+    letters = re.compile(r'[A-Za-zçğıöşüÇĞİÖŞÜ]{2,}')
+    tr_words = re.compile(r'\b(saat|saattir|saniye|dakika|dk|sn|gün|hafta|haftalık|ay|yıl|kez|kere|adet|kişi|üye|mesaj|'
+                          r'tane|grup|kanal|uyarı|sil|yok|var|hepsi|kapalı|açık|sistem|ana|hiç|evet|hayır|bekleyen)\b')
+    skip_attr = {'execute', 'executemany', 'executescript', 'getenv', 'get', 'setdefault', 'pop', 'startswith', 'endswith',
+                 'strftime', 'split', 'rsplit', 'replace', 'compile', 'search', 'match', 'fullmatch', 'sub', 'findall',
+                 'finditer', 'index', 'count', 'encode', 'decode', 'lstrip', 'rstrip', 'strip', 'format', 'add_handler',
+                 'run_daily', 'run_repeating', 'run_once', 'getLogger', 'partition', 'rpartition', 'translate', 'loads'}
+    skip_fn = {'_env_path', 'print', 'getattr', 'setattr', 'hasattr', 'isinstance', 'Regex', 'CommandHandler',
+               'CallbackQueryHandler', 'kv_get', 'kv_set', 'open', 'sorted', 'int', 'float', 'i18n_id', 'ContextVar',
+               'compile', 'canon_cmd', 'SystemExit', 'RuntimeError', 'ValueError', 'Exception', 'basicConfig',
+               'Formatter', 'TypeError', 'KeyError', 'AttributeError', 'ExtBot', 'HTTPXRequest'}
+    ui_fn = {'ibtn', 'toggle_btn', 'InlineKeyboardButton', 'KeyboardButton', 'reply_text', 'send_message', 'answer',
+             'edit_message_text', 'edit_text', 'safe_send_message', 'notify_managers', 'send_log', '_f', 'BotCommand',
+             'fold', 'show', 'ForceReply', 'edit_message_caption', 'L', 'tr_text', 'tr_line', 'log_deleted', 'toast'}
+    docs, inner, skip_nodes = set(), set(), set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.body:
+            b = node.body[0]
+            if isinstance(b, ast.Expr) and isinstance(b.value, ast.Constant) and isinstance(b.value.value, str):
+                docs.add(b.value)
+        if isinstance(node, ast.Expr) and isinstance(node.value, (ast.Constant, ast.JoinedStr)):
+            docs.add(node.value)
+        if isinstance(node, ast.JoinedStr):
+            for v in node.values:
+                inner.add(v)
+                if isinstance(v, ast.FormattedValue) and v.format_spec is not None:
+                    inner |= set(ast.walk(v.format_spec))
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and (t.id in ('WEB_PAGE', 'TG_ERRORS', 'I18N_SRC',
+                                                                                      'LANG_LABELS', 'CMD_ALIASES',
+                                                                                      '_PH_UNIT', '_TAG_PAIRS')
+                                                                             or t.id.startswith('I18N_'))
+                                                for t in node.targets):
+            skip_nodes |= set(ast.walk(node))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in ('i18n_extract', 'i18n_check',
+                                                                                       '_ancestors_between'):
+            skip_nodes |= set(ast.walk(node))
+
+    def call_name(c):
+        f = c.func
+        if isinstance(f, ast.Attribute):
+            return f.attr, (f.value.id if isinstance(f.value, ast.Name) else None)
+        return (f.id, None) if isinstance(f, ast.Name) else (None, None)
+
+    def context(node):
+        child, p, ui = node, parents.get(node), False
+        for _ in range(14):
+            if p is None:
+                break
+            if isinstance(p, ast.Dict) and child in p.keys:
+                return None
+            if isinstance(p, ast.Subscript) and child is p.slice:
+                return None
+            if isinstance(p, ast.Compare):
+                return None
+            if isinstance(p, ast.Call):
+                name, base = call_name(p)
+                if base in ('logger', 're', 'os', 'json', 'conn', 'sys') or name in skip_fn:
+                    return None
+                if name in skip_attr and child in p.args:
+                    return None
+                if name == 'ibtn' and len(p.args) > 1 and child is p.args[1]:
+                    return None
+                if name == 'toggle_btn' and len(p.args) > 2 and child is p.args[2]:
+                    return None
+                if name == '_f' and child in p.args and p.args.index(child) in (0, 1, 3):
+                    return None
+                if name == 'BotCommand' and p.args and child is p.args[0]:
+                    return None
+                if name in ui_fn:
+                    ui = True
+            if isinstance(p, ast.keyword) and p.arg in ('callback_data', 'url', 'pattern', 'filename', 'parse_mode', 'name',
+                                                         'style', 'action', 'emoji_id', 'request_id', 'loc', 'ha', 'va',
+                                                         'textcoords', 'fontweight', 'color', 'format', 'level',
+                                                         'family', 'datefmt', 'mime_type', 'content_type'):
+                return None
+            child, p = p, parents.get(p)
+        return ui
+
+    def parts_of(node):
+        """BinOp(+) zinciri / f-string / sabit → [str | None(değişken)]"""
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if '{}' in node.value:  # .format() kalıbı: {} değişken yeridir
+                out = []
+                for i, piece in enumerate(node.value.split('{}')):
+                    if i:
+                        out.append(None)
+                    out.append(piece)
+                return out
+            return [node.value]
+        if isinstance(node, ast.JoinedStr):
+            out = []
+            for v in node.values:
+                out.append(v.value if isinstance(v, ast.Constant) else None)
+            return out
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            return parts_of(node.left) + parts_of(node.right)
+        return [None]
+
+    def is_str_chain(node):
+        if isinstance(node, (ast.JoinedStr,)) or (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            return True
+        return isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and (is_str_chain(node.left) or
+                                                                                 is_str_chain(node.right))
+    chain_members = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and is_str_chain(node):
+            for sub in ast.walk(node):
+                if sub is not node and (isinstance(sub, (ast.JoinedStr, ast.BinOp)) or
+                                        isinstance(sub, ast.Constant) and isinstance(sub.value, str)):
+                    if not any(isinstance(a, (ast.IfExp, ast.Call, ast.Subscript, ast.ListComp, ast.GeneratorExp, ast.BoolOp))
+                               for a in _ancestors_between(parents, sub, node)):
+                        chain_members.add(sub)
+
+    found = {}
+    for node in ast.walk(tree):
+        is_chain = isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add) and is_str_chain(node) \
+            and node not in chain_members
+        if not (is_chain or isinstance(node, ast.JoinedStr) or isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        if node in inner or node in docs or node in skip_nodes or node in chain_members:
+            continue
+        parts = parts_of(node)
+        tpl, n = '', 0
+        for p in parts:
+            if p is None:
+                tpl += f'⟨{n}⟩'
+                n += 1
+            else:
+                tpl += p
+        if not letters.search(tpl) or sql.search(tpl):
+            continue
+        ui = context(node)
+        if ui is None:
+            continue
+        for line in tpl.split('\n'):
+            s = line.strip()
+            static = re.sub(r'⟨\d+⟩', ' ', s)
+            if not letters.search(static):
+                continue
+            words = re.findall(r'[A-Za-zçğıöşüÇĞİÖŞÜ]+', static)
+            single_cap = len(words) == 1 and len(s) >= 2 and s[:1].isupper() and not s.isupper()
+            if not (tr_chars.search(static) or emoji.search(static) or ui or len(words) >= 2 or single_cap
+                    or tr_words.search(static)):
+                continue
+            if re.fullmatch(r'[\w./:%#-]+', s) and not tr_chars.search(s) and not ui and not single_cap \
+                    and not tr_words.fullmatch(s):
+                continue
+            seen = {}
+            s2 = re.sub(r'⟨\d+⟩', lambda m: f'⟨{seen.setdefault(m.group(0), len(seen))}⟩', s)
+            found.setdefault(s2, getattr(node, 'lineno', 0))
+    # web panel: L("…") ve RICH_HELP
+    m = re.search(r"WEB_PAGE = r'''(.*?)'''", src, re.S)
+    if m:
+        page = m.group(1)
+        keys = re.findall(r'L\("((?:[^"\\]|\\.)*)"', page)
+        rh = re.search(r'const RICH_HELP = "((?:[^"\\]|\\.)*)";', page)
+        for k in keys + ([rh.group(1)] if rh else []):
+            found.setdefault(k.strip(), 10 ** 9)
+    return [k for k, _ in sorted(found.items(), key=lambda kv: kv[1])]
+
+def _ancestors_between(parents: dict, node, top) -> list:
+    out, p = [], parents.get(node)
+    while p is not None and p is not top:
+        out.append(p)
+        p = parents.get(p)
+    return out
+
+def i18n_check():
+    """python main.py --i18n-check — koddaki çevrilmemiş/katalogda olmayan metinleri listeler."""
+    src = open(os.path.abspath(__file__), encoding='utf-8').read()
+    tpls = i18n_extract(src)
+    missing = [t for t in tpls if i18n_id(t) not in _I18N_SRC]
+    print(f"Koddaki metin satırı: {len(tpls)} · katalogda olmayan: {len(missing)}")
+    for lang, d in sorted(_I18N_TR.items()):
+        gaps = [t for t in tpls if i18n_id(t) in _I18N_SRC and i18n_id(t) not in d]
+        print(f"  {lang}: {len(d)} çeviri, eksik {len(gaps)}")
+    for t in missing[:200]:
+        print("  +", t)
+
 # ═══════════════════════════ ÇEVİRİ KATALOĞU ═══════════════════════════
 # I18N_SRC: kimlik<TAB>Türkçe şablon · I18N_<DİL>: kimlik<TAB>çeviri (⟨0⟩ ⟨1⟩ değişken yerleri, sırası değişebilir).
 # Yeni metin eklenince: python main.py --i18n-check (katalogda olmayan Türkçe satırları listeler).
 I18N_SRC = r'''
+f42221a83	ULUS Security Bot
+a9826a4de	⟨0⟩ Security Bot
+89c80575f	⚡ Main bot : @⟨0⟩
+b18ef8784	too long
+d86fae223	✅ Dil ayarlandı: ⟨0⟩
+972caaca5	🌍 <b>Dil / Language</b>
+0c1e30399	Dilini seç:
+fea7d950e	✅ Grubun dili: ⟨0⟩
+1b6f202bc	🌍 <b>Grubun dili / Group language</b>
+9ab6017a5	Şu an: ⟨0⟩
+9d13d74f6	Botun bu gruptaki dilini seç:
+448e35ffe	Yetkin yok!
+17665e8c1	🌍 Grubun dili: ⟨0⟩ | ⟨1⟩
+ef8a27237	🌍 <i>English: this bot protects Telegram groups and channels against spam, links, flood and raids. To use it in your language (English, Русский, العربية…) type /setlang</i>
+fe63fd010	INTEGER DEFAULT 0
+a2cb7ba33	INTEGER DEFAULT 10
+78271d84c	INTEGER DEFAULT 300
+fd9a1dbae	TEXT DEFAULT 'demote'
+d2ed41ddc	TEXT DEFAULT 'demote_ban'
+207e2a000	INTEGER DEFAULT 5
+ebc7b2954	TEXT DEFAULT '[]'
+1fda1fc79	INTEGER DEFAULT 1
+4c9e57207	👑 Kurucu
+bfa3235c4	🔱 Yardımcı Kurucu
+ef61a4d09	⭐ Üst Admin
+a5926dc01	🛡 Admin
+8d0d91abe	⚠️ Uyarı verme
+9a83dd2de	🗑 Mesaj silme
+d7d2f6eb2	🔇 Susturma
+4acd35f89	👢 Atma (kick)
+41605b650	🔨 Ban / ban kaldırma
+1a7979b5e	↩️ Uyarı geri alma
+5b4929b15	📌 Sabitleme
+6880a0676	🧹 Toplu silme / yavaş mod
+1b5d5b3d1	📩 Katılım isteği / itiraz
+6a285730c	📜 Kurallar / karşılama / notlar
+eab57b3ab	🚨 Acil kilit (açma)
+932bdd7e5	⚙️ Koruma ayarları
+6628cf302	👑 Rütbe verme / alma
+178f46a47	🧩 Filtre (otomatik yanıt) yönetimi
+5d856e480	🏷 Toplu etiketleme (/etiket)
+8c664bc3f	🔗 Davet linki
+5fc826495	🚫 Kısıtlama / ban
+52e1acc4f	🎙 Sesli sohbet
+c264fb5af	💬 Konu yönetimi
+5e74fa6f0	📖 Hikaye paylaşma
+1e9853465	✏️ Hikaye düzenleme
+f56347abf	🗑 Hikaye silme
+fc5b6f247	ℹ️ Grup bilgisi
+16f35c22f	⭐ Admin atama
+fce0709e2	❌ İşlem yapılamadı, lütfen tekrar dene.
+c1a2c3bf9	Bu işlemi kendine uygulayamazsın.
+58503ae82	Bu hesaba işlem uygulanamaz.
+c93d8e442	⛔ ⟨0⟩ senin rütbende veya üstünde; işlem yapamazsın.
+7c6c0a917	Bu kişi
+980a088c1	⛔ Yetkin yok! (⟨0⟩ ve üstü)
+f78cc4201	⛔ Bu komut için grupta gerçekten yönetici olmalısın.
+1a089160e	⛔ Bot bu grupta yönetici değil veya yetkileri yetersiz.
+6d4a7341c	<tg-emoji emoji-id="⟨0⟩">⟨1⟩</tg-emoji>
+4352d25d9	<blockquote expandable>⟨0⟩</blockquote>
+ec502d773	⟨0⟩ saat
+1d683512c	⟨0⟩ dakika
+e0250a8c0	⟨0⟩ saniye
+4f52d88ec	Merhaba {kullanıcı}, {kanal} grubuna hoş geldin!
+41006f31c	🙏 Teşekkürler! Bot eklendi: ⟨0⟩
+e89ec2f7d	Tip: ⟨0⟩
+484b4f591	Komutlar icin /help yaz.
+fbb8f4be4	Bot eklendi: ⟨0⟩ (⟨1⟩) | owner: ⟨2⟩
+417b3cc01	✅ Bot eklendi ve kaydedildi! Komutlar için /help, ayarlar için /settings.
+189f689b9	🌍 Language / Dil: /setlang
+e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> uyarı
+ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Uyarı: ⟨3⟩/⟨4⟩ | ⟨5⟩
+4c8ea4760	warn
+9e23d2151	geçici ban (⟨0⟩)
+953cd28f3	gruptan atıldı
+090d91568	📨 İtiraz için bota özelden /itiraz yazabilir.
+ddd70b55a	⟨0⟩ ⟨1⟩ ⟨2⟩ uyarıya ulaştı → <b>⟨3⟩</b> (⟨4⟩)⟨5⟩
+f05514a4b	🚫 ⟨0⟩ ⟨1⟩ | Sebep: ⟨2⟩ | ⟨3⟩
+33762701b	🗑 ⟨0⟩ → ⟨1⟩ mesajı silindi | ⟨2⟩
+e83ba4992	🔇 ⟨0⟩ ⟨1⟩ → ⟨2⟩ susturuldu
+4689a9495	👢 ⟨0⟩ ⟨1⟩ → gruptan atıldı
+24b70b24b	🚫 ⟨0⟩ ⟨1⟩ → banlandı
+f52bff073	flood_notice_⟨0⟩_⟨1⟩
+f881648dd	🗑 Mesaj silindi
+a1ce809b5	⚠️ Silindi + uyarıldı
+4d4d20ba3	🔇 Silindi + 1 saat susturuldu
+3a4a2408d	🚫 Silindi + banlandı
+184e9ea25	✅ Görmezden gelindi
+1cd1dbdf9	🗑 Sil
+d193c645a	⚠️ Uyar
+bb7ad37ac	🔇 Sustur 1s
+ebe01fecc	🚫 Banla
+e7e0e2df9	✅ Görmezden gel
+3397853de	Rapor, grupta bir mesaja yanıt verilerek gönderilir: /report [sebep]
+b61b50bf7	Raporlamak için bir mesaja yanıt vererek /report yaz.
+9cf259e34	Yetkililer raporlanamaz.
+c5bbdb405	Çok sık rapor gönderiyorsun, biraz bekle.
+bd7e0099e	Bu mesaj zaten raporlandı.
+896d1ca10	🚩 <b>Yeni rapor</b> #⟨0⟩
+cec4cf481	Grup: <b>⟨0⟩</b>
+c3a6b7566	Raporlayan: ⟨0⟩
+5083aeebb	Raporlanan: ⟨0⟩ (<code>⟨1⟩</code>)
+d2cdf97e4	⟨0⟩<blockquote expandable>⟨1⟩</blockquote>⟨2⟩
+9b4b6cd06	<a href="⟨0⟩">Mesaja git</a>
+679ec2d36	✅ ⟨0⟩, raporun yetkililere iletildi.
+008e3c181	⚠️ ⟨0⟩, rapor alındı ama şu an ulaşılabilir yetkili yok.
+ad6b780a2	Rapor bulunamadı.
+04f22133c	Bu rapor zaten işlendi: ⟨0⟩
+4f0282227	rapor
+94cea35e5	↩️ Uyarıyı geri al
+2446ce8e3	🔊 Susturmayı kaldır
+d3d996724	↩️ Uyarı geri alındı (⟨0⟩/⟨1⟩)
+2ffab4aa4	🔇 1 saat susturuldu
+969014784	🔊 Susturma kaldırıldı
+96524e022	🚫 Banlandı
+c1ef156c4	✅ Ban kaldırıldı
+7181ac4be	Geçersiz işlem.
+3461c44ea	Bu işlem için grupta yönetici olmalısın.
+74042fc88	Bot bu grupta yönetici değil veya yetkileri yetersiz.
+aec9fe5ec	Yetkililere uygulanamaz.
+14fea3d87	👋 Merhaba ⟨0⟩!
+b6ba013b6	Gruba yazabilmek için aşağıdaki soruyu cevaplamalısın.
+30a234e49	⏰ Süren: ⟨0⟩. Yanlış cevap veya süre aşımında gruptan atılırsın.
+5941a96e3	⏰ Captcha zaman aşımı → ID:⟨0⟩ atıldı | ⟨1⟩
+47de968f7	Hata.
+371e8fa90	Bu captcha sana ait değil!
+4b056df52	Captcha süresi dolmuş.
+16a67ec53	✅ Doğru!
+13e7c138f	✅ ⟨0⟩ doğrulandı!
+d8c5044b0	✅ Captcha geçti: ⟨0⟩ | ⟨1⟩
+d4d19c221	❌ Yanlış cevap!
+be0ff1965	❌ ⟨0⟩ yanlış cevap verdi ve atıldı.
+921ae23b1	❌ Captcha başarısız → ⟨0⟩ atıldı | ⟨1⟩
+a1d75b185	🗑 ⟨0⟩ — kanal kimliğiyle (⟨1⟩) gönderilen mesaj silindi | ⟨2⟩
+c537f5f16	🆕 ⟨0⟩, yeni üyeler ilk ⟨1⟩ dakika link/medya/forward gönderemez. (~⟨2⟩ dk kaldı)
+df471627f	engelli sticker paketi
+d3bfcdff9	engelli medya
+c82923d6d	tehlikeli dosya (⟨0⟩)
+c83f1da6c	uygunsuz içerik
+5fb084a5f	yapay zeka: ⟨0⟩
+51da96b93	uygunsuz içerik (⟨0⟩)
+c5baa0aed	Uygunsuz medya (⟨0⟩)
+acae614af	otomatik: art arda uygunsuz medya (saldırı şüphesi)
+f77a6df47	🚨 <b>Medya saldırısı</b> sezildi, grupta medya gönderimi kilitlendi.
+d6fc51018	imzasız gönderi
+93f2e53e1	🔞 <b>Kanalda uygunsuz medya silindi</b>
+a99d18293	Gönderen: ⟨0⟩
+d6c8546a4	Kanal: <code>⟨0⟩</code>
+cb902699f	Kanalda art arda uygunsuz medya (kanalı kapattırma saldırısı şüphesi)
+ade12807b	🔒 <b>Medya kilidi</b>: ⟨0⟩ boyunca fotoğraf, video, sticker, GIF ve dosya gönderimi kapalı.
+d21e8724d	Sebep: ⟨0⟩
+0ca7ff868	🔓 Medya kilidi açıldı, eski izinler geri yüklendi.
+874318f86	🔓 Medya kilidi açıldı | ⟨0⟩
+4bf6387ff	Bu komutu grupta, engellenecek medyaya yanıt vererek kullan.
+b38691ea2	Engellemek istediğin fotoğraf/video/GIF/sticker/dosyaya yanıt vererek yaz.
+19a0caff5	Paket engeli için bir sticker'a yanıt ver.
+a6fdf7132	sticker paketi <code>⟨0⟩</code>
+478778014	(tüm gruplarda)
+350c5b7db	🚫 ⟨0⟩ engellendi. Aynısı gönderilirse silinir.
+3506ca524	Bu zaten engelli.
+4d19611fc	🚫 Medya engellendi (⟨0⟩) | ⟨1⟩
+63de95c9c	Önce /kanal ile seç!
+0d2990bb6	🔓 Medya kilidi açıldı.
+5efbe835d	Medya kilidi zaten açık.
+bc8817800	🔒 Medya kilitlendi.
+57dd35ab6	Kilitlenemedi (raid kilidi aktif olabilir veya botun yetkisi yok).
+6fc9219df	⟨0⟩ gün ⟨1⟩ saat
+184dd1447	⟨0⟩ saat ⟨1⟩ dk
+65f0ede73	⟨0⟩ dk
+c55e9eeb2	✏️ ⟨0⟩, ⟨1⟩ dakikadan eski mesajlar düzenlenemez; düzenlediğin mesaj silindi.
+e4ec4ef08	<i>kayıt yok (mesaj, koruma açılmadan önce gönderilmiş)</i>
+4f135e257	<a href="⟨0⟩">Mesajın yeri</a>
+a81c7ed8d	✏️ <b>Geç düzenlenen mesaj silindi</b>
+ff6af8a83	Kullanıcı: ⟨0⟩ (<code>⟨1⟩</code>)
+6c94268e3	Gönderilme: ⟨0⟩ · ⟨1⟩ sonra düzenlendi
+eba784f45	<b>Eski hâli:</b>
+817e491aa	<b>Yeni hâli:</b>
+090ff92f5	<blockquote expandable>⟨0⟩</blockquote>⟨1⟩
+ba4e72261	Forward
+330690bdd	forward (⟨0⟩. kez)
+a00507082	medya flood (⟨0⟩/⟨1⟩ sn)
+a77f997a9	flood (⟨0⟩ mesaj/⟨1⟩ sn)
+74c953a60	🔗 Link silindi → ⟨0⟩ | ⟨1⟩
+427c1fec3	link gönderme
+794910b1f	Yasaklı kelime
+8fb66aa89	yasaklı kelime
+4e5efb06d	tekrar spam
+c91e153a9	Anti-forward şu an: ⟨0⟩
+6d6d358e6	Kullanım: /antiforward on|off
+117ba2454	AÇIK
+6a2055cc2	Anti-forward ⟨0⟩.
+596cfaf0b	Anti-forward ⟨0⟩ | ⟨1⟩
+d2102fa46	Anti-media şu an: ⟨0⟩
+332b15c14	Kullanım: /antimedia on|off
+3227848c2	Anti-media flood ⟨0⟩.
+48d9c6287	Anti-media flood ⟨0⟩ | ⟨1⟩
+8cc0eba99	Anti-spam flood şu an: ⟨0⟩
+d1a5f38ec	Limit: ⟨0⟩ mesaj / ⟨1⟩ saniye
+3599fb42c	Kullanım: /antispam on|off
+64adfe1a4	Limit değiştirmek: /antispam on 10 5 (10 mesaj/5 saniye)
+1a836ee8e	Anti-spam flood ⟨0⟩. (Limit: ⟨1⟩ mesaj/⟨2⟩sn)
+27867ef23	Anti-spam ⟨0⟩ | ⟨1⟩
+5a6f48edd	Anti-link şu an: ⟨0⟩
+d947593b7	Kullanım: /antilink on|off
+5ddc225c5	Link engelleme ⟨0⟩. (Adminler muaf)
+298cef31c	Anti-link ⟨0⟩ | ⟨1⟩
+dc5c98faf	Captcha şu an: ⟨0⟩
+0742b23d4	Kullanım: /captcha on|off
+348974ec8	Captcha ⟨0⟩.
+070cf47b7	Captcha ⟨0⟩ | ⟨1⟩
+f8303f57c	✅ ⟨0⟩ artık yetkili değil.
+eb3b60248	🗑 ⟨0⟩ rütbesi alındı | ⟨1⟩
+36a946671	Kullanıcı bulunamadı!
+92274adac	📂 ⟨0⟩ klasörcü yapıldı!
+b7a687056	📂 ⟨0⟩ klasörcü atandı | ⟨1⟩
+3b49b9b50	Sebep belirtilmedi
+d34c44d0e	kalıcı ban
+42ca54745	🚫 ⟨0⟩ ⟨1⟩ aldı! Sebep: ⟨2⟩
+2580d49ff	ban
+023576cd7	Kullanıcı belirt! Reply at veya ID/username ver.
+bad97a937	✅ ⟨0⟩ unban edildi!
+b83344e83	✅ ⟨0⟩ ban kaldırıldı | ⟨1⟩
+dee699309	👢 ⟨0⟩ kicklendi!
+16d07ca95	👢 ⟨0⟩ kicklendi | ⟨1⟩
+299422191	24 saat (Admin sınırı)
+b2fbfc457	🔇 ⟨0⟩ ⟨1⟩ mute edildi!
+9247b48e0	🔇 ⟨0⟩ ⟨1⟩ mute | ⟨2⟩
+b13185722	⟨0⟩ ⟨1⟩ unmute edildi!
+c2abdaf0d	unmute
+dd3fea678	⟨0⟩ ⟨1⟩ unmute edildi | ⟨2⟩
+08ccab800	manuel unmute
+f990c822c	Unmute başarısız: ⟨0⟩
+fa5f86984	⟨0⟩ ⟨1⟩ uyarısı geri alındı (⟨2⟩/⟨3⟩).
+53a5687cb	success
+e222d2c43	↩️ ⟨0⟩ uyarı geri alındı (⟨1⟩) | ⟨2⟩
+b26226e44	📊 ⟨0⟩ uyarı: ⟨1⟩/⟨2⟩
+fcbd59f04	Pin için bir mesaja reply at ve /pin yaz!
+821dc813a	📌 Mesaj sabitlendi!
+f07ba3194	📌 Mesaj sabitlendi | ⟨0⟩
+84ce06e7a	✅ Sabitleme kaldırıldı!
+7a8e925ad	📍 Sabitleme kaldırıldı | ⟨0⟩
+a166505b1	Kullanım: /slowmode <saniye> (0 = kapat)
+5efa94a44	Örnek: /slowmode 30
+d9e0a5f25	⏩ Yavaş mod kapatıldı.
+c9f3d97aa	🐢 Yavaş mod ayarlandı: ⟨0⟩ saniye.
+90fc9c4e8	🐢 Slowmode ⟨0⟩sn | ⟨1⟩
+04ee47e62	Geçerli bir saniye değeri gir!
+ec7dc1340	Once /kanal ile sec!
+ef6a75200	Bu komutu temizlenecek grubun içinde kullan.
+8ab6d8456	Kullanim: /temizle <sayi> veya /temizle all
+f726b6834	Son 20.000 mesaj
+ad1696ee9	Son ⟨0⟩ mesaj
+09bed8e26	🧹 Mesajlar siliniyor, lütfen bekle...
+1f937217d	🧹 ⟨0⟩ temizlendi.
+f6a3aa1c3	🧹 ⟨0⟩ temizlendi | ⟨1⟩
+ca1480b4e	📋 Ban listesi boş.
+3df0209e0	🚫 <b>Ban Listesi</b> (son 20):
+2f35cf3c7	<blockquote expandable>
+5ed531a43	⟨0⟩</blockquote>
+a2ef54f04	📋 Mute listesi boş.
+f3ad3e028	🔇 <b>Mute Listesi</b> (son 20):
+4d02c60e6	⟨0⟩ dk kaldı
+e9fa5b6c6	süresi dolmuş
+50bd44457	Kullanım: /spamkoruma on|off
+aaf3e3fa7	Spam koruma ⟨0⟩!
+032f12948	⚙️ Spam koruma ⟨0⟩ | ⟨1⟩
+db5c288ba	Kullanım: /wordban <kelime>
+5ce049d2e	Geçersiz regex: ⟨0⟩
+382054e7a	'⟨0⟩' yasaklı kelime listesine eklendi!
+a061e639e	'⟨0⟩' zaten yasaklı!
+c690df9b8	Kelime yasaklama sistemi açıldı!
+a04bd920f	Kelime yasaklama sistemi kapatıldı!
+908cb2d50	Kullanım: /setautoaccept on|off
+ad89cff79	Otomatik kabul ⟨0⟩!
+8a77c7461	Kullanım: /setautoreject on|off
+de72bc915	Otomatik red ⟨0⟩!
+f4661e0bb	Kullanım: /setautorejectbot on|off
+4f2789f4b	Bot/sahte hesap reddi ⟨0⟩!
+19f41bbbf	Henüz davet istatistiği yok!
+8618c4bd5	📈 Davet İstatistikleri:
+4dff67686	⟨0⟩: ⟨1⟩ üye
+fae5737f3	🚨 RAİD TESPİT EDİLDİ!
+7b14ac650	⟨0⟩ üye / ⟨1⟩ saniye
+cf9fdec29	Grup ⟨0⟩ dk kilitlendi. Açmak için: /antiraid_ac
+1124ad26d	🔒 Grup ⟨0⟩ dk kilitlendi: ⟨1⟩
+93ff62fcf	Grup zaten kilitli.
+0182255e2	🚨 Acil kilit: ⟨0⟩
+121e5db73	🔒 Grup ⟨0⟩ dk kilitlendi. Kilidi Yardımcı Kurucu ve üstü /antiraid_ac ile açabilir.
+2aadb84f8	Kilitlenemedi (botun yetkilerini kontrol et).
+aff77f945	✅ Raid kilidi otomatik açıldı | ⟨0⟩
+8fcabef94	🔒 Şu an KİLİTLİ
+94a774e51	🔓 Açık
+376d9283f	🚨 Anti-Raid: ⟨0⟩
+8827355aa	Kullanım: /antiraid on|off
+f0e5d75da	Limit değiştir: /antiraid on 15 20 (15 üye/20sn)
+ecbb4a7da	🚨 Anti-raid ⟨0⟩.
+4f3192d13	Limit: ⟨0⟩ üye / ⟨1⟩ saniye
+bdf82e0b3	🚨 Anti-raid ⟨0⟩ | ⟨1⟩
+cc103ac23	Grup zaten kilitli değil.
+374c81aa3	✅ Raid kilidi açıldı, grup eski izinlerine döndü.
+2551f6fe1	✅ Raid kilidi manuel açıldı | ⟨0⟩
+4918e916d	Hata: kilit açılamadı (botun yetkilerini kontrol et).
+bce49f901	Profil alinamadi!
+9131de73e	Kullanici bulunamadi!
+45e118d05	Normal
+bf84ddcb3	Susturuldu (⟨0⟩s ⟨1⟩dk kaldi)
+08c52b8c6	Susturuldu (⟨0⟩ dk kaldi)
+c5a6c0399	👤 <b>Kullanici Profili</b>
+8359545a8	Ad: ⟨0⟩
+0fd8daf31	ID: <code>⟨0⟩</code>
+16d1a3d6f	Durum: ⟨0⟩
+c90e09fec	Uyari: ⟨0⟩/⟨1⟩
+f7b55484b	Son Islemler:
+245846708	sistem
+1ebb0f458	Hic moderasyon islemi yok.
+ea0db6b35	Kelime yasaklama: ⟨0⟩
+67b2688cb	Hic yasakli kelime yok.
+ab2a94371	Eklemek icin: /wordban <kelime>
+bc50a233e	Sil: ⟨0⟩
+ea1ef9198	Tumunu Sil
+9e6ecd595	Kapat
+d4ff2fcbb	Kelime Yasaklama: ⟨0⟩
+1e892c51e	Toplam: ⟨0⟩ kelime
+d6c5bc3c9	Silmek icin asagidaki butonlari kullan:
+3e285778b	ACIK
+86fc112e5	KAPALI
+3b9e05b52	Kelime listesi kapatildi.
+a9b768614	Tum yasakli kelimeler silindi.
+baa6a8908	Tum yasakli kelimeler silindi | ⟨0⟩
+f3b918935	Yasakli kelime silindi: ⟨0⟩ | ⟨1⟩
+09e3ab40d	Tum kelimeler silindi.
+4b153db82	Kelime Yasaklama: ACIK
+dbddb7434	Mesaj Gonderme
+399307b2e	Medya Gonderme
+17dec3f5f	Link Gonderme
+a6d462ad9	Dosya Gonderme
+b80944077	Kaydet
+b0bd84b1e	Iptal
+eec2005a5	Once /kanal ile kanali sec!
+056d48fa9	Night mode manuel olarak acildi.
+aad062b54	Night mode manuel olarak kapatildi.
+511a5144a	Night mode saati ayarlandi:
+cb1460461	Baslangic: ⟨0⟩:⟨1⟩
+771bcaf96	Bitis: ⟨0⟩:⟨1⟩
+7989dd84a	Kısıtlamaları ayarlamak için: /nightmod
+79514002a	Format hatasi. Kullanim: /nightmod 23:00 07:00
+204b48fc8	Yapilandir (DM)
+42031a2a7	Night mode ilk kez kullaniliyor! Yapilandirmak icin bota ozel mesaj gonder:
+89f29d42a	Aktif
+3de48344f	Pasif
+de1f5c130	Night Mode: ⟨0⟩ (⟨1⟩)
+b1d3baa6d	Saat: ⟨0⟩:⟨1⟩ - ⟨2⟩:⟨3⟩ (UTC+3)
+b5356dbcd	Kısıtlanacak izinleri sec, sonra Kaydet'e bas:
+bc2943e26	🌙 Gece modu başladı. Sabah ⟨0⟩:⟨1⟩'e kadar kısıtlamalar aktif.
+86a8a2d6d	Night mode aktif oldu | ⟨0⟩
+2a8fea2da	☀️ Gece modu sona erdi. Normal izinler geri yüklendi.
+19d0c7302	Night mode sona erdi | ⟨0⟩
+5f5e93020	Night mode yapilandirmasi iptal edildi.
+9ca4e6abd	Medya
+c0ceeb976	Ses/Video Not
+d0517071a	Link
+02c5387be	Hic kisitlama secilmedi
+8c6724096	Night mode kaydedildi!
+4c2f064b0	Kisitlamalar: ⟨0⟩
+ec5110d51	Saat ayarlamak icin: /nightmod 23:00 07:00
+015f290e6	Night mode yapilandirildi | ⟨0⟩
+a6ff502b6	⟨0⟩ Geçici ban süresi doldu ama unban başarısız oldu: <code>⟨1⟩</code>
+11f9578d0	error
+09caa25fa	⟨0⟩ Geçici ban sona erdi → ⟨1⟩ unban edildi
+83655a556	clock
+45cdd1bd7	🔗 Link
+a70e468cd	Link, gizli (yazıya gömülü) link ve link butonlu mesajlar silinir.
+a0c63db58	🔤 Yasaklı kelime
+09f922f95	Listedeki kelimeler; Türkçe karakter, büyük/küçük harf ve leetspeak dahil yakalanır.
+58c8ebdab	🔁 Tekrar spam
+61bbb7e24	60 sn içindeki son 10 mesajın çoğu aynıysa spam sayılır.
+37f36cdb7	🌊 Flood
+a8ee9b9f5	Kısa sürede limitten fazla mesaj.
+283d462ac	↪️ Forward
+93442a52b	Başka sohbetten iletilen mesajlar.
+4592320db	🖼 Medya flood
+b65eef3f3	Kısa sürede limitten fazla fotoğraf/video/sticker.
+32d0d473e	🔞 Uygunsuz medya
+cf1a8e3ca	Porno/çıplaklık (yapay zeka, kuruluysa), engelli medya ve sticker paketleri, tehlikeli dosyalar (.apk, .exe…).
+353ad5e39	Sil
+a79d71fbf	Uyar
+229c67bd8	Sustur
+0855009c4	At
+7f3fcf8f1	Banla
+bd3c8d60c	Geçici ban
+7c65bba4a	⟨0⟩ mesaj
+5df501398	⟨0⟩ sn
+637c7d4eb	⟨0⟩ üye
+2a687b503	⟨0⟩ kişi
+2dd4cbf18	⟨0⟩ işlem/saat
+d507ef055	Mesaj
+cc9e030d6	Ses/Video not
+1949df42c	Link önizleme
+01674713d	Dosya/Müzik
+0a4ef3c95	✏️ Yeni hoş geldin mesajını yaz ya da fotoğraf/video/GIF gönder (açıklaması mesaj olur).
+a5e32e95a	Butonlar: her satıra  Etiket - https://link  (yan yana: && ile)
+1ee44f2e2	Değişkenler: {kullanıcı} {ad} {username} {grup} {uye_sayisi} · Rastgele: mesajları %%% satırıyla ayır
+989ac76ce	Hoş geldin {kullanıcı}!
+f4b119f84	✏️ Veda mesajını yaz (medya ve butonlar da olur). Değişkenler: {ad} {kullanıcı} {grup}
+3fffcf251	👋 {ad} aramızdan ayrıldı.
+e32be930c	📜 Grup kurallarını yaz. Biçim (kalın, link) ve butonlar korunur.
+8a546a91a	1) Saygılı ol  2) Reklam yok
+369899a51	📢 Zorunlu kanalı yaz: @kanal, t.me/kanal ya da -100… ID. Bot o kanalda yönetici olmalı.
+ffb95707b	@kanal
+0bf3f943d	⏰ Önce süreyi, sonra mesajı yaz. Örn: 6sa Kuralları okumayı unutmayın!
+b7be418c7	Süre: 30dk, 6sa, 1g · Medya için fotoğrafın açıklamasına yaz.
+dafcc65fa	6sa Mesaj
+c1e570e92	🔤 Yasaklanacak kelimeleri yaz (her satıra bir tane). Regex için başına re: koy.
+8031790fb	🔗 İzin verilecek alan adlarını yaz (boşlukla ayır). Örn: youtube.com t.me/kanalim
+dd20fa7d1	📝 Notu şu biçimde yaz: isim içerik
+750db2552	kurallar Grup kuralları...
+2f50f0128	🧾 Log kanalı/grubu ID'sini yaz (örn. -1001234567890). Bot orada mesaj atabilmeli.
+0a89e21a0	🛟 Güvenilir kişinin kullanıcı ID'sini yaz (kişi bota /id yazarak öğrenebilir).
+678669669	Kapalı
+5e05f56cb	⬅️ Geri
+3425aebce	🛡 <b>Koruma</b> — ⟨0⟩
+a9aa38570	Bir korumaya dokunarak aç/kapat, cezasını ve limitlerini ayarla.
+dfc009e83	⟨0⟩ <b>koruması</b> — ⟨1⟩
+196e11b00	Ceza: <b>⟨0⟩</b>
+3b58939e6	(limit ⟨0⟩ → ⟨1⟩)
+e882e3937	Susturma kademeli: 10 dk → 30 dk → 5 saat
+10d361785	Koruma ⟨0⟩
+24d948e4b	Limit
+a92c81c26	🔗 İzinli linkler ›
+05bd7ca2c	🔤 Kelime listesi ›
+7bb491e04	🚪 <b>Katılım</b> — ⟨0⟩
+a956dd268	• <b>Captcha</b>: yeni üye grupta matematik sorusunu çözene kadar yazamaz.
+29aad6032	• <b>Özelden doğrulama</b>: katılım isteği gönderene bot özelden soru sorar; doğru cevaplayan otomatik kabul edilir. Grupta "yeni üyeleri onayla" açık olmalı ve botun davet yetkisi olmalı.
+d33b884be	Captcha (grupta)
+6fe48b7bb	Özelden doğrulama
+34c8b8ee3	Oto kabul
+747e46068	Oto red
+eb973fe6c	Bot / kullanıcı adsız isteği reddet
+371ffa7fa	Kullanıcı adsız yeni üyeyi sustur
+22be1b04d	🚨 Anti-Raid ›
+df3d708d0	🆕 Yeni üye kısıtı ›
+119163a69	🚨 <b>Anti-Raid</b> — ⟨0⟩
+3d6f3a6ef	Belirtilen sürede limitten fazla üye katılırsa grup ⟨0⟩ dk kilitlenir, sonra eski izinler geri yüklenir.
+12e3f2f5a	🔒 Kilitli
+78047dc1b	Anti-Raid
+5ebba95e7	🔓 Kilidi şimdi aç
+80ea856ce	🆕 <b>Yeni üye kısıtı</b> — ⟨0⟩
+983dcd824	Yeni katılanlar belirtilen süre boyunca link, medya ve forward gönderemez (mesajı silinir, uyarı gösterilir).
+b55881f2f	⚠️ <b>Uyarılar</b> — ⟨0⟩
+979ac1fa7	"Uyar" cezalı korumalar ve /warn uyarı verir; limit dolunca seçili ceza uygulanır.
+cd70c61ed	Şu an: <b>⟨0⟩</b> uyarı → <b>⟨1⟩</b>
+e72447e76	Uyarı limiti
+a380d0c65	Ceza süresi
+c601b3f5f	Koruma susturması
+6a05e68f4	🌙 <b>Gece Modu</b> — ⟨0⟩
+9ca9fb409	Durum: <b>⟨0⟩</b>⟨1⟩
+d772b08c3	Saat: <b>⟨0⟩:⟨1⟩ – ⟨2⟩:⟨3⟩</b> (UTC+3)
+145d44a73	Seçili izinler bu saatlerde kapatılır, bitince eski izinler geri yüklenir.
+4a4847e71	(şu an aktif)
+ed1a5ae4e	Gece modu
+58910c4c5	Başlangıç ⟨0⟩:⟨1⟩
+8e87dff1c	Bitiş ⟨0⟩:⟨1⟩
+586001e9d	🔗 <b>İzinli linkler</b> — ⟨0⟩
+53a0c084e	Bu alan adları link korumasından muaftır (alt alan adları dahil). Toplam: ⟨0⟩
+0aa28d421	Silmek için dokun.
+c619b874d	➕ Ekle
+20540dbc7	<b>Tüm yasaklı kelimeler silinsin mi?</b>
+b12c1611e	🔤 <b>Yasaklı kelimeler</b> — ⟨0⟩
+cbdf733da	Filtre: <b>⟨0⟩</b> · Toplam: ⟨1⟩
+acb2cf3c1	Kelime filtresi
+9de026dc8	🧹 Tümünü sil
+866ffe59a	📝 <b>Notlar</b> — ⟨0⟩
+8488244a4	Grupta <code>#isim</code> yazınca not gösterilir. Toplam: ⟨0⟩
+6e5864d9f	➕ Not ekle
+64d1a5476	🧩 <b>Filtreler</b> — ⟨0⟩
+75e34f897	Grupta tetikleyici yazılınca bot cevap verir. Toplam: ⟨0⟩
+c8063c80c	Eklemek için grupta: <code>/filter</code> · Silmek için dokun.
+7cb292fe4	🧾 <b>Log kanalı</b> — ⟨0⟩
+399fb6ff5	Tüm moderasyon kayıtları buraya gönderilir.
+6a7bdfba4	Şu an: <code>⟨0⟩</code>
+e76134e13	Sadece grup sahibi değiştirebilir.
+d92dcb23a	✏️ Log kanalını ayarla
+c62c45415	🗑 Kaldır
+512ba4fe4	🚨 Raid
+07210c024	⚙️ <b>⟨0⟩ — Grup Ayarları</b>
+9006cb8f1	🛡 Aktif korumalar: ⟨0⟩
+16ccea6ec	🚪 Captcha: ⟨0⟩ · Özelden doğrulama: ⟨1⟩
+cc096b5a7	⚠️ Uyarı: ⟨0⟩ → ⟨1⟩
+06292addb	🌙 Gece modu: ⟨0⟩
+e5044a295	🛡 Koruma
+82a6a709d	🌙 Gece Modu
+2eed1225e	🔗 Linkler
+d38c4e47a	🔤 Kelimeler
+6828b98dc	🧩 Filtreler
+7956a13a3	⏰ Zamanlı mesaj
+81bddc593	🏷 Etiket
+5961a42e8	✏️ Düzenleme & Rapor
+1ff65156a	🧾 Log Kanalı
+f1a57e125	🌐 Grup Ağı
+f5c96387f	🛟 Kurtarma
+5244ca690	🌍 Dil: ⟨0⟩
+1bd24917c	✖️ Kapat
+e38a49a6f	Kanal Koruma Ayarlari
+f81ca3a77	Bu ayarı sadece grubun kurucusu değiştirebilir.
+4081e665c	Geçersiz ayar
+ce432606a	✅ Açıldı
+ca037fcc4	❌ Kapatıldı
+a006b158d	⚙️ ⟨0⟩ cezası → ⟨1⟩ | ⟨2⟩
+0ebfd3ac6	Ceza: ⟨0⟩
+286a11648	Limit cezası: ⟨0⟩
+c32110889	Liste değişmiş, yenilendi
+cf6b53ca2	🗑 ⟨0⟩ silindi: ⟨1⟩ | ⟨2⟩
+64e48562d	İzinli link
+ed6b18d70	🗑 ⟨0⟩ silindi
+36a8cc3d4	🧹 Tüm yasaklı kelimeler silindi | ⟨0⟩
+5db717ed8	Tüm kelimeler silindi
+0f2ad553f	Filtre silindi
+3247c21b8	🌙 Gece modu ⟨0⟩
+672441418	açıldı
+ba4dc20d1	kapatıldı
+d3d694451	Kaydedildi
+95bf688eb	Log kanalı kaldırıldı
+e413c4b9e	Kurallar silindi
+0f514bbde	✅ Raid kilidi panelden açıldı | ⟨0⟩
+8e6a20f22	🔓 Kilit açıldı
+f5014f259	Kilit açılamadı (bot yetkisi?)
+7f0e2a142	Grup bulunamadı.
+f41c17d41	Bu paneli kullanmak için grupta yönetici olmalısın.
+8213d6575	<i>Vazgeçmek için: iptal</i>
+1465f36fd	Cevabını açılan mesaja yanıt olarak yaz.
+3035a6b30	⏰ Süre doldu, panelden tekrar dene.
+18363eae4	İptal edildi.
+3a22b8f74	❌ Kurallar boş olamaz.
+fa98ef9b6	Hoş geldin mesajı
+a9e0c5b00	✏️ ⟨0⟩ güncellendi | ⟨1⟩
+074e8897f	✅ ⟨0⟩ güncellendi (⟨1⟩). Panelden 👁 Önizle ile bakabilirsin.
+4f4799ddf	✅ Kanal zorunluluğu açık: <b>⟨0⟩</b>
+9dc44c973	❌ Süreden sonra mesajı yaz. Örn: <code>6sa Kuralları okuyun!</code>
+564247ab5	✅ Zamanlanmış mesaj #⟨0⟩: her ⟨1⟩ bir.
+390237a11	✅ ⟨0⟩ kelime eklendi, kelime filtresi açık.
+28ebadbf6	❌ Geçersiz regex: ⟨0⟩
+8d642d759	✅ ⟨0⟩ alan adı eklendi.
+f6b268d0d	❌ Biçim: <code>isim içerik</code> (isim: harf, rakam, - veya _)
+1b6abf7f2	✅ Not kaydedildi: <code>#⟨0⟩</code>
+d872c76cd	Log kanalını sadece grup sahibi değiştirebilir.
+1731f9a98	❌ Geçersiz ID. Örnek: <code>-1001234567890</code>
+e84190fc5	✅ ULUS log kanalı bağlandı: ⟨0⟩
+9d4e14027	❌ Bu sohbete mesaj gönderemiyorum. ⟨0⟩
+d8947ff95	✅ Log kanalı ayarlandı.
+7f9f8fabc	Bilinmeyen işlem.
+c3ecef83d	sn
+e3a725f35	Sadece üyeler
+fb155ed20	Üyeler + Adminler
+5e998efe4	Üyeler + Admin + Üst admin
+431e199fa	Kurucu hariç herkes
+8b3606b03	🤖 Yapay zeka taraması⟨0⟩
+2abda5f05	(kurulu değil)
+af96fe25f	📦 Tehlikeli dosyalar (.apk .exe …)
+c977dbc41	🔒 Saldırıda otomatik medya kilidi
+1c409b726	Kilit süresi
+e4b73af2e	🚫 Engelli medya listesi ›
+a5265e3d7	🔓 Medya kilidini aç
+c1a903ce0	🔒 Medyayı şimdi kilitle
+678507459	açık
+c293fc85c	kapalı
+8dd94c76e	kurulu değil (sunucuda <code>pip install nudenet</code>)
+043b96df1	🔒 Medya kilidi aktif: ⟨0⟩'e kadar
+059a31b37	Yapay zeka taraması: ⟨0⟩
+c77da8b2d	Engellemek için medyaya yanıt ver: <code>/medyaengel</code> · sticker paketi: <code>/paketengel</code>⟨0⟩
+a54dfcd87	🚫 <b>Engelli medya</b> — ⟨0⟩
+b1fe46387	Aynısı gönderilince silinir. Toplam: ⟨0⟩
+2d00f3347	Kaldırmak için dokun. Eklemek: medyaya yanıt verip <code>/medyaengel</code>
+0c575feaa	✏️ <b>Düzenleme & 🚩 Rapor</b> — ⟨0⟩
+fe3d0969d	• <b>Geç düzenleme koruması</b>: gönderildikten ⟨0⟩ dk sonra düzenlenen mesaj silinir; eski ve yeni hâli grubun kurucusuna ve botu ekleyen kişiye özelden gönderilir (bot, onların özelden /start yazmış olmasını ister).
+48166d583	• <b>Rapor</b>: üyeler bir mesaja yanıt verip <code>/report</code> veya <code>@admin</code> yazar; yetkililere butonlu bildirim gider.
+9a9d43302	👥 Kimlere uygulanır: <b>⟨0⟩</b> (değiştirmek için butona dokun; sadece kurucu)
+60543a144	Geç düzenleme koruması
+2719eae25	👥 Kimlere: ⟨0⟩
+8173539b7	Süre
+a95a8ac50	Kurucuya/ekleyene bildir
+337b927c6	Rapor sistemi
+283ea618d	🌍 <b>Dil / Language</b> — ⟨0⟩
+ecfd0b504	Botun bu gruptaki mesajları, butonları ve uyarıları seçilen dilde olur. Senin yazdığın hoş geldin, kurallar ve notlar değişmez.
+b04edf4df	👮 <b>Admin denetimi</b> — ⟨0⟩
+46926b2fa	• <b>Günlük özet</b>: her akşam kurucuya ve botu ekleyene kim kaç ban, susturma, uyarı ve silme yaptı.
+9e35dc551	• <b>İşlem sınırı</b>: kurucu olmayan bir yetkili 1 saatte ⟨0⟩'dan fazla ban/atma/susturma yaparsa yetkisi askıya alınır, sana butonlu bildirim gelir (banları tek tuşla geri alınır).
+dbc65734d	• <b>Silinen mesaj kaydı</b>: /del ve /temizle ile silinen mesajlar log kanalına kopyalanır. (Telegram, uygulamadan elle silinen mesajları botlara bildirmez.)
+fef769989	Anlık özet: <code>/denetim 7</code> · Mesaj geçmişi: mesaja yanıtla <code>/gecmis</code>
+5d565355a	Askıdaki yetkili: ⟨0⟩
+fbe3b7863	Bu ayarları sadece kurucu değiştirebilir.
+011f51955	Günlük admin özeti
+f8f216c2d	Admin işlem sınırı
+c1017ac8a	Sınır
+75d76fc04	Silinen mesajları log kanalına kopyala
+b91937b6d	🌐 <b>Grup ağı</b> — ⟨0⟩
+e26434728	Bu grup ⟨0⟩ ağında (⟨1⟩ grup):
+4515b950e	Ban eşitleme açıkken bir grupta banlanan kişi ağdaki tüm gruplardan banlanır (kick hariç); ban kaldırılınca her yerden kalkar.
+2a41a6019	Ban eşitleme
+7b9394ab7	📋 Kelime & link listelerini ağa kopyala
+35c1578b6	⚙️ Koruma ayarlarını ağa kopyala
+a0ec7c7bd	➖ Bu grubu ağdan çıkar
+db918b20f	Bu grup bir ağda değil. Yönettiğin grupları kendi ağına eklersen banlar tüm gruplara yayılır ve ayarlarını tek tıkla kopyalarsın. (Kurucu / yardımcı kurucu gerekir.)
+e44c5b572	➕ Bu grubu ağıma ekle
+1c979a8ff	henüz yok
+9f41d74fa	🛟 <b>Admin kurtarma</b> — ⟨0⟩
+62477adfc	Admin listesi 6 saatte bir kaydedilir. Biri kısa sürede 3+ adminin yetkisini alırsa yöneticilere ve güvenilir kişilere kurtarma butonlu uyarı gider. Güvenilir kişiler bota özelden <code>/kurtar</code> yazarak adminleri geri yükleyebilir.
+092c6482f	Son kayıt: ⟨0⟩
+ba8991412	Güvenilir kişiler (⟨0⟩/3) — kaldırmak için dokun:
+5729ee3a9	➕ Güvenilir kişi ekle
+72e9b014a	Otomatik geri yükle
+cdfef870d	📸 Şimdi kaydet
+521787de8	♻️ Geri yükle ›
+c578b31d8	Kayıt bulunamadı.
+b5e5e7de1	Geçersiz dil
+a85ca0330	Bunu sadece grubun kurucusu değiştirebilir.
+43ce9c01e	✏️ Düzenleme koruması kapsamı: ⟨0⟩ | ⟨1⟩
+446ff86ee	Kimlere: ⟨0⟩
+59e922883	🔒 Medya kilitlendi
+dd43607b8	Kilitlenemedi (raid kilidi veya bot yetkisi)
+650f54e0c	🔓 Medya kilidi açıldı
+a6220f5d4	Kilit zaten açık
+1d4e3c6c4	Engel kaldırıldı
+de91565ff	Ağa eklemek için bu grubun kurucusu olmalısın.
+6b85bac2e	🌐 Grup ⟨0⟩ ağına eklendi
+6c4e9120a	Ağa eklendi
+b605b46d7	Bu grup bir ağda değil
+4f36e2321	Ağdan çıkarıldı
+bd4ac87bb	Bu işlemi sadece ağın sahibi yapabilir.
+f9a34a2ad	Ban eşitleme ⟨0⟩
+78a09a0ea	🌐 Ayarlar ağdaki ⟨0⟩ gruba kopyalandı | ⟨1⟩
+eacfa093c	⟨0⟩ gruba kopyalandı
+c39c747b1	Kurtarma ayarlarını sadece kurucu değiştirebilir.
+95e917987	Kaldırıldı
+87f3326f9	📸 Kaydedildi
+49c866e1e	Kaydedilemedi (bot admin mi?)
+b13ed05bb	♻️ ⟨0⟩ admin geri yüklendi⟨1⟩
+8670a3a46	, ⟨0⟩ başarısız
+c3b595125	Güvenilir kişiyi sadece kurucu ekleyebilir.
+32cb829ea	❌ Kişi bulunamadı. Kullanıcı ID'sini yaz (kişi bota /id yazarak öğrenebilir).
+89f663ce6	En fazla 3 güvenilir kişi eklenebilir.
+dfe9ba864	✅ ⟨0⟩ güvenilir kişi olarak eklendi. Bota özelden /start yazmış olmalı.
+a4167566b	Önce /kanal ile bir grup seç!
+2ba2862f6	grup
+62d623326	kanal
+3fca554f2	kişi
+ffd1ee882	📝 taslak
+4bf27d98f	⏰ zamanlandı
+4c10fb3fc	📤 gönderiliyor
+2467aa607	✅ bitti
+578b9744b	❌ iptal
+71db82dfe	Saat şöyle yazılır: -saat 20:00
+c3cd977ee	Şablon adı şöyle yazılır: /duyuru -kaydet guncelleme "mesaj"
+530791023	hedef yok
+9a2c72e2d	🔕 Duyuruları kapat
+9f242a754	🗳 Henüz oy yok
+37e3719ed	🗳 ⟨0⟩ oy: ⟨1⟩
+186e99c6e	✅ <b>Duyuru #⟨0⟩ tamamlandı</b>
+53acfe01d	⏹ <b>Duyuru #⟨0⟩ durduruldu</b>
+8fa7a67a9	📊 ⟨0⟩/⟨1⟩ işlendi
+6b12880d0	✅ Ulaştı: <b>⟨0⟩</b>
+ddb6da67b	🚫 Botu engellemiş / başlatmamış: ⟨0⟩ (sonraki duyurularda atlanır)
+814224bfc	⚠️ Gönderilemedi (bot çıkarılmış / yetkisiz): ⟨0⟩
+d4d2773cb	📌 Sabitlendi: ⟨0⟩
+53ffa3f09	👆 Buton tıklamaları /duyurular içinde görünür
+0d709ac7c	🗳 Anket sonuçları /duyurular içinde görünür
+dd370224e	Durdurmak için /duyurudur
+be085c333	📢 <b>Duyuru</b>
+0b7be0b19	<code>/duyuru "mesaj"</code> — gruplar + kanallar
+1e622cf6b	<code>/duyuru -kisiler "mesaj"</code> — botu özelden kullananlar
+25a35b0aa	<code>/duyuru -kisiler -kanal "mesaj"</code> — kişiler + kanallar (birleştirilebilir)
+0b87fef23	<code>/duyuru all "mesaj"</code> — hepsi
+bc83a4f15	Seçenekler: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (son 7 gün; <code>-aktif 30</code>) · <code>-test</code> (sadece sana) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code>
+1aca894ba	🎯 Önizlemede belli grup/kanalları seçebilirsin.
+9fa263da2	🗳 Anket: <code>/duyuru -anket -kisiler "Soru?
+735ec279d	Seçenek 1
+98805337f	Seçenek 2"</code> — oylar tek ankette toplanır
+aaa59ea0d	💾 Şablon: <code>/duyuru -kaydet isim "mesaj"</code> → <code>/duyuru -kisiler #isim</code> · /duyurusablon
+a3caa1df0	💡 Bir mesaja (resim, video, butonlu ya da premium emojili) yanıt verip <code>/duyuru -kisiler</code> yazarsan o mesaj olduğu gibi gönderilir. Metinde buton satırı da yazabilirsin: <code>Kanal - https://t.me/kanal</code> (tıklamalar sayılır)
+fb071e726	/duyurular — geçmiş, tıklamalar, anket sonuçları · /duyurudur — gönderimi durdur
+344eb221b	⚠️ Premium emojiler Telegram tarafından normal emojiye çevrildi (botlar yazarak premium emoji gönderemiyor). Çözüm: mesajı kendin yaz, ona yanıt verip /duyuru yaz — kopyalanan mesajda korunur.
+f87763b78	👆 <b>Duyuru #⟨0⟩ önizlemesi</b>
+3790c85e6	🎯 Hedef: ⟨0⟩
+d46292455	🔥 Sadece son ⟨0⟩ günde aktif olanlar
+019c9cc1b	✅ Seçili grup/kanal: ⟨0⟩
+14d962307	👤 Kişiler: botu özelden kullananlar; gruplarda görülüp botu hiç başlatmamış olanlara Telegram izin vermez (bir kez denenir, sonra atlanır).
+f7bcd6c82	⏱ Tahmini süre: ~⟨0⟩ sn
+aaca2bf64	⏰ Gönderim: ⟨0⟩
+4046d6be5	📌 Gruplarda ve kanallarda sabitlenecek
+c3eded236	🔕 Bildirimsiz
+cffb2a880	👆 Buton tıklamaları sayılacak
+251fac5c6	🗳 Anket iletilecek; oylar bu ankette toplanır
+ba70fe09b	⏰ Zamanla
+8241e1495	✅ Gönder
+86f2e67ab	❌ İptal
+d53523fb6	Gönderilecek kimse yok.
+2882de09f	🎯 Grup/kanal seç
+78f17fac4	❌ Kapat
+e6b5975cd	◀️ Önceki
+b84641c59	Sonraki ▶️
+9a4dab900	🔄 Seçimi temizle
+6044624ae	✅ Tamam
+786000738	🎯 <b>Duyuru #⟨0⟩: grup/kanal seç</b> (sayfa ⟨1⟩/⟨2⟩)
+8273973d4	Seçili: <b>⟨0⟩</b> — hiçbiri seçili değilse hepsine gider.
+0b988bbef	Bu komut sadece botun sahibi tarafından kullanılabilir!
+4b64d112c	Şablon için mesaj yaz ya da bir mesaja yanıt ver.
+9cc026c97	💾 Şablon kaydedildi: #⟨0⟩
+12933b18c	Kullanmak için: /duyuru -kisiler #⟨0⟩
+dcba9eba6	#⟨0⟩ adında şablon yok. /duyurusablon ile listeyi gör.
+c3b81b13d	Anket şöyle yazılır:
+185c6d7a9	/duyuru -anket -kisiler "Soru?
+27ced0bf8	Seçenek 2"
+9de509dc5	Anket oluşturulamadı: ⟨0⟩
+e8c8a3987	🧪 Test anketi sadece sana gönderildi.
+f6c39b561	Test gönderilemedi: ⟨0⟩
+3ccbd9c93	🧪 Test duyurusu sadece sana gönderildi.
+305ee0f9a	(özelden)
+cb34b252b	Önizleme gönderilemedi: ⟨0⟩
+68aa08ebf	🔕 Duyurular kapatıldı. Tekrar açmak için /duyuruac
+ead4b09a2	🗑 Silindi
+6fc68153b	Yetkisiz ya da geçersiz.
+5027629e8	Bu duyuru zaten işlendi.
+1b315a09e	⏰ Duyuru #⟨0⟩ zamanlandı: ⟨1⟩
+08d8e26cc	/duyurular ile görebilirsin.
+d236ce6c8	📤 Duyuru #⟨0⟩ gönderiliyor…
+e15ad036b	İptal edildi
+8c0a53753	❌ Duyuru #⟨0⟩ iptal edildi.
+32ff8287a	Zamanlanmış değil.
+95d0599f3	⏹ Durduruluyor…
+a96302489	Şu an gönderilmiyor.
+7afa989da	📢 Henüz duyuru yok.
+b0b0b34ae	📢 <b>Son duyurular</b>
+a2148c2a7	🗳 anket
+771c7f3fb	👆 ⟨0⟩ tıklama⟨1⟩
+8139aea8f	(⟨0⟩ kişi)
+71fc8c6a3	❌ #⟨0⟩ iptal
+6b91bce73	⏹ #⟨0⟩ durdur
+55b4c1882	💾 Kayıtlı şablon yok.
+4dc8bf919	Kaydetmek için: <code>/duyuru -kaydet isim "mesaj"</code> ya da bir mesaja yanıt verip <code>/duyuru -kaydet isim</code>
+a5f43a44d	💾 <b>Duyuru şablonları</b>
+bd5b7fec5	📋 kopya mesaj
+82b029e57	<code>#⟨0⟩</code> — ⟨1⟩
+8ebf8c6d8	Kullanım: <code>/duyuru -kisiler #isim</code>
+d9ecd93d0	⏹ Duyuru durduruluyor…
+e6989213d	Şu an gönderilen duyuru yok.
+1d2937461	🔔 Duyurular açıldı.
+6934721dd	change_info+delete_messages+restrict_members+invite_users+pin_messages+manage_chat
+404522550	https://t.me/⟨0⟩?startgroup=kurulum&admin=⟨1⟩
+b75b13003	➕ <b>Yeni ⟨0⟩ eklendim</b>
+862253052	· ⟨0⟩ üye
+7171ced0d	👤 Ekleyen: ⟨0⟩⟨1⟩
+8290f7d5e	· <code>⟨0⟩</code>
+b0c699f59	🔐 Yönetici
+7505ec5cf	⚠️ Henüz yönetici değil (24 saat sonra hatırlatılır)
+93e256834	➖ <b>Çıkarıldım:</b> ⟨0⟩
+f6cedb404	👤 Çıkaran: ⟨0⟩ · <code>⟨1⟩</code>
+545d22c19	⚠️ <b>⟨0⟩</b> grubunda hâlâ yönetici değilim, bu yüzden koruma çalışmıyor.
+e7c66ff8b	Grup ayarları → Yöneticiler → Yönetici ekle → @⟨0⟩ (mesaj silme ve kullanıcı kısıtlama yetkisi yeterli) ya da aşağıdaki butonu kullan.
+519fdb65c	⚡ Beni yönetici yap
+977c42cf0	📈 <b>⟨0⟩ haftalık rapor</b> (⟨1⟩ – ⟨2⟩)
+075c08a00	👥 Grup: <b>⟨0⟩</b> · 📢 Kanal: <b>⟨1⟩</b>
+626db2ea3	➕ Yeni eklendiğim: <b>⟨0⟩</b> · ➖ Çıkarıldığım: <b>⟨1⟩</b>
+3b300252b	👤 Özelden kullanan: <b>⟨0⟩</b> (bu hafta +⟨1⟩)
+8ebb70df7	💬 Mesaj: <b>⟨0⟩</b>⟨1⟩ · aktif kişi: <b>⟨2⟩</b>
+179fe6c75	🚪 Gruplara katılan: <b>⟨0⟩</b> · ayrılan: <b>⟨1⟩</b>
+171919cd0	🆕 <b>Yeni sohbetler</b>
+8298e9706	… ve ⟨0⟩ tane daha
+7ba765796	🏆 <b>En aktif gruplar</b>
+03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ mesaj
+57d75c0ab	🛠 Bot kısa bir bakımda; birazdan dönecek. Korumalar çalışmaya devam ediyor.
+fc94758f1	🛠 Bakım modu <b>açık</b>⟨0⟩
+588994912	— ⟨0⟩'de kapanır
+35ea18ef8	✅ Bakım modu kapalı
+e1a334ce2	(süresiz)
+e7103f4b6	<code>/bakim 30</code> — 30 dakika · <code>/bakim ac</code> — süresiz · <code>/bakim kapat</code>
+c05840eb1	Sonuna <code>-duyur</code> eklersen gruplara kısa not gider.
+fe8a047fd	Bakımda komutlar ve butonlar herkese kapanır (sen hariç); spam, link, flood, captcha gibi korumalar çalışmaya devam eder.
+9fd9dff45	✅ Bakım modu kapandı.
+280c2df8e	Bakım modu zaten kapalı.
+a476c76e4	✅ Bakım bitti, bot tamamen çalışıyor.
+5a2d5c21d	🛠 Bakım modu açıldı, ⟨0⟩'de kendiliğinden kapanır.
+321af0468	🛠 Bakım modu açıldı (süresiz). Kapatmak için /bakim kapat
+81851cbcd	Kullanım: /bakim 30 · /bakim ac · /bakim kapat
+0d8f36bae	Komutlar ve butonlar herkese kapalı (sen hariç); korumalar çalışıyor.
+0e64031cc	/davet grupta kullanılır: sana özel davet linki verir, getirdiğin kişiler sayılır.
+882848490	Bu grupta davet yarışması kapalı.
+b5811c1fa	Davet linki oluşturamadım: bana "kullanıcı davet etme" yetkisi verilmeli.
+c2dee7686	Davet linki oluşturamadım, biraz sonra tekrar dene.
+24b1d9ce7	🔗 ⟨0⟩, davet linkin:
+1dafe45ec	👥 Getirdiğin: <b>⟨0⟩</b> kişi⟨1⟩
+6f74b2ba9	🏆 Sıralama: /davetler
+060348723	(⟨0⟩ kişi ayrıldı)
+cb5bdaa5f	/davetler grupta kullanılır.
+1db2cf152	🏆 Henüz davetle gelen yok. /davet ile kendi linkini al!
+4ba6e3c96	🏆 <b>Davet sıralaması</b>⟨0⟩
+d7ee0f9c5	(son 7 gün)
+b71ab530b	⟨0⟩ ⟨1⟩ — <b>⟨2⟩</b> kişi
+e309c956d	Kendi linkin için /davet⟨0⟩
+ff021375b	· haftalık: /davetler hafta
+db6ff4fd5	🚫 Engelle
+ead127c24	📨 Mesajın bot yöneticisine iletildi. Yanıt gelince burada göreceksin.
+b3be121db	✅ Yanıt iletildi.
+6a71974f7	❌ İletilemedi: kullanıcı botu engellemiş.
+29d8bcae2	❌ İletilemedi: ⟨0⟩
+a299e6f40	Yetkisiz!
+67149866b	kullanıcı adı yok
+e9d283a8a	ID: ⟨0⟩
+546855b2f	Toplam mesaj: ⟨0⟩
+4caedc905	🚫 Engellendi: mesajları artık iletilmeyecek.
+aa1be6bef	✅ Engel kaldırıldı.
+05fe7a9ae	✅ Engeli kaldır
+347667dc7	💬 Bota özelden yazdığın mesajlar bot yöneticisine iletilir; yanıt da buraya gelir.
+fb6c079d1	💬 Destek hattı: <b>⟨0⟩</b>
+29ab6a683	Son 7 gün: ⟨0⟩ mesaj, ⟨1⟩ kişi
+d3a86e2ed	Kullanıcıların bota özelden yazdığı mesajlar sana iletilir; o mesaja <b>yanıt</b> verirsen cevabın kullanıcıya gider (kimliğin görünmez). Altındaki 🚫 ile kişiyi engelleyebilirsin.
+2e8d13df7	/destek kapat — kapat
+b9d5c0506	/destek ac — aç
+fb9c9edb1	🔨 ban
+69750b260	👢 atma
+ba949e0b3	🔇 susturma
+499389526	⚠️ uyarı
+2146683b0	🗑 silme
+29c555d38	✅ ban kaldırma
+2adb56b78	🔊 susturma kaldırma
+be630c265	↩️ uyarı geri alma
+4a1bf66db	atıldı
+804ba7661	sil
+324073880	🔻 Telegram yöneticiliği de alındı.
+cf9b454c2	⚠️ Telegram yöneticiliği alınamadı (onu bot atamamış olabilir); gerekirse grup ayarlarından elle al. (⟨0⟩)
+b55e087a5	🚨 <b>Admin işlem sınırı aşıldı</b> — ⟨0⟩
+427b5c6c1	⟨0⟩ son 1 saatte <b>⟨1⟩</b> ban/atma/susturma yaptı (sınır ⟨2⟩). Yetkisi askıya alındı⟨3⟩.⟨4⟩
+95dbff4c7	(rütbe: ⟨0⟩)
+1f08073ce	♻️ Yetkisini geri ver
+007e62b21	↩️ Son 2 saatteki banlarını kaldır
+62523d9c0	✅ Tamam, askıda kalsın
+edef2b326	Bunu sadece grubun kurucusu yapabilir.
+c2ee2c9d8	↩️ ⟨0⟩ kişinin banı kaldırıldı
+91b30283d	↩️ ⟨0⟩ kişisinin son banları geri alındı (⟨1⟩) | ⟨2⟩
+9ed54f7b6	Askıda değil (zaten çözülmüş).
+65e104036	(Telegram yetkisi geri verilemedi: ⟨0⟩)
+fdec34132	♻️ Yetkisi geri verildi⟨0⟩
+e44b14d39	♻️ ⟨0⟩ yetkisi geri verildi | ⟨1⟩
+caddb66f3	✅ Yetkisi alınmış olarak kaldı
+a9968a219	⛔ ⟨0⟩: yetkisi askıda
+5d7617657	👮 <b>Günlük admin özeti</b> — ⟨0⟩
+053473339	<i>Telegram, uygulamadan elle silinen mesajları botlara bildirmez; silme sayısı /del ve /temizle ile yapılanlardır.</i>
+46faeb5b0	Önce /kanal ile grup seç!
+c1c404194	Bu komut kurucu ve yardımcı kurucu içindir.
+3960d6a99	Bu sürede yetkili işlemi yok.
+42c00ba90	👮 <b>Admin denetimi</b> — ⟨0⟩ (son ⟨1⟩ gün)
+5cb08e285	Gün sayısı: <code>/denetim 7</code>
+3de0d27b9	📩 Denetim özeti özelden gönderildi.
+57a762312	Özelden gönderemedim: önce bota özelden /start yaz.
+6accc9fd5	… ve ⟨0⟩ mesaj daha
+37de34f22	🗑 <b>Silinen mesajlar</b>⟨0⟩ | Silen: ⟨1⟩
+eaf7ea115	<blockquote expandable>⟨0⟩⟨1⟩</blockquote>
+9a1505c99	/del grupta, silinecek mesaja yanıt olarak kullanılır.
+d223e7b03	Silinecek mesaja yanıt vererek /del yaz.
+9fada83b0	🗑 <b>Mesaj silindi</b> | Sahibi: ⟨0⟩ | Silen: ⟨1⟩
+a1c331d8e	/gecmis grupta, bir mesaja yanıt olarak kullanılır.
+5f93a0deb	Geçmişini görmek istediğin mesaja yanıt vererek /gecmis yaz.
+250e055ba	Bu mesajın düzenleme kaydı yok (son ⟨0⟩ gün saklanır).
+36da7c07e	📝 <b>Düzenleme geçmişi</b> — ⟨0⟩ · ⟨1⟩ düzenleme
+27ec83d6a	ilk hâli
+afea26f62	⟨0⟩. düzenleme
+39562283b	🌐 Global banlı kullanıcı katıldı ve banlandı: ⟨0⟩
+b42c13323	🤖 Şüpheli hesap kısıtlandı: ⟨0⟩ → ⟨1⟩
+3c4fe05e5	👋 ⟨0⟩ katıldı → ⟨1⟩
+aa9673f91	BUGÜN
+fe5b02de1	BU HAFTA
+05e451c40	BU AY
+a65b592d7	TÜM ZAMANLAR
+fa5c481c7	Kullanıcı → Mesaj
+11a5c6c19	├ Toplam aktif kullanıcı: ⟨0⟩
+d8524730d	└ Toplam mesaj: ⟨0⟩
+cd18a00ba	Senin ⟨0⟩ : ⟨1⟩
+8b57b7048	Bu grup kayıtlı değil! Özelden kullanıyorsan önce /kanal ile grup seç.
+d2fc8f52c	Grubunuzda Aylık en çok aktif olan 15 kişi:
+10710d7e5	📊 Bu Sıralama bu Aya aittir.
+0bffc9609	Grubunuzda Tüm Zamanların en çok aktif 15 kişisi:
+5552d868e	📊 Tüm zamanlar sıralaması.
+9d75c68d7	Henüz mesaj istatistiği yok!
+54dbc7053	Grubunuzda Günlük en çok aktif olan 15 kişi:
+86767b480	📊 Bu Sıralama geçtiğimiz Güne aittir.
+25670a03f	Grubunuzda Haftalık en çok aktif olan 15 kişi:
+17af6b262	📊 Bu Sıralama geçtiğimiz Haftaya aittir.
+43d197ca4	📅 Günlük
+f70fa8d28	📅 Haftalık
+1b9326b3c	📅 Aylık
+c9c0e3bcd	📊 Bütün zamanlarda
+d4d0010bd	📋 Detaylı bilgi
+f939c661d	🌐 Global
+674ed30af	👥 Bulunduğunuz grup için sıralama türünü seçiniz.
+0f3a59f6a	Bu menü ⟨0⟩ tarafından açıldı.
+bbf0e9940	👥 Grubunuzdaki ⟨0⟩ en çok aktif olanlar:
+62e79a0f9	Bot grubunuzda yetkili olduğundan beri grubunuzun çeşitli etkileşimleri:
+f55378a92	👥 Aktif kullanıcı:
+503794387	💬 Toplam mesaj:
+ef5bd5de0	📊 Toplam çeşitli etkileşim:
+c6c4664dd	Belirli bir kullanıcı için /info @kullanici veya mesaja reply vererek bilgi alabilirsiniz.
+7e811e0d2	👱 İsim: ⟨0⟩
+9b0e7b293	🌐 Kullanıcı adı: ⟨0⟩
+14ed29970	👥 Toplam Bulunduğun grup sayısı: ⟨0⟩
+ba33e26dc	💬 Bulunduğun gruplarda toplam mesaj:
+8cb7f31a3	├📆 Günlük: ⟨0⟩
+5ee653a06	🔍 Bulunduğun gruplarda toplam bilgi:
+0df3dab20	├🃏 Çıkartma: ⟨0⟩
+e93a634c3	📊 ⟨0⟩ istatistikleri:
+ae2b984ac	💬 Mesaj sayısı:
+3e08d6dfd	┌📆 Günlük: ⟨0⟩
+037b7c646	├📆 Haftalık: ⟨0⟩
+9f577c2b5	├📆 Aylık: ⟨0⟩
+e1ed2556f	📊 Etkileşim detayı:
+0327b318b	┌🃏 Çıkartma: ⟨0⟩
+b667cf812	├🙃 Emoji: ⟨0⟩
+68fa09ce3	├📷 Fotoğraf: ⟨0⟩
+886e342ec	├🎥 Video: ⟨0⟩
+a11d703a7	├💾 Dosya: ⟨0⟩
+0afb08ea1	├🎙 Ses kaydı: ⟨0⟩
+5199486f9	└📼 Müzik: ⟨0⟩
+7d244b585	🏆 Genel sıralama: #⟨0⟩
+9394cb52f	Tum adminleri geri yukle
+846fa3804	Spam yapan haric geri yukle
+ea0ec5a8c	Şüpheli: ⟨0⟩
+40ab78429	🚨 <b>KANAL KORUMA MODU AKTIF</b>
+65bfd4f34	⟨0⟩Kanal: <code>⟨1⟩</code>
+d5d022cd9	Kurucu ve botu ekleyen admin haric tum admin yetkileri alindi.
+11b7596d5	⟨0⟩ admin geri yuklendi
+19c35e8f0	🌐 Ağ banı kaldırıldı: ⟨0⟩ (ağdaki tüm gruplarda)
+c2e7013a3	🌐 Ağ banı: ⟨0⟩ ağdaki ⟨1⟩ gruba daha yayıldı
+9fe755831	kayıt bulunamadı
+d121e65b8	bot bilgisi alınamadı: ⟨0⟩
+463126054	♻️ Admin kurtarma: ⟨0⟩ admin geri yüklendi⟨1⟩
+90d9a6b20	, başarısız: ⟨0⟩
+caa60fdc5	🚨 <b>Toplu yetki alma</b>
+8ba5e6709	Grup/kanal: <b>⟨0⟩</b>
+5d095f637	⟨0⟩ (<code>⟨1⟩</code>) 10 dk içinde ⟨2⟩ adminin yetkisini aldı.
+8d21e12ea	Son sağlam kayıt: ⟨0⟩
+9ba30f2ce	♻️ Adminleri geri yükle
+a96545d83	♻️ Otomatik geri yüklendi: ⟨0⟩ admin⟨1⟩
+a556aedb4	(başarısız: ⟨0⟩)
+ee38d1474	Kullanılabilir admin kaydı yok.
+d94586a2d	Kurtarma yetkin olan bir grup/kanal yok. Grup sahibi seni panelden 'güvenilir kişi' olarak eklemeli.
+a186abeb7	Hangi grubun/kanalın adminlerini geri yüklemek istiyorsun?
+358350243	Bu grup için henüz admin kaydı yok (kayıt 6 saatte bir alınır).
+e0f04d2e3	⟨0⟩ · ⟨1⟩ admin
+629844d31	<b>⟨0⟩</b> — geri yüklenecek kaydı seç:
+b5ad3a8e7	Yetkin yok veya kayıt yok.
+0644770db	♻️ ⟨0⟩ kaydındaki adminler geri yüklenecek:
+700b3ac82	Onaylıyor musun?
+1ca35b0e1	✅ Evet, geri yükle
+e6a5e85cd	❌ Vazgeç
+805c38798	Geri yükleniyor...
+cf63ea900	♻️ ⟨0⟩ admin geri yüklendi.⟨1⟩
+b8058c528	❌ Başarısız: ⟨0⟩
+e82edc1de	(Bot, kendisinde olmayan yetkiyi veremez ve başkasının atadığı adminleri değiştiremez.)
+f13124b3b	Admin listesi geri yuklendi (⟨0⟩ admin).
+400c018e5	medya flood
+60ff56604	⟨0⟩ mesaj / ⟨1⟩sn
+97268aded	30dk icinde 2+ admin spam yapti
+d739884a3	⚠️ <b>Admin Spam Tespit Edildi!</b>
+3302869c8	Admin: ⟨0⟩ (<code>⟨1⟩</code>)
+3cbc92eef	Islem: ⟨0⟩
+3d7963ca4	Kanal koruma modu: Aktif degil
+72f491ffe	Ban + Yetki alindi
+35cf8f7fb	Yetkisi alindi
+b6331605b	🤖 Bot ekleme engellendi
+ad9ead387	Bot: ⟨0⟩
+a7c242666	Ekleyen: ⟨0⟩
+9b75f55a2	⚠️ Yetkisiz admin ekleme tespit edildi!
+e97409070	Ekleyen: ⟨0⟩ (<code>⟨1⟩</code>)
+c065dbd5f	Eklenen: ⟨0⟩ (<code>⟨1⟩</code>)
+17a403bbb	Toplu ban tespiti: ⟨0⟩ (⟨1⟩) ⟨2⟩ ban / ⟨3⟩sn
+e21052fad	Baslik: '⟨0⟩' → '⟨1⟩'
+eb38d7d1c	Aciklama degistirildi
+b2209389a	Kanal klonlama koruması devreye girdi!
+85a87d615	Degisiklikler geri alindi:
+b79ccad39	📋 <b>Haftalik Kanal Log Raporu</b>
+a510b1897	<code>⟨0⟩</code>
+546658b9b	Ban+Yetki Al
+2c124f337	Sadece Yetki Al
+a5505fdbd	⟨0⟩ Admin Spam Koruma
+183b4aa2e	Spam Aksiyon: ⟨0⟩
+5d5673266	⟨0⟩ Admin Medya Flood
+652974e14	Medya Aksiyon: ⟨0⟩
+9123863e2	⟨0⟩ Link Koruması
+3d1465b74	⟨0⟩ Klonlama Koruması
+a03517abc	⟨0⟩ Bot Ekleme Koruması
+b27f8f968	⟨0⟩ Toplu Ban Koruması
+006229c38	👥 Güvenli Adminler
+ec411a6b8	💾 Kanal Başlık/Açıklama Kaydet
+a8d6a7aa4	🔙 Kapat
+e0a90af5c	Kanal bulunamadi!
+9abd1a97e	Bu komut kanal ayarlari icin. Grup ayarlari icin /settings kullan.
+d63cd9886	Kaydedildi: ⟨0⟩
+c3d254196	Guvenli admin listesi:
+ff4ef369c	(Link atmasina izin verilenler)
+5243a71a1	Kanal gönderileri
+f6489e475	kanal yöneticisi
+29bb8c58f	İstekler onaylanıyor, lütfen bekle...
+218960722	Bekleyen katılım isteği bulunamadı.
+1b385aeaa	✅ ⟨0⟩ istek onaylandı.
+fb8bc6b23	(⟨0⟩ istek onaylanamadı; süresi dolmuş veya geri çekilmiş olabilir)
+05d63d7c6	İstek onaylama: ⟨0⟩ onaylandı | ⟨1⟩
+9ea0064d2	Bu botu kullanman engellendi.
+db8a1871b	Kullanim: /uyeetiketi @kullanici <etiket> veya reply + /uyeetiketi <etiket>
+584a09e9f	Kullanici ve etiket gerekli!
+84aa89869	Etiket max 32 karakter olabilir!
+fcd61489e	⛔ Kendi rütbendeki veya üstündeki birine etiket veremezsin.
+5f53e65d3	⟨0⟩ admin degil! Sadece adminlere etiket verilebilir.
+f4fc9906d	🏷 Etiket verildi: ⟨0⟩ → ⟨1⟩
+be06d3d2f	Yardımcı kurucuyu sadece kurucu verebilir.
+0ef49a704	Kullanıcı bulunamadı! ID, @kullanıcıadı veya yanıt ile kullan.
+4de20141f	Kullanım: /⟨0⟩ @kullanıcı [etiket]
+d033e22ae	admin
+89fa8ca8c	basadmin
+e1b55fb8a	Etiket: ⟨0⟩
+b60f7c81a	⟨0⟩ yapıldı: ⟨1⟩⟨2⟩
+9adcfd5da	Kullanim: /engelle <id> [sebep]
+dd3f79560	Gecersiz ID!
+b53956227	✅ ⟨0⟩ engellendi.
+68a3942e7	Kullanim: /engelkaldir <id>
+7f14d47f5	✅ ⟨0⟩ engeli kaldirildi.
+a07c6c04c	Mevcut uyari limiti: ⟨0⟩
+eeceb0ee6	Kullanim: /setwarnlimit <2-20>
+68cb7aa9e	Limit 2-20 arasinda olmali!
+7fdd7a44f	Uyari limiti ⟨0⟩ olarak ayarlandi.
+32cb8952a	Spam muaf listesi bos.
+804f32102	/whitelist @kullanici ile ekle.
+7ec4b51e6	Spam Muaf Listesi:
+c0c03c505	⟨0⟩ muaf listeden cikarildi.
+e6695a6db	⟨0⟩ spam muaf listesine eklendi.
+9e5f1a353	Ozel grup
+e9312bd1b	Captcha
+688f939e9	Kelime Filtresi
+cbabb7d8b	Yok
+28b8f5479	👥 Uye: ⟨0⟩
+ceb987630	👮 Admin: ⟨0⟩
+af72a68a6	📈 Istatistikler
+28086b0d5	├ Toplam mesaj: ⟨0⟩
+01c7b8d8a	├ Aktif kullanici: ⟨0⟩
+12279a365	├ Toplam ban: ⟨0⟩
+74d4fdeab	├ Toplam uyari: ⟨0⟩
+69516a922	└ Uyari limiti: ⟨0⟩
+c77739311	Aktif Koruma: ⟨0⟩
+58b3e5e14	Yazı! 🪙
+561c75012	Tura! 🪙
+1a786e9bf	⟨0⟩ Zar: ⟨1⟩
+e7e394f96	🤖 ⟨0⟩ — Bot Sahibi Komutlari
+f4e511a55	/panel — Botunun gruplari ve istatistikleri
+94da61b33	/duyuru — Gruplara, kanallara ve kisilere duyuru (/duyuru yaz, kullanimi gor)
+5d08c9107	/duyurular — Duyuru gecmisi, tiklamalar, anket sonuclari
+cbbbbd1fd	/duyurusablon — Duyuru sablonlari
+70215bc5f	/buyume — Haftalik buyume raporu (her pazartesi otomatik gelir)
+7a7fa1e0f	/destek — Destek hatti (ozelden gelen mesajlar sana iletilir)
+0d05bfd3b	/gban <id|@kullanici> [sebep] — Botunun tum gruplarinda banla
+1db86c395	/ungban <id|@kullanici> — Bani kaldir
+2eb535697	/gbanlist — Ban listesi
+eeedac8d1	/kanal — Grup sec
+98b86d999	🤖 Bot Sahibi Komutlari
+6e9bfe3b7	/klonlar — Klon botlari yonet (durdur/baslat/sil)
+e48ef6b31	/klon — Kendi klon botun
+3f50c5d54	/panel — Yönetim paneli (gruplar/kanallar, botu çıkar, 🧹 temizlik)
+5e0335772	/perf — Performans: yavaş işlemler, bellek, kuyruk
+6d08e2352	/bakim — Bakım modu (komutlar kapanır, korumalar çalışır)
+f160302c5	/engelle <id> [sebep] — Engelle
+b1c36dc93	/engelkaldir <id> — Engel kaldir
+647651cb8	/gban <id|@kullanici> [sebep] — Tum gruplarda banla
+86ee8d200	/ungban <id|@kullanici> — Global bani kaldir
+d094b4c43	/gbanlist — Global ban listesi
+d729d3ba2	/yedek — Veritabani yedegi al
+0e556fad9	/gmedyaengel — Yanitlanan medyayi tum gruplarda engelle
+8af5e8c17	/kurtar — Admin kurtarma
+f0032f0c7	/kanal — Kanal sec
+97a1889ae	/kanalsettings — Kanal ayarlari
+def1847f5	⟨0⟩/start — Baslat
+f467f5a12	/menu — Alt menuyu goster
+579f051c8	/settings — Secili grubun butonlu ayar paneli
+0ecfed5c8	/help — Yardim
+d1d491df3	/kanal — Kanal baglantisi
+a64b799ed	/itiraz <aciklama> — Ban itirazi gonder
+3aaf39bd7	/kurtar — Admin kurtarma (guvenilir kisiler icin)
+e8a9f2564	💬 Bota yazdığın mesaj bot yöneticisine iletilir, yanıtı buraya gelir.
+90b35c202	/klon — Kendi adinla klon bot ac
+53ff31717	👤 Kullanici Komutlari
+a6ac25fa6	📊 Istatistik & Profil
+7c1cddd9b	/profil — Kendi profilini goruntule
+4794e486d	/gunluk — Gunluk mesaj siralaması
+9304026c3	/haftalik — Haftalik siralama
+0f2144ac5	/aylik — Aylik siralama
+dab273f01	/toplam — Tum zamanlar siralaması
+ffca95898	/top — Butonlu siralama menusu
+f6859df4f	/info @kullanici — Kullanici istatistikleri
+f739f3e69	/grupbilgi — Grup hakkinda bilgi
+96d41dfbc	/rules — Grup kurallarini gor
+cf6de9a2b	/afk [sebep] — AFK ol (etiketleyene bilgi verilir, yazınca kalkar)
+427ccde79	/oylama — Yanıtladığın kişi için susturma oylaması başlat
+f2f9f9eaf	/etiketme — /etiket listesinden çık (tekrar yazınca geri gir)
+6de9402ed	/davet — Sana özel davet linki (getirdiğin kişiler sayılır) · /davetler — sıralama
+82789607f	📝 Notlar
+f9f2a17b9	/notlar — Kayitli notlar
+46ba4fefd	#not — Notu getir (ornek: #kurallar)
+a37fbde9a	/not <isim> — Notu getir
+5ff3c9cb2	🎰 Eglence
+b0d9549b8	/yazitura — Yazi tura at
+3ab74dacf	/zar — Zar at
+b4031dc89	/help — Bu menu
+6467c9dbe	/id — ID goster
+0af5bde71	/itiraz <aciklama> — Ban itirazi (bota ozelden)
+aff60c67d	/report [sebep] veya @admin — Yanitladigin mesaji yetkililere bildir
+15575b067	👮 Yetkili Komutlari — senin rütben: ⟨0⟩
+d955391ce	Rütbe sırası: 👑 Kurucu > 🔱 Yardımcı Kurucu > ⭐ Üst Admin > 🛡 Admin
+cb1ecf135	🛡 Admin ve üstü
+ba31c6e75	/warn @kullanici [sebep] — Uyari ver
+9db2b48b7	/mute @kullanici [sure] — Sustur (Admin en fazla 24 saat)
+0d7e990d0	/unmute @kullanici — Susturmayi kaldir
+258592394	/kick @kullanici — Gruptan at
+40e58c981	/warns · /banlist · /mutelist — Listeler
+07722765d	/cekilis · /cekilis_bitir — Cekilis
+faabdc38a	/filter — Otomatik yanit (or. selam → Aleykum selam; medya ve buton olur)
+0e48d2662	/filters · /stop <kelime> · /stopall — Filtre listesi / sil
+a295c1d2b	/etiket <mesaj> · /etiketdur — Üyeleri gruplar hâlinde etiketle / durdur
+43f5db5d3	/sicil @kullanici — Botun tüm gruplarındaki ceza geçmişi ve eski isimleri (özelden gelir)
+4268b44a9	/cekilis 1g 3 Ödül | kanal=@kanal mesaj=20 gun=7 — Şartlı, süreli çekiliş
+f9892b61b	/yetkim — Rütben ve yetkilerin
+10ead6ab1	⭐ Üst Admin ve üstü
+667e625bc	/ban @kullanici [sure] [sebep] · /unban — Ban
+387e5f34e	/unwarn @kullanici — 1 uyari geri al
+48c85c764	/temizle <sayi/all> · /slowmode <sn> — Toplu silme, yavas mod
+2454c2b92	/pin · /unpin — Sabitleme
+d0ffce66f	/kilit [dk] · /medyakilit [dk] — Acil durum kilidi
+f6b07290c	/istekonayla — Katilim isteklerini onayla
+f252c350e	/setrules · /setwelcome · /setgoodbye · /save · /notsil — Kurallar, karşılama, veda, notlar
+7bf273598	(medya, butonlar, biçim ve rastgele mesaj desteklenir; /setwelcome yazınca yardımı çıkar)
+8c7cbbe68	/welcome · /goodbye · /resetwelcome — Önizle / varsayılana dön
+df2e5eccc	/zamanla 6sa <mesaj> · /zamanlar — Zamanlanmış (tekrarlı) mesajlar
+de546f6e8	🔱 Yardımcı Kurucu ve üstü
+d18538a2d	/settings — Butonlu ayar paneli (tum koruma ayarlari)
+00043ba1c	/kurulum — Hizli kurulum (paket + hos geldin + korumalar)
+bfe1425f8	/kanalzorunlu @kanal — Yazmak için kanala katılma zorunluluğu (kapat: /kanalzorunlu kapat)
+d21608b5a	/antispam · /antilink · /antiforward · /antimedia · /antiraid · /captcha on/off
+886d570db	/antiraid_ac · /medyaac — Kilitleri ac
+5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /linkizin · /yeniuye
+443a00692	/setwarnlimit · /setwarnaction · /captchasure
+3d2493394	/medyaengel · /paketengel — Medya/paket engeli
+20abda0cf	/admin (/addadmin) · /basadmin @kullanici [etiket] — Rütbe ver
+3c7389596	/remove @kullanici — Rütbeyi al
+a83e94dc8	/yetkiler — Kişiye özel yetki paneli (bota özelden)
+13accc070	/uyeetiketi @kullanici <etiket> — Admin etiketi
+775ec46f0	/reload — Admin listesini Telegram'dan yenile (elle/başka botla verilen yetkiler)
+9a654a567	👑 Sadece Kurucu
+f0d85c250	/yardimcikurucu @kullanici — Yardimci kurucu yap
+aed09d232	/setlog — Log kanali · Grup agi · Yedek admin kurtarma
+81fcecc0c	📊 Bilgi
+99e6db648	/stats · /grupbilgi · /leaderboard · /staff
+a475e9c96	Sure formati: 30m, 2h, 7d
+78f33d7b8	Telegram admini
+5a0e84cda	⚙️ Ayarlar Paneli
+f910032f2	🌍 Dil / Language: /setlang⟨0⟩
+215259316	⚙️ Ayarlar
+96fccfef2	🛡 Gruplarım
+5e167ed13	📊 İstatistik
+4ab530c07	❓ Yardım
+3f15c0b6a	🤖 Klon bot
+3edc5eebe	change_info+delete_messages+restrict_members+invite_users+pin_messages+promote_members+manage_video_chats
+dd1fb512f	change_info+post_messages+edit_messages+delete_messages+invite_users+promote_members
+a2c4fcfa1	🔗 Grup seç
+ed11ea7cd	📢 Kanal seç
+d7f837819	Menüden seç veya komut yaz…
+2ac5318f5	➕ Gruba ekle
+7357057be	📢 Kanala ekle
+2dadb70db	Menü aşağıda 👇
+71aa20a4d	Önce bir grup seç: 🛡 Gruplarım veya 🔗 Grup seç butonunu kullan.
+3224664d6	Bot bu sohbette yönetici değil. Botu oraya yönetici olarak ekle ve tekrar seç.
+78ad7212f	Bu sohbette yetkin yok.
+2216a64f4	✅ Seçildi: <b>⟨0⟩</b>
+e107177fc	Yardım menüsü
+9e88862d9	Grup kuralları
+07efa78b4	Kayıtlı notlar
+cf90a04f1	Profilin ve uyarıların
+b79df54d5	Aktiflik sıralaması
+a0d54db08	Kullanıcı istatistikleri
+c3da965fe	Grup bilgisi
+aa6b818af	ID göster
+c23bc7fa5	Zar at
+cbd34c9f1	Yazı tura at
+1a6e6af53	Yanıtladığın mesajı yetkililere bildir
+61e89c9ef	AFK ol
+c51b37c71	Etiket listesinden çık
+d1076c2fa	Grubun dili / Language
+03811f00b	Susturma oylaması (mesaja yanıt)
+ef4e5e596	Sana özel davet linki
+1db922722	Davet sıralaması
+53d58e1ac	Butonlu ayar paneli
+0c4051b76	Admin listesini yenile
+c55aa4167	Uyarı ver
+cec03bba0	1 uyarı geri al
+263cc2188	Uyarıları gör
+76f0023be	Susturmayı kaldır
+9d1a81717	Banı kaldır
+6118dce5a	Gruptan at
+18bbd14ee	Mesajları toplu sil
+2d7017ef2	Mesajı sabitle
+d7722a3e3	Sabitlemeyi kaldır
+a263e4e53	Yavaş mod
+9da046535	Ban listesi
+6d6c46eda	Mute listesi
+a84a2a1e7	Not kaydet
+385c7d8ec	Not sil
+a60cb06d0	Hızlı kurulum
+d2dd24bcc	Otomatik yanıt ekle
+364057e43	Filtre listesi
+5d24c4032	Filtre sil
+e46d6d528	Hoş geldin mesajı (medya/buton)
+2c1419a05	Veda mesajı
+27f1ba342	Kuralları yaz
+3d5b58779	Zamanlanmış mesaj ekle
+943458e1e	Zamanlanmış mesajlar
+2331d765c	Üyeleri etiketle
+b0d7d4f3d	Etiketlemeyi durdur
+e912877cd	Kanal zorunluluğu
+29cc4c872	Kullanıcı sicili
+8871a3c02	Çekiliş başlat
+dfae805ce	Çekilişi bitir
+1945bd345	Acil durum: grubu kilitle
+c0559b5cc	Grup kilidini aç
+422c89bec	Rütben ve yetkilerin
+fa7d4e18f	Yetkili listesi
+84be9db5d	Grup istatistikleri
+3a085165d	Yanıtlanan medyayı engelle
+414c8153f	Sticker paketini engelle
+c3e7837f2	Medya gönderimini kilitle
+956c0ce19	Medya kilidini aç
+4e382259e	Başlat ve menü
+1c4ce1da4	Menüyü göster
+7e27a3b5a	Grup/kanal seç
+dc6cac394	Seçili grubun ayarları
+e78fa8e35	Ban itirazı gönder
+eaba0a794	Yardım
+cbad220d3	Admin kurtarma (güvenilir kişiler)
+fcea72bad	Seçili grup için hızlı kurulum
+495825a5e	Web panel (tüm ayarlar tek sayfada)
+9674953cf	Bot duyurularını kapat
+99ab93b21	Dil / Language
+333895635	Yöneticiye yaz (destek hattı)
+0d0187ac4	Botunun grupları ve istatistikleri
+8938961a5	Gruplara, kanallara, kişilere duyuru
+be4f2dea9	Duyuru geçmişi
+0c8b2de83	Duyuru şablonları
+ecced9e02	Haftalık büyüme raporu
+52b5b2176	Destek hattı aç/kapat
+32791cc9a	Botunun gruplarında banla
+a7b61f397	Klon botları yönet
+205162f9b	Performans ölçümü
+5d22ead7d	Yönetim paneli
+84c0cbd02	Global ban
+68cd0b7eb	Global banı kaldır
+a38b6848f	Global ban listesi
+45a767875	Kullanıcı/sohbet engelle
+4902bf286	Engeli kaldır
+cfc719f1d	Veritabanı yedeği
+efdd2ee59	Bakım modu
+bf65fdcd0	Medyayı tüm gruplarda engelle
+385efb5c0	⚡ Main bot: @⟨0⟩
+8f13119d3	⟨0⟩ — grup ve kanal koruma botu: spam, link, flood, raid ve captcha.
+63edd3296	🛡 ⟨0⟩ Security Bot
+7ebe2ab6b	Grubunu ve kanalını spam, link, flood, raid ve sahte hesaplara karşı korur. Tüm ayarlar butonlu panelden yapılır.
+287dec170	Başlamak için /start⟨0⟩
+1a42073da	⚙️ Panel
+81daf5632	<b>⟨0⟩</b> grubuna katılma isteğin alındı. Onaylanman için soruyu cevapla:
+784db6bac	⏰ Süre: ⟨0⟩
+90d0b5f0a	🔐 Özelden doğrulama gönderildi: ⟨0⟩ | ⟨1⟩
+49349d70e	Bu doğrulamanın süresi dolmuş.
+6af257079	İstek artık geçerli değil (zaten işlenmiş olabilir).
+d7eff8c3b	✅ Doğrulandı! <b>⟨0⟩</b> grubuna kabul edildin.
+69af7d417	✅ Özelden doğrulandı ve kabul edildi: ⟨0⟩ | ⟨1⟩
+99c1bac07	❌ Yanlış cevap. <b>⟨0⟩</b> katılım isteğin reddedildi; tekrar istek gönderebilirsin.
+86e28712b	❌ Özelden doğrulama başarısız, reddedildi: ⟨0⟩ | ⟨1⟩
+9dbf30953	⏰ Süre doldu, katılım isteğin reddedildi. Tekrar istek gönderebilirsin.
+2ec5e8129	⏰ Özelden doğrulama zaman aşımı → ID:⟨0⟩ reddedildi | ⟨1⟩
+c9e24da4b	ch_flood_⟨0⟩
+12ae98fff	⚠️ Kanal flood algılandı! 10 saniyede ⟨0⟩ gönderi
+f271bb123	🌐 Global banlı katılım isteği reddedildi: ⟨0⟩
+7b944f9a5	❌ Bot/sahte reddedildi: ⟨0⟩ → ⟨1⟩
+d5d491f80	✅ Otomatik kabul: ⟨0⟩ → ⟨1⟩
+5f7e623cd	❌ Otomatik red: ⟨0⟩ → ⟨1⟩
+f8cddb848	📩 Yeni istek: ⟨0⟩ → ⟨1⟩
+a984efcca	Bu kişiye işlem yapamazsın.
+30a92b565	⛔ Rütbe yönetimi için ⟨0⟩ ve üstü gerekli.
+f57eaa44e	⛔ Kendi rütbendeki veya üstündeki birini düzenleyemezsin.
+c8857eea2	⛔ ⟨0⟩ rütbesini sadece üst rütbe verebilir.
+fd71ebc88	Kullanıcı bulunamadı.
+fa5ded262	❌ Botun admin atama yetkisi yok!
+889786c65	❌ Kullanıcı grupta bulunamadı!
+3c0a7e1f2	⚙️ Yetkiler
+e9e94dc59	Bu kişinin rütbesi yok. Önce /admin veya /basadmin ile rütbe ver.
+627b90668	⚠️ ⟨0⟩ (botta yok)
+ae8f6f509	📡 Telegram yetkileri
+033d23563	🤖 Bot yetkileri
+3d3a3d682	→ 📡 Telegram yetkileri
+8bff101a7	→ 🤖 Bot yetkileri
+daddb4f0e	❌ Rütbeyi al
+12ec1558f	✅ Kapat
+8f4a3cad6	👤 <b>Yetki düzenleme:</b> ⟨0⟩
+2a138f61a	Rütbe: <b>⟨0⟩</b>
+9d0d28c34	✅ açık · ❌ kapalı · 🔒 rütbesi yetmiyor
+bc2ec6c27	<i>Değişiklikler anında uygulanır. Rütbe butonları rütbeyi değiştirir.</i>
+4dd50d885	Geçersiz buton.
+2f00bbdcd	Bu yetki rütbesinin üstünde.
+da5fcba10	Geçersiz rütbe.
+8ba8423be	Zaten ⟨0⟩.
+aac33021a	⟨0⟩ yapıldı: ⟨1⟩ | ⟨2⟩
+d37ea2c16	Rütbe: ⟨0⟩
+222dfbc00	Rütbe alındı.
+f97fd51ad	✅ ⟨0⟩ rütbesi alındı.
+570da29a3	Yetkin yok.
+c119667e9	✅ Yetki paneli kapatıldı. Değişiklikler kaydedildi.
+cf9f2e455	⟨0⟩ bu grupta yetkili değil.
+d4df62038	🔒 Bu yetki rütbenin üstünde ya da botta bu yetki yok.
+ca3e89467	Düzenleyebileceğin yetkili yok. Rütbe vermek için grupta /admin @kişi yaz.
+9befd0808	👑 <b>Yetki yönetimi</b>
+6fcfd3b55	Düzenlemek istediğin kişiyi seç:
+770d8a43d	Night Mode Yapilandirmasi
+0d3da9061	Kisitlanacak izinleri sec, sonra Kaydet'e bas:
+3014d10c7	Saat degistirmek icin: /nightmod 23:00 07:00
+8b386c8fe	Night mode yapilandirma hatasi.
+441634b34	🛡 ⟨0⟩ aktif! Ayarlar için /settings, komutlar için /help.
+f9f826fff	🛡 <b>⟨0⟩ Security Bot</b>
+a299d1e4f	Grup ve kanalların için spam, link, flood, raid ve captcha koruması.
+b40285a71	1️⃣ Aşağıdaki butonla botu grubuna gerekli yetkilerle ekle.
+15b8ba9ba	2️⃣ Alttaki menüden grubunu seç, ⚙️ Ayarlar ile her şeyi butonlarla yönet.
+eae59de08	💬 Destek
+81e22b47b	Geçersiz yetki linki.
+5af6c10c1	Grup kaydedildi! Artık bota özelden 🛡 Gruplarım ile seçebilirsin.
+425ac7c01	Grup ID: ⟨0⟩
+60a03153e	Kaydedilemedi: önce botu bu gruba yönetici yap.
+08cdd8869	Bu grup kayitli (ID: ⟨0⟩)
+7b80705e1	DM'de /kanal yazarak yonetim paneline gec.
+c6668e444	Kayıtlı bir grubun/kanalın bulunamadı.
+489f886fe	Alttaki 🔗 Grup seç / 📢 Kanal seç butonuyla sohbetini seç: bot orada yöneticiyse otomatik tanınır. Bot henüz ekli değilse önce Gruba ekle butonunu kullan.
+529f5b296	Yonetmek istedigin kanal/grubu sec:
+3b561f5ba	✅ Seçildi: ⟨0⟩
+e537ee79f	Artık DM'de komutları kullanabilirsin.
+5da9ca5b4	Senin ID'n: <code>⟨0⟩</code>
+758b4fa2f	Reply kişinin ID'si: <code>⟨0⟩</code>
+a52056450	Örnek:
+f679032d2	• <code>/admin ⟨0⟩</code>
+ae44f58ab	• <code>/ban ⟨0⟩</code>
+8db290527	Kanal bulunamadı!
+d7db3c4cf	Mevcut log: ⟨0⟩
+354f04cc0	Kullanım: /setlog -1001234567890
+9cc790504	✅ Log kanalı güncellendi: ⟨0⟩
+f40d6696a	GRUP PERSONELİ
+511c4973a	Toplam: ⟨0⟩ personel
+284837aa3	Kullanım: /gban <id|@kullanıcı> [sebep] (veya mesaja yanıt)
+e2d4f8ab8	Bu kişi banlanamaz.
+01c3bd4a0	tüm botlarda
+cb8da44a3	⟨0⟩ gruplarında
+49aed1394	🌐 ⟨0⟩ ⟨1⟩ banlanıyor...
+73497703d	🌐 ⟨0⟩ ⟨1⟩ banlandı.
+a960dfa59	✅ ⟨0⟩ sohbet | ❌ ⟨1⟩ (yetki yok/üye değil)
+ffc42c25d	Kullanım: /ungban <id|@kullanıcı>
+ad983fea1	✅ ⟨0⟩ ⟨1⟩banı kaldırıldı.
+9027cc5a2	global
+63de87994	Ban listesi boş.
+29fa938c6	• <code>⟨0⟩</code> — ⟨1⟩ (⟨2⟩)
+d65a4bee5	Global Ban Listesi
+c58c96fc0	⟨0⟩ Ban Listesi
+6d34fa6d2	🌐 <b>⟨0⟩</b> (son 50):
+15db0d20b	Şu an: ⟨0⟩ (⟨1⟩)
+08771c47b	Kullanım:
+1d58fa8c1	/setwarnaction ban
+ff104d450	/setwarnaction tempban 1d
+fe4e1ffe8	/setwarnaction kick
+5cb6abc41	/setwarnaction mute 2h
+9ebd56f1c	✅ Uyarı limiti dolunca uygulanacak ceza: ⟨0⟩⟨1⟩
+bd06580b1	Yeni üye kısıtlaması: ⟨0⟩
+d8eaa4a1a	Kullanım: /yeniuye <dakika> veya /yeniuye off
+4986c7002	0-1440 arası dakika gir veya off yaz.
+7e4bdbce0	✅ Yeni üye kısıtlaması kapatıldı.
+d5a3095ed	✅ Yeni üyeler ilk ⟨0⟩ dk link/medya/forward gönderemez.
+d4c80a6a7	🔗 Link muaf listesi:
+f3425da9b	/linkizin ekle youtube.com
+71399725d	/linkizin sil youtube.com
+99d71c223	(t.me/kanalim gibi yol da eklenebilir)
+d555eadad	(boş)
+4bcfe1994	✅ ⟨0⟩ link muaf listesine eklendi.
+e6dffb4e9	✅ ⟨0⟩ listeden çıkarıldı.
+c22e23f31	Kullanım: /captchasure 2m (30sn - 60dk arası)
+b4b2c0b74	✅ Captcha süresi: ⟨0⟩
+42cf26778	İtiraz için bana özelden yaz: /itiraz <açıklama>
+ef023696b	Kullanım: /itiraz <neden banın kaldırılmalı?>
+294f98c41	Kayıtlı bir banın bulunmuyor.
+78158a307	Hangi grup için itiraz ediyorsun?
+0072d91b7	Bu grup için 24 saatte bir itiraz edebilirsin.
+0799f76c1	✅ Banı kaldır
+1358a154b	❌ Reddet
+6d20aaa15	📨 <b>Ban itirazı</b> #⟨0⟩
+1040c08fa	Grup: <code>⟨0⟩</code>
+fae78e9bb	Ban sebebi: ⟨0⟩
+76700df28	✅ İtirazın yöneticilere iletildi. Sonuç sana buradan bildirilecek.
+53667435f	Süre doldu, /itiraz komutunu tekrar yaz.
+6486efe3d	Gönderiliyor...
+6c9744f83	İtiraz bulunamadı.
+e2457d551	Bu itiraz zaten işlendi: ⟨0⟩
+07b34dcdd	✅ İtirazın kabul edildi, banın kaldırıldı. Gruba tekrar katılabilirsin.
+ed103ceb6	❌ İtirazın reddedildi.
+f7480a2b3	<b>Sonuç:</b> ⟨0⟩ — ⟨1⟩
+b497d1353	✅ Kabul
+6c25e020d	❌ Red
+97239bc70	📨 İtiraz #⟨0⟩ ⟨1⟩ | ⟨2⟩
+1ea2795d4	https://t.me/⟨0⟩
+7a80eefec	🖼 medya yok
+573052e01	🔘 ⟨0⟩ buton
+b81be0f7f	🎲 ⟨0⟩ seçenek
+d542cb1c4	💎 birebir kopya
+03cb45a36	Fotoğraf
+bc17c1f01	Video
+638bbfe15	Dosya
+867b291d2	Müzik
+e8bff35ea	Ses
+2e9d0e77a	Sticker
+966648de4	Yuvarlak video
+7d472b473	saat
+f4a9f3249	Bu buton artık geçerli değil.
+30dc00c2e	Bu bağlantı artık geçerli değil.
+c9910a305	Bu not artık yok.
+0e89955b2	👋 {ad} aramızdan ayrıldı. Yolun açık olsun!
+e41edf275	📜 <b>⟨0⟩ Kuralları</b>
+3f1696378	<b>Biçim:</b> mesajı Telegram'da nasıl yazarsan (kalın, italik, link, spoiler, alıntı) öyle kaydedilir.
+06c164645	<b>Medya:</b> fotoğraf/video/GIF/sticker'a yanıt verip komutu yaz.
+6a1a1a0ad	<b>Butonlar</b> (her satır bir sıra, <code>&amp;&amp;</code> ile yan yana):
+a1c3d2c0b	<code>Kanalımız - https://t.me/kanal &amp;&amp; Destek - @destek</code>
+3424e60cc	<code>Kuralları oku - rules</code> · <code>Bilgi - popup:Metin</code> · <code>Not - #isim</code>
+dd3608634	Renk: satır sonuna <code>#yeşil</code> <code>#kırmızı</code> <code>#mavi</code> · Rose tarzı: <code>[Kanal](buttonurl://t.me/kanal)</code>
+90f26740a	<b>Değişkenler:</b> <code>{kullanıcı}</code> <code>{ad}</code> <code>{soyad}</code> <code>{username}</code> <code>{id}</code> <code>{grup}</code> <code>{uye_sayisi}</code> <code>{tarih}</code> <code>{saat}</code>
+23adc295f	<b>Rastgele:</b> birden fazla mesajı tek başına <code>%%%</code> satırıyla ayır.
+7d75ab43e	Kanallarda bu mesaj kullanılamaz.
+93a792a44	Hoş geldin
+06ba336bf	Veda
+ff0fe91d4	Kurallar
+86eca05aa	✏️ <b>⟨0⟩ mesajı</b>
+0d20c41d6	Kullanım: <code>/⟨0⟩ metin</code> ya da bir mesaja/medyaya yanıt: <code>/⟨1⟩</code>
+ee9b02bb7	💎 Premium emoji korunuyor: mesaj birebir kopyalanır. Kaynak mesajı silme (silinirse normal emoji ile gönderilir).
+d54d1a799	✅ ⟨0⟩ mesajı kaydedildi (⟨1⟩).⟨2⟩
+32bc1141c	Önizleme:
+a4fd88326	✏️ ⟨0⟩ mesajı güncellendi | ⟨1⟩
+f2ecba035	Bu grupta henüz kural belirlenmemiş.
+f6d49a8a4	/setrules ile ekleyebilirsin.
+3dadf54ab	⟨0⟩ mesajı: ⟨1⟩ · ⟨2⟩
+42b967a7b	Değiştirmek için /set⟨0⟩
+6d2d95e97	👋 Hoş geldin
+46af570c5	🚪 Veda
+c0b137fe2	welcome
+3c8ec4874	goodbye
+6413cb724	✅ Hoş geldin mesajı varsayılana döndü.
+14324da2a	Süre biçimi: <code>30dk</code>, <code>6sa</code>, <code>1g</code> (ya da 30m, 6h, 1d)
+a44cbb972	Süre en az 10 dakika, en fazla 7 gün olabilir.
+7e69525ad	Bir grupta en fazla ⟨0⟩ zamanlanmış mesaj olabilir.
+ee86ab412	⏰ <b>Zamanlanmış mesaj</b>
+8dada6c44	Kullanım: <code>/zamanla 6sa Kuralları okumayı unutmayın!</code>
+82c791f2c	ya da bir mesaja/medyaya yanıt: <code>/zamanla 6sa</code>
+7939ca797	Liste ve silme: /zamanlar
+62c97be15	✅ Zamanlanmış mesaj #⟨0⟩: her ⟨1⟩ bir gönderilecek (ilki ⟨2⟩ sonra). Liste: /zamanlar
+bd18601d1	⏰ Zamanlanmış mesaj eklendi (her ⟨0⟩) | ⟨1⟩
+e2d35adb1	⟨0⟩ <b>#⟨1⟩</b> her ⟨2⟩ · sonraki ⟨3⟩
+76c241937	🧹 Öncekini sil
+b35d597c9	📌 Öncekini tut
+225f856c3	⏰ <b>Zamanlanmış mesajlar</b>
+207dc0f12	Eklemek için: <code>/zamanla 6sa mesaj</code> (medya/buton desteklenir)
+351e8911a	Henüz yok.
+242c0f02c	Bulunamadı
+e388dd558	▶️ Başlatıldı
+d08a36466	➕ Yeni zamanlanmış mesaj
+25cda8fe6	🚪 <b>Veda mesajı</b> — ⟨0⟩
+b61184fea	Durum: <b>⟨0⟩</b> · ⟨1⟩
+0eec2952d	Sadece kendi isteğiyle çıkanlara gönderilir (atılan/banlanana değil). Otomatik silme süresi hoş geldinle aynıdır.
+b0037f2fb	👋 <b>Karşılama</b> — ⟨0⟩
+611ef08d1	Hoş geldin: <b>⟨0⟩</b> · ⟨1⟩
+a4530174c	📜 Kurallar: ⟨0⟩ · 🚪 Veda: ⟨1⟩ · ⏰ Zamanlı mesaj: ⟨2⟩
+d0b1d849f	Medya, buton ve değişkenler için ✏️ Değiştir'e bas (ya da grupta /setwelcome yazıp yardımına bak).
+2b7ced272	Açık
+e5b4e786e	var
+68b8326a2	yok
+2bae1a721	✏️ Değiştir
+894e0e55f	👁 Önizle
+099ae3d9c	🖼 Medyayı kaldır
+8bb5bb494	↩️ Varsayılana dön
+adcf7aa93	🧹 Eskisini sil
+1eaf255d1	👥 Toplu tek mesaj
+7ef1d92b8	⏱ Otomatik sil
+e0454a0ce	📩 Özelden gönder
+060b7f669	📜 Kuralları yaz
+ee89e73e1	👁 Kurallar
+b6669596d	🚪 Veda mesajı ›
+0c2dc5967	⏰ Zamanlı mesajlar ›
+9a8a538db	Kara liste: ⟨0⟩
+0eed14a22	Kural yok
+a6aea5676	👁 Önizleme gönderildi
+eb9f11f93	↩️ Varsayılana döndü
+14af210b4	🖼 Medya kaldırıldı
+a4439e0c5	<a href="tg://user?id=⟨0⟩">⟨1⟩</a>
+f615cd8f5	⏹ Etiketleme durduruldu
+ce76be77d	✅ Etiketleme bitti
+98452c88d	⟨0⟩: ⟨1⟩/⟨2⟩ kişi etiketlendi.
+7f535520c	/etiket grupta kullanılır.
+59b9ad51d	⏳ Bu grupta etiketleme zaten sürüyor. Durdurmak için: /etiketdur
+46a8f403f	⏳ Grup kirlenmesin diye etiketlemeler arasında bekleme var. ⟨0⟩ dk sonra tekrar dene.
+02343ede4	Etiketlenecek kimse bulunamadı. (Bot, grupta yazan ya da katılan üyeleri tanır.)
+29099e290	🏷 Etiketleme başladı: <b>⟨0⟩</b> kişi, ⟨1⟩'⟨2⟩ · yaklaşık ⟨3⟩ dk
+5a101718d	Durdurmak için: /etiketdur
+41db30f80	li
+cbb3f8fad	lü
+f64e607e0	⏹ Durdur
+87e8dab7e	🏷 /etiket başlatıldı (⟨0⟩ kişi) | ⟨1⟩
+93e9f8e23	Şu an süren bir etiketleme yok.
+de3fd2d6f	⏹ Etiketleme durduruluyor…
+6e637aa42	⏹ Durduruluyor
+a0fd2c146	Etiketleme zaten bitti.
+60c103470	Bunu etiketlenmek istemediğin grupta yaz.
+170599775	🔔 Tekrar /etiket listesindesin.
+3812eb431	🔕 Artık bu grupta /etiket ile etiketlenmeyeceksin. Geri almak için tekrar /etiketme yaz.
+21946f144	⚠️ Kanal zorunluluğu kontrol edilemiyor: bot kanalda yönetici mi? (/kanalzorunlu ile tekrar ayarla)
+8e87bf498	Kanala katıl
+cbb50c7c3	✅ Katıldım
+0ca6d0da1	📢 ⟨0⟩, bu grupta yazabilmek için önce <b>⟨1⟩</b> kanalına katılmalısın.
+c0ec4b2f3	Bu buton sana ait değil.
+aaed7d345	✅ Teşekkürler, artık yazabilirsin!
+bd2685273	Henüz kanala katılmamışsın. Önce 📢 butonuyla katıl, sonra tekrar bas.
+1886b3d17	Kanalı <code>@kullaniciadi</code>, <code>t.me/kanal</code> ya da <code>-100…</code> ID olarak yaz.
+f02d79616	Kanal bulunamadı ya da bot kanalda değil. ⟨0⟩
+87bee0af3	Bu bir kanal değil.
+4171be67d	Botu önce kanala <b>yönetici</b> olarak ekle (üyeleri görebilmesi için gerekli).
+9d38f82c5	Açık — <b>⟨0⟩</b>
+4adcca7b1	📢 <b>Kanal zorunluluğu</b>: ⟨0⟩
+a3407edfd	Ayarla: <code>/kanalzorunlu @kanal</code>
+95acb52af	Kapat: <code>/kanalzorunlu kapat</code>
+045928d81	Bot, kanalda yönetici olmalı. Yöneticiler ve bot sahibi muaftır.
+fe929a5d7	📢 Kanal zorunluluğu kapatıldı.
+53a5e40c2	Kanala katılmayanların mesajı silinir ve katılma butonu gösterilir.
+cef984319	📢 Kanal zorunluluğu: ⟨0⟩ | ⟨1⟩
+d48d5b5ae	kısa süre
+05260e946	⟨0⟩ gün
+b04fc7f5d	az önce
+21aaa5a62	⟨0⟩ dakikadır
+7448bebe4	⟨0⟩ saattir
+5ba98ca40	⟨0⟩ gündür
+ad5b41977	💤 ⟨0⟩ artık AFK⟨1⟩
+44c5de771	👋 ⟨0⟩ geri döndü (⟨1⟩ AFK'ydı).
+e117178d7	💤 ⟨0⟩ şu an AFK (⟨1⟩)⟨2⟩
+44140939f	📢 <b>Kanal zorunluluğu</b> — ⟨0⟩
+e5b1aac1e	Durum: <b>⟨0⟩</b>
+0716f7bc2	Kanal: ⟨0⟩
+0d5b480e5	Kanala katılmayan üyenin mesajı silinir ve '📢 Kanala katıl / ✅ Katıldım' butonlu uyarı gelir. Yöneticiler muaftır. Bot, kanalda yönetici olmalı.
+7d73e8088	ayarlanmamış
+6ba5f155e	✏️ Kanalı ayarla
+c9606c43c	🏷 <b>Etiket ayarları</b> — ⟨0⟩
+203ce8b22	<code>/etiket mesaj</code> üyeleri gruplar hâlinde etiketler. <code>/etiketdur</code> durdurur, üyeler <code>/etiketme</code> ile listeden çıkabilir.
+b86bf2507	Bir mesajda: <b>⟨0⟩ kişi</b> · Biçim: <b>⟨1⟩</b> · Kimler: <b>⟨2⟩</b>
+1da63df5e	son 7 günün aktifleri
+4e45e032a	Kişi
+4dd25e398	⟨0⟩İsimle
+c39394400	⟨0⟩Emojiyle
+b48e5cb08	Sadece son 7 günün aktifleri
+b1d807974	Bildir
+ca39fe0f8	botun ⟨0⟩ başka grubunda banlı
+9872ca74d	CAS spam listesinde kayıtlı
+9396a2730	🚩 ⟨0⟩ kara listede (⟨1⟩) → <b>banlandı</b>.
+545b1c5c1	🚩 ⟨0⟩ kara listede (⟨1⟩) → <b>susturuldu</b>. Yöneticiler serbest bırakabilir.
+07441d924	🚩 Dikkat: ⟨0⟩ ⟨1⟩.
+45358021b	✏️ İsim değişikliği: ⟨0⟩ (ID <code>⟨1⟩</code>)
+281b2747a	Eski: ⟨0⟩
+059547382	Yeni: ⟨0⟩
+a2c2bec19	📋 <b>Sicil</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
+0786218b9	🏷 Eski isimler: ⟨0⟩
+14c5bccb9	🚩 Ortak kara liste: ⟨0⟩
+38fd7e621	<b>⟨0⟩ grupta banlı</b>
+04a2454bb	🌐 CAS: ⟨0⟩
+66b71c0f8	⚠️ kayıtlı
+5a25bd323	📊 Son ⟨0⟩ gün: ⚠️ ⟨1⟩ uyarı · 🔇 ⟨2⟩ susturma · 👢 ⟨3⟩ atma · 🚫 ⟨4⟩ ban
+5f914853f	Kayıtlı ceza yok.
+05d9f273c	Kullanım: /sicil @kullanıcı, /sicil ID ya da bir mesaja yanıt olarak /sicil
+f3ac03616	📩 Sicil özelden gönderildi.
+5d8b9aade	📩 Sicili özelden gönderebilmem için önce bana özelden /start yaz.
+2e3efd222	🤖 Bota git
+859b5bb09	🔇 Sustur (⟨0⟩/⟨1⟩)
+4d8231ce2	❌ İptal (yönetici)
+39229bf11	/oylama grupta, bir mesaja yanıt olarak kullanılır.
+6a2b8f19c	Bu grupta oylamalı susturma kapalı.
+61afc3c7f	Susturulmasını istediğin kişinin mesajına yanıt olarak /oylama yaz.
+89cfeb825	Bu kişi için oylama başlatılamaz.
+77053150c	Yeni üyeler oylama başlatamaz (en az 1 gündür grupta olmalısın).
+ebb86ddce	Kısa süre önce oylama başlattın, biraz bekle.
+2848c7501	Bu kişi için zaten bir oylama sürüyor.
+97509d3a2	🗳 ⟨0⟩ için <b>susturma oylaması</b> (⟨1⟩)
+49efb6ab2	Başlatan: ⟨0⟩ · ⟨1⟩ oy gerekli · ⟨2⟩ dk içinde
+dc6640321	Bu oylamanın süresi doldu.
+608b293ec	Oylama iptal edildi
+0fdae78cf	❌ Oylama ⟨0⟩ tarafından iptal edildi.
+a0e2f43f9	Kendin için oy veremezsin.
+ffff3ff40	Yeni üyeler oy veremez (en az 1 gündür grupta olmalısın).
+fe7fa73cc	Zaten oy verdin.
+e0e085981	✅ Oyun alındı
+73e49db75	Susturulamadı (bot yetkisi?)
+aa6350471	🔇 Susturuldu
+75f1001f2	🔇 ⟨0⟩ ⟨1⟩ oyla ⟨2⟩ susturuldu.
+c38ad78f4	mute
+8555c063c	🗳 Oylama: ⟨0⟩ ⟨1⟩ oyla ⟨2⟩ susturuldu | ⟨3⟩
+18fb9aaaa	🧑‍⚖️ <b>Topluluk koruması</b> — ⟨0⟩
+f1deffa09	🚩 <b>Ortak kara liste:</b> botun başka bir grubunda banlanan kişi buraya katılınca seçilen işlem uygulanır.
+43a185211	🌐 <b>CAS:</b> dünya çapındaki spam listesinde kayıtlı hesaplar da yakalanır.
+6e4660beb	✏️ <b>İsim takibi:</b> ad/kullanıcı adı değişiklikleri log kanalına yazılır (geçmiş /sicil'de).
+adabf49fe	🗳 <b>Oylamalı susturma:</b> üyeler bir mesaja /oylama ile oy verip kişiyi geçici susturabilir (yeni üyeler oy veremez, yetkililere kullanılamaz).
+b800b8e5f	🚩 Ortak kara liste
+02bc5dab6	🌐 CAS
+97bceca81	✏️ İsim takibi
+c5772d4e7	🗳 Oylama
+f12c4aec5	Gerekli oy
+662158acd	Susturma
+5c4935039	🎁 <b>Çekiliş</b>⟨0⟩
+0dad0ba32	🏆 Kazanan sayısı: <b>⟨0⟩</b>
+7c606f70b	⏰ Bitiş: <b>⟨0⟩</b>
+92b031d27	📢 ⟨0⟩ kanalına üye olmak
+1a822445f	💬 grupta en az ⟨0⟩ mesaj (son ⟨1⟩ gün)
+d9e82561c	📅 en az ⟨0⟩ gündür grupta olmak
+d0610eddb	🛡 profil fotoğrafı ya da kullanıcı adı olan gerçek hesap
+208622235	📋 <b>Şartlar</b>
+99c8d7297	👥 Katılımcı: <b>⟨0⟩</b>
+cadb40104	🎁 Katıl (⟨0⟩)
+5ccfb1128	Kanal
+eb533cc4f	Bu grupta süren bir çekiliş var. Bitirmek için: /cekilis_bitir
+10870143e	Süre 1 dakika ile 30 gün arasında olmalı.
+9c50f1ba5	❌ Kanal şartı: ⟨0⟩
+ec58b461d	✅ Çekiliş başladı.⟨0⟩
+9d6e7b1e0	Şart eklemek için örnek: /cekilis 1g 3 Ödül | kanal=@kanal mesaj=20 gun=7
+8a942b576	Bitirmek için: /cekilis_bitir [kazanan sayısı]
+05fd915f2	🎉 ⟨0⟩ çekiliş başlattı: ⟨1⟩ | ⟨2⟩
+30f5e7aae	Botlar katılamaz.
+f03d1a2cb	Önce gruba katılmalısın.
+b5417cc27	Grup üyeliğin doğrulanamadı.
+004bfc204	Profil fotoğrafı ya da kullanıcı adı olmayan hesaplar katılamaz (sahte hesap koruması).
+39a47e334	Önce ⟨0⟩ katılmalısın.
+99797f0e4	Grupta en az ⟨0⟩ mesajın olmalı (şu an ⟨1⟩).
+f21f9c94c	En az ⟨0⟩ gündür grupta olmalısın.
+ff2167b09	Bu çekiliş sona erdi.
+b5116fff1	Zaten katıldın, bol şans! 🍀
+5c88f09bc	🎉 Çekilişe katıldın, bol şans!
+b05652dd1	✅ <b>Çekiliş bitti</b>
+4cc381328	🎉 Çekiliş sona erdi! Şartları sağlayan katılımcı yoktu.
+8e2d564a7	🎉 <b>Çekiliş sona erdi!</b>⟨0⟩
+5aa86da43	🏆 Kazanan⟨0⟩: ⟨1⟩
+e9ade43fd	👥 Katılımcı: ⟨0⟩
+7438ab083	🏆 Çekiliş bitti: ⟨0⟩ | ⟨1⟩
+1e5f2647b	kazanan yok
+12a0187af	Aktif çekiliş yok.
+9de1a5b57	✅ Çekiliş bitirildi.
+0034b3c7e	Agg
+fb9a58cf3	DejaVu Sans
+ff647517b	Günlük mesaj — son 30 gün
+34673a626	Saatlere göre mesaj (Türkiye saati, 30 gün)
+fa46923fb	Katılan / ayrılan — son 30 gün
+0edbd3fce	Katılan (⟨0⟩)
+03822ea5b	Ayrılan (⟨0⟩)
+5b09123ba	En aktif üyeler — son 7 gün
+8faf5f37f	Henüz veri yok
+c68b2a090	💬 Mesaj: 7 gün <b>⟨0⟩</b> · 30 gün <b>⟨1⟩</b> · aktif üye (7 gün): <b>⟨2⟩</b>
+efd6992e0	👥 30 günde katılan <b>⟨0⟩</b> · ayrılan <b>⟨1⟩</b>
+980151f9d	🛡 Toplam: 🚫 ⟨0⟩ ban · 🔇 ⟨1⟩ susturma · 👢 ⟨2⟩ atma · 🔁 ⟨3⟩ spam · 🙋 ⟨4⟩ istek
+8b3ad8463	⟨0⟩ — istatistik
+4b6ea2e22	https://api.telegram.org/bot⟨0⟩/⟨1⟩
+afd536817	Ceza
+74a1b4f70	🌊 Flood: mesaj sınırı
+7d5fdce06	🌊 Flood: süre
+6eec7f346	🖼 Medya flood: medya sınırı
+188dc2ac4	🖼 Medya flood: süre
+4cb84b51a	🔇 Susturma süresi
+3b723e30f	🕊 Spam muaf kişiler
+62af570a8	Her satıra bir kullanıcı ID'si. Bu kişilere spam, flood ve link koruması uygulanmaz.
+97559aa34	🛡 Korumalar
+eaecb6e7c	🔤 Kelime ve link listeleri
+50e7fc41b	Yasaklı kelimeler
+5d70efcb4	Her satıra bir kelime. Regex için başına re: koy.
+a59a817c8	İzinli alan adları
+98ae8882f	Her satıra bir alan adı (örn. youtube.com).
+17dfd3589	🚪 Katılım
+47bc3cee8	Captcha süresi
+31a22d269	📩 Katılım isteğinde özelden doğrulama
+51640d5b4	Raid: üye sınırı
+33500eff3	Raid: süre
+bcd337aa1	🐣 Yeni üye kısıtı
+b7e0a1cb1	Kullanıcı adı olmayanı sustur
+3fe9d6820	✅ Katılım isteklerini otomatik kabul et
+876437b88	❌ Katılım isteklerini otomatik reddet
+94dd4d1bd	🤖 Bot / kullanıcı adsız isteği reddet
+b582c2d59	🖼 Uygunsuz medya
+ca770c605	🤖 Yapay zekâ ile +18 tarama
+737b0637b	Fotoğraf, sticker ve GIF'ler taranır (sunucuda nudenet kurulu olmalı).
+1903d3d63	📦 Tehlikeli dosyaları sil
+9c0ff36ee	.apk .exe .bat .scr gibi dosyalar
+c79ee4fbb	Kısa sürede çok uygunsuz medya gelirse grup medyası geçici kilitlenir.
+b43510a81	✏️ Düzenleme ve rapor
+e97c80f7b	✏️ Geç düzenleme koruması
+7f9f3195d	Gönderildikten bir süre sonra düzenlenen mesaj silinir; eski ve yeni hâli kurucuya gider.
+5e74ca845	👥 Kimlere uygulanır
+ddd26077d	Seçilenler dışındaki rütbeler muaf. Sadece kurucu değiştirir.
+66613016d	Düzenleme süresi
+e0d3940a6	📨 Kurucuya / ekleyene bildir
+9b1e938f3	🚩 Rapor sistemi (/report, @admin)
+44d53d26e	⚠️ Uyarılar
+70d607de5	Uyarı sınırı
+a8dd080ee	Sınır dolunca
+453982208	Geçici ceza süresi
+bfbfead91	👋 Karşılama
+e8a88eb95	🧹 Yeni gelince eskisini sil
+5c2fbdfa8	👥 Toplu katılımda tek mesaj
+90de79bd5	🚪 Veda mesajı
+0f39f1096	📜 Kurallar
+f9c17c1f0	🏷 Etiket ve kanal
+4f7b4fd4f	/etiket: bir mesajda
+4aa6ce6cc	/etiket biçimi
+6ae999552	name
+6b93199e3	İsimle
+4e50d3317	emoji
+aa42b8748	Emojiyle
+1d365363e	📢 Kanal zorunluluğu
+7b7afd285	Kanalı /kanalzorunlu @kanal ile ayarla.
+87bb0ff1a	🔗 Davet yarışması
+1c0fda956	Üyeler /davet ile kendi linkini alır, /davetler sıralama.
+c8d05f85f	🧑‍⚖️ Topluluk koruması
+33af72703	Botun başka grubunda banlı kişi katılınca.
+25347c8be	Kara liste işlemi
+f7e588100	🌐 CAS spam listesi
+4a02f552b	✏️ İsim değişikliği takibi
+32a52c44c	🗳 Oylamalı susturma
+9b96d57aa	Oylama susturma süresi
+d51893a35	🌍 Dil / Language
+8d6c8a4a5	Botun bu gruptaki dili
+45ac69c17	Botun mesajları, butonları ve uyarıları bu dilde olur. Senin yazdığın içerik değişmez.
+a53ce8e7e	👮 Admin denetimi
+d06ffe7b8	📋 Günlük admin özeti
+79c2f9928	Her akşam kim kaç ban, susturma, uyarı ve silme yaptı (kurucuya ve botu ekleyene).
+c1b823489	🚨 Admin işlem sınırı
+b05a27d38	Kurucu olmayan yetkili 1 saatte sınırdan fazla ban/atma/susturma yaparsa yetkisi askıya alınır.
+2a6b6f7f9	Saatlik sınır
+967df5546	admin_limit
+99f28dbae	🗑 Silinen mesajları log kanalına kopyala
+704d44996	/del ve /temizle ile silinenler. Telegram elle silinenleri botlara bildirmez.
+bf952a57c	🛟 Admin kurtarma
+c4395cbb9	Güvenilir kişiler (en fazla 3)
+94f3d0e2c	Her satıra bir kullanıcı ID'si. Adminler toplu düşürülürse bu kişiler bota /kurtar yazabilir.
+44ada5469	♻️ Toplu düşürmede otomatik geri yükle
+fe85b70c6	#yeşil
+485f81ade	#kırmızı
+9cfcbc726	Geçersiz seçim
+4094a1250	Çok uzun: ⟨0⟩…
+3994c99a9	Geçersiz ID: ⟨0⟩ (sadece sayı)
+5055a2323	En fazla ⟨0⟩ kişi
+abe802098	Geçersiz
+43936b588	Mesaj boş olamaz
+45313b745	Bilinmeyen alan
+98d2db628	30 dakikada bir
+15ff62ef8	Saatte bir
+3ff28dc87	2 saatte bir
+b7b8f6424	3 saatte bir
+b5416f932	6 saatte bir
+d74bcca07	12 saatte bir
+e07f13000	Günde bir
+f1868872f	3 günde bir
+b09892476	Haftada bir
+fe3e896af	📦 Sticker paketi: ⟨0⟩
+cce0f0bc2	Yetkin yok
+b91959e41	Saat biçimi SS:DD olmalı
+6ed0b041b	🌙 Gece modu kaydedildi
+04f474277	Not adı: harf, rakam, - veya _ (en fazla 32)
+064f4b29e	Not içeriği boş olamaz
+a918fc143	📝 #⟨0⟩ kaydedildi
+8af22b61d	🗑 Not silindi
+bdf64f16d	Not bulunamadı
+2550a4e51	Tetikleyici geçersiz (en fazla 100 karakter; içinde geçsin diye *kelime*)
+65d904f46	Cevap boş olamaz
+543b45aca	En fazla ⟨0⟩ filtre olabilir
+75dac4689	🧩 Filtre ⟨0⟩: ⟨1⟩
+833cd7a4f	güncellendi
+8421922af	🗑 Filtre silindi
+d52273a24	Filtre bulunamadı
+737953689	Geçersiz aralık
+8f07eb02e	⏰ Zamanlanmış mesaj eklendi
+4a5a1fa05	✅ Güncellendi
+e10b8c2a9	🗑 Engel kaldırıldı
+e750a9371	Bilinmeyen işlem
+233235be6	Bilinmeyen ayar
+64198f47f	Önce /kanalzorunlu @kanal ile kanal ayarla
+794ac0486	🖥 Web panelden değiştirildi: ⟨0⟩ | ⟨1⟩
+c5340e8d3	Oturum doğrulanamadı. Paneli Telegram içinden aç.
+650c37e3f	Grup bulunamadı
+ed8d9ddd6	Bu grupta yönetici değilsin (ya da bot Telegram'a ulaşamadı).
+d1d4f67c2	Bot bakımda, biraz sonra tekrar dene.
+c8f419af1	application/json; charset=utf-8
+105883075	Bad Request
+740b83150	Unauthorized
+3dab5f601	Forbidden
+d205cbd67	Not Found
+50624c2ba	Method Not Allowed
+b6656e148	Payload Too Large
+ffa5578af	Internal Server Error
+e2d7c5c97	POST gerekli
+33edae1a5	İstek çok büyük
+bcde64b8a	Geçersiz istek
+0429402e5	Bağlantı geçersiz
+d219c6810	Location
+010457c55	text/plain; charset=utf-8
+67a86b556	text/html; charset=utf-8
+ed8c751c4	Desteklenmeyen istek
+a5bfc246e	Sunucu hatası
+6b75a37b8	🖥 Web paneli aç
+b76f92e63	Web panel bu botta açılmamış (.env içinde WEBAPP_URL boş).
+61267ecf8	🖥 Web panel bota özelden açılır:
+1503ed392	🖥 Özelden aç
+f6dcc8f07	🖥 <b>Web panel</b>
+ffdbfe849	Tüm ayarlar tek sayfada: korumalar, düzenleme koruması, uygunsuz medya, katılım, karşılama, listeler, gece modu, notlar, filtreler, zamanlanmış mesajlar, engelli medya, yetkililer ve grup istatistikleri. Değişiklikler birkaç saniye içinde bota yansır.
+72019bbac	ana
+62ca31689	⟨0⟩: ⟨1⟩ bekleyen⟨2⟩
+3f8811338	, ⟨0⟩ işleniyor
+e5136258e	⚡ <b>Performans</b> — çalışma süresi ⟨0⟩
+be1d477f1	💬 İşlenen güncelleme: <b>⟨0⟩</b> · kuyruk: ⟨1⟩
+fdd4f90c1	🧠 Bellek: <b>⟨0⟩ MB</b> (en yüksek ⟨1⟩ MB) · CPU: ⟨2⟩ sn
+3da2a45ed	🧠 CPU: ⟨0⟩ sn
+3d0951b3b	🗄 Veritabanı: ⟨0⟩ MB · toplu yazma: ⟨1⟩ kez, ⟨2⟩ satır · bekleyen: ⟨3⟩
+22a8d336d	⏱ Döngü gecikmesi: ort ⟨0⟩ · en yüksek ⟨1⟩ (100 ms üstü = bir işlem botu bekletiyor)
+7f78c41d0	👥 Grup: ⟨0⟩ · Kanal: ⟨1⟩ · Klon: ⟨2⟩
+a860ce1ad	🐢 <b>En yavaş (ortalama)</b>
+6ea19cdf0	⟨0⟩. <code>⟨1⟩</code> — ⟨2⟩ ort · en çok ⟨3⟩ · ⟨4⟩ kez
+b46e47f18	⏳ <b>En çok toplam süre</b>
+5d3700941	⟨0⟩. <code>⟨1⟩</code> — toplam ⟨2⟩ · ⟨3⟩ kez
+3e186b7ac	🔄 Yenile
+0b681bc34	🧹 Sıfırla
+9db9059a2	🔙 Panel
+7866cfd7a	🧹 Ölçümler sıfırlandı
+8ed3799c7	🔄 Yenilendi
+e8f595afe	🪦 Botun çıkarıldığı / erişilemeyen
+fbd3f68b8	⚠️ Botun yönetici olmadığı
+7950587b4	🕳 Boş (≤⟨0⟩ üye)
+c7417acd3	💤 ⟨0⟩ gündür sessiz
+b2d73a5b7	🤖 <b>⟨0⟩ Security Bot Paneli</b>
+6dcd06cc1	📊 İstatistikler:
+2934c79d8	├ Toplam Grup: ⟨0⟩
+e11665156	├ Toplam Kanal: ⟨0⟩
+98ee4dccc	├ Toplam Kullanıcı: ⟨0⟩
+2cdc2cc48	└ Özelden kullanan: ⟨0⟩
+f93b0152d	📢 Kanallar
+774aa2184	👥 Gruplar
+de09056f1	🧹 Temizlik
+d03041124	📊 İstatistikler
+9782862bd	🚫 Engelliler
+c5249c21a	⚡ Performans
+d580a6f3f	('group','supergroup')
+9e1bd9726	Kanallar
+009c2e489	Gruplar
+43dd9b917	⟨0⟩ <b>⟨1⟩</b> (⟨2⟩) — sayfa ⟨3⟩/⟨4⟩
+1e4e3b199	Adına dokun: bilgi · 🚪: botu çıkar
+7035c59fd	📢 Kayıtlı kanal yok.
+a6492303c	👥 Kayıtlı grup yok.
+e5b94ef1a	🔙 Geri
+8b1164c1a	🔙 Listeye dön
+6abf2b290	Bu sohbetin kaydı yok (silinmiş).
+deacf11c1	✅ yönetici
+19ae8c1fe	✅ sahip
+c5de3cdae	⚠️ üye (yönetici değil)
+6d25c19b2	❌ grupta değil
+9f9a5ad1c	❌ atılmış
+33337525a	🆔 <code>⟨0⟩</code>⟨1⟩
+84ba3029b	👥 Üye: ⟨0⟩ · 🤖 Bot: ⟨1⟩
+c86df7e48	📅 Kayıt: ⟨0⟩⟨1⟩
+079fe4cc3	💬 Son mesaj: ⟨0⟩ · 7 günde ⟨1⟩ mesaj
+33a131ec1	🛡 Açık korumalar: ⟨0⟩
+cac2ce338	hiç
+d4f5955f6	🚪 Botu çıkar
+84297554a	🗑 Kaydı sil
+5b1da6456	📋 Ayarlarını diğer gruplara uygula
+094b763b4	not found
+e71c5792f	not a member
+f9c565e5d	🧹 <b>Temizlik taraması</b> — ⟨0⟩ sohbet tarandı
+9309c9a8c	🗑 Kayıtları sil
+f9dc0c92a	🚪 Çık + sil
+3939c3aa3	📋 Göster
+4fd13b5b2	✅ Temizlenecek bir şey yok.
+71017a253	Not: ‘Çık + sil’ botu o sohbetlerden çıkarır ve ayarlarını siler.
+78c3f116c	🔄 Yeniden tara
+f73473dc3	Bu komut sadece özelden çalışır!
+42c9a2045	📋 <b>⟨0⟩</b> grubunun ayarları diğer <b>⟨1⟩</b> gruba uygulansın mı?
+3e1a4c661	Kopyalanır: koruma ayarları, cezalar, captcha, gece modu, uyarı sınırı vb.
+ac2c708cc	Kopyalanmaz: hoş geldin/veda/kurallar mesajı, kanal zorunluluğu, kilitler, gruba özel listeler.
+46d884196	<b>+ listeler</b>: yasaklı kelime ve izinli link listeleri de eklenir (mevcutlar silinmez).
+cc53a5889	✅ Uygula + listeler
+4bbf7625d	Kaynak grubun kaydı yok.
+8b18be741	✅ ⟨0⟩ gruba uygulandı
+a27027da6	📋 Bu grubun ayarları ⟨0⟩ gruba uygulandı | ⟨1⟩
+584db30d0	🚪 Bot <b>⟨0⟩</b> sohbetinden çıkarılsın mı?
+5cb08b81f	• <b>Ayarları sakla</b>: bot tekrar eklenirse ayarlar geri gelir.
+c988453c1	• <b>Kaydı da sil</b>: ayarlar, rütbeler ve istatistikler silinir.
+29f10e48b	🚪 Çık, ayarları sakla
+874976382	🗑 Çık ve kaydı sil
+1a6229583	Çıkılamadı: ⟨0⟩
+c8614638e	✅ Çıkıldı⟨0⟩
+588b8a501	ve kayıt silindi
+4dd5e9778	Taranıyor…
+f127b4d7a	🧹 ⟨0⟩ sohbet taranıyor, biraz sürebilir…
+c04373159	Tarama eskidi, yeniden tara.
+817dbc364	• ⟨0⟩ (<code>⟨1⟩</code>)
+f3c33c83f	🔙 Taramaya dön
+1a3a3e54d	kayıtları silinsin
+84c117afe	sohbetlerden çıkılsın ve kayıtları silinsin
+1f67427da	⚠️ ⟨0⟩: <b>⟨1⟩</b> sohbetin ⟨2⟩ mi? Bu geri alınamaz.
+eb3f9ab14	✅ Evet
+33889c985	İşleniyor…
+5ac06101c	✅ ⟨0⟩ sohbet temizlendi⟨1⟩
+73500e336	Sadece ana bot sahibi.
+6a8179ecc	Engelli listesi sadece ana bot sahibine açıktır.
+cd8533168	• ⟨0⟩: <code>⟨1⟩</code> — ⟨2⟩
+7ec9c6536	🚫 <b>Engellenenler</b>
+2f8268ac0	Engellenmiş kimse yok.
+13f3c860d	📊 <b>Bot İstatistikleri</b>
+25fdf74b3	├ Toplam Mesaj Kaydı: ⟨0⟩
+31d1735c8	└ Toplam Ban: ⟨0⟩
+511d1c70c	Kullanım: /save <isim> <metin>  (veya bir mesaja yanıt: /save <isim>)
+b9050868c	Not içeriği boş olamaz.
+fe73e61b7	✅ Not kaydedildi: #⟨0⟩
+e2c814129	Kullanım: /not <isim>
+6d1ba3c3a	Böyle bir not yok. /notlar ile listeyi gör.
+fdb9a02af	Kayıtlı not yok. /save ile ekle.
+da2bf5ed4	📝 <b>Notlar</b>
+755923919	Görmek için grupta #isim yaz.
+80841e69d	Kullanım: /notsil <isim>
+41afe3456	✅ Not silindi.
+bd44e9b93	Böyle bir not yok.
+c74724c97	🔗 Link engeli
+a6085267b	🧩 Captcha
+a2e8d7dd3	↪️ İletme engeli
+65984a6d2	🚨 Raid koruması
+64de715c0	🐣 Yeni üye kısıtı (60 dk)
+da5934c57	🔤 Kelime filtresi
+90879408f	🟢 Hafif
+b042dc5d1	🟡 Normal
+79b39bda7	🔴 Sıkı
+58c29a09a	⚡ <b>Hızlı kurulum</b> — ⟨0⟩
+bf650f464	<b>1/3</b> Bir koruma paketi seç. Sonra hepsini tek tek değiştirebilirsin.
+51a1926be	🟢 <b>Hafif</b>: link + flood
+14630f04b	🟡 <b>Normal</b>: + tekrar spam, captcha, uygunsuz medya
+b89411ab4	🔴 <b>Sıkı</b>: + yeni üye kısıtı, iletme engeli, raid koruması
+ce91c6e00	⚙️ Kendim seçeyim
+e45f19110	✖️ Şimdilik geç
+d6c79520c	Varsayılan
+e62d3857f	Kendi metnim
+3c5a1bd73	<b>2/3</b> Yeni gelenlere hoş geldin mesajı gönderilsin mi?
+4a80c8576	Şu an: <b>⟨0⟩</b>
+f4b2ad895	🚫 Kapalı
+b8723d469	👋 Varsayılan
+5566ef1f3	✏️ Kendi metnimi yazacağım
+0a255f736	<b>3/3</b> Hangi korumalar açık olsun? Dokunarak aç/kapat.
+b229f24f3	➡️ Devam
+39c7bad60	varsayılan metin
+05c1aeb32	kendi metnin
+d405d7c75	<b>Özet</b>
+5618672c1	👋 Hoş geldin: ⟨0⟩
+f2adce74f	Uygula'ya bas, ayarlar kaydedilsin. Sonradan /settings ile her şeyi değiştirebilirsin.
+77676a86d	✅ Uygula
+eebb82b20	🛡 Korumaları değiştir
+2e80a5fce	Bu grup kayıtlı değil. Önce botu yönetici yap.
+762cfa3fa	⚡ Hızlı kurulum bota özelden yapılır:
+32f93f6ae	⚡ Kurulumu aç
+ab8bc5e3f	Önce 🛡 Gruplarım ile bir grup seç, sonra /kurulum yaz.
+008c8e774	Kurulum geçildi. İstediğin zaman /kurulum ile açabilirsin.
+6f6bec44f	✅ Ayarlar kaydedildi
+5dc655d64	✅ <b>Kurulum tamam!</b> — ⟨0⟩
+46d73ff37	Ayrıntılı ayarlar için /settings · Otomatik yanıtlar için grupta /filter
+d9a9eba4a	⚡ Hızlı kurulum uygulandı | ⟨0⟩
+161bbf828	🧩 <b>Filtre kullanımı</b>
+8344bd8fb	• Bir mesaja yanıt: <code>/filter Aleyküm selam</code> (tetikleyici yanıtladığın mesaj)
+7e201996f	• Yanıtsız: <code>/filter selam Aleyküm selam</code>
+cf1db6a05	• Çok kelimeli: <code>/filter "iyi akşamlar" Size de!</code>
+812fb6d89	• Mesajın içinde geçerse: <code>/filter *selam* Merhaba!</code>
+206f91a6d	• Sticker/foto/GIF ile cevap: medyaya yanıtla → <code>/filter selam</code>
+b0b395569	• Butonlar: cevabın altına satır satır <code>Kanal - https://t.me/kanal</code>
+380f07344	Değişkenler: <code>{kullanıcı}</code> <code>{ad}</code> <code>{grup}</code> · Biçim (kalın, link…) korunur
+528d066d4	Liste: /filters · Sil: /stop selam · Hepsini sil: /stopall
+7315f262e	⚠️ Bu grupta en fazla ⟨0⟩ filtre olabilir. /stop ile eskileri sil.
+cf56cd5da	içinde geçince
+0272debab	yazılınca
+3045102b7	✅ Filtre ⟨0⟩: <b>⟨1⟩</b> ⟨2⟩ cevap verilecek.
+67c264f1a	eklendi
+c64b0c3ca	🧩 Filtre eklendi: ⟨0⟩ | ⟨1⟩
+830911851	Bu grupta filtre yok. Eklemek için: /filter
+32a5d5ddb	🧩 <b>Filtreler</b> (⟨0⟩)
+3b8b66dd5	Silmek için: /stop &lt;tetikleyici&gt;
+8b3a30608	Kullanım: /stop <tetikleyici>
+f2ba0c77b	✅ Filtre silindi.
+77a5db13d	Böyle bir filtre yok. /filters ile listeye bak.
+b7301e99a	Bu grupta filtre yok.
+bd0505102	⚠️ Bu gruptaki <b>⟨0⟩</b> filtrenin hepsi silinsin mi?
+8d8252e68	🗑 Evet, hepsini sil
+9b6fcea87	↩️ Vazgeç
+272826aad	Vazgeçildi.
+cf9d69e94	🗑 ⟨0⟩ filtre silindi.
+13c07c249	🧹 Tüm filtreler silindi (⟨0⟩) | ⟨1⟩
+0451d6399	🏷 Marka adı
+93077ebd5	Botunun mesajlarda görünecek adını yaz (ör. Alfa Guard).
+efbbbb435	👋 Karşılama metni
+4e2fd1f48	/start yazınca görünecek karşılama metnini yaz.
+e840e51a6	🔗 Destek linki
+2236aa076	Destek grubu/kanal linkini yaz (https://t.me/...). Kaldırmak için: -
+74af46bea	❓ Yardım başlığı
+ce0e0d6dc	Yardım menüsünün başlığını yaz.
+07075bae9	Kullanıcı
+8c59b527c	🤖 <b>Klon bot onayı</b> #⟨0⟩
+673f5ba81	👤 Botu açmak isteyen kişi: ⟨0⟩ — ID: <code>⟨1⟩</code>
+286285872	🔑 Bot token: <code>⟨0⟩</code>
+140e8742e	🏷 Bot ismi: ⟨0⟩ (@⟨1⟩)
+bbde0b439	Token geçersiz veya iptal edilmiş.
+2f1be69b6	Token başka bir bota ait.
+b8261ca98	⚠️ Klon botun @⟨0⟩ durduruldu: ⟨1⟩
+5b74bc345	BotFather'dan yeni token alıp 🤖 Klon menüsünden <b>Token değiştir</b> ile tekrar başlatabilirsin.
+15f0441be	token geçersiz (⟨0⟩)
+c079ca840	⏳ <b>@⟨0⟩</b> bot sahibinin onayını bekliyor. Onaylanınca açılacak.
+aa2e8a82e	🤖 <b>Klon bot</b>
+f3fc6979c	Kendi bot adınla, ULUS altyapısını kullanan bir koruma botu aç.
+4fbf35472	1) @BotFather'da /newbot ile bot oluştur
+632cbf17b	2) Aldığın token'ı aşağıdaki butonla gönder
+883193ad7	3) Bot sahibi onaylayınca botun çalışmaya başlar⟨0⟩
+3a5be4fd4	🔑 Token gönder
+e76ac71f1	🟢 Çalışıyor
+f8a7fde2a	⚠️ Token geçersiz
+b535c1e0c	🤖 <b>Klon botun</b>: @⟨0⟩
+0bc0356ba	Durum: ⟨0⟩ · Grup/kanal: ⟨1⟩
+47500a892	🏷 Marka: <b>⟨0⟩</b>
+ca0fe8e9a	🔗 Destek: ⟨0⟩
+b07ee01ba	❓ Yardım başlığı: ⟨0⟩
+8e9727f2e	👋 Karşılama: ⟨0⟩⟨1⟩
+de54dae36	varsayılan
+53f82bc49	⏸ Durdur
+b8abb05fb	▶️ Başlat
+60446c88d	↩️ İsteği geri çek
+ded7cc646	🔑 Token değiştir
+d3fb29907	🗑 Klonu sil
+367b6aa51	Klon işlemleri bota özelden yapılır.
+a51f7d30f	Bu istek zaten işlendi.
+c862658b2	Eski sürümden kalan istek; kullanıcı /klon ile token göndermeli.
+a102e834e	🤖 Klon sistemi yenilendi: /klon yazıp bot token'ını gönder, bot sahibi onaylayınca botun açılır.
+982a0150c	Açılamadı: ⟨0⟩
+447501409	⚠️ Açılamadı: ⟨0⟩
+64fbe849e	⚠️ Klon botun açılamadı: ⟨0⟩
+03718599d	/klon ile yeni token gönderebilirsin.
+ba7f6e886	✅ Onaylandı, bot açıldı
+705bd8131	❌ Reddedildi
+744d07117	✅ <b>Klon botun onaylandı ve açıldı!</b> @⟨0⟩
+90edeb341	Ad, karşılama metni ve destek linki için: /klon
+172a66fda	❌ @⟨0⟩ için klon bot isteğin reddedildi.
+dffc58eb3	Artık izin istemene gerek yok: token'ı gönder, bot sahibi onaylayınca botun açılır.
+7269890c3	Bu işlemi sadece bot sahibi yapabilir.
+741c29704	Bekleyen isteğin yok.
+a353b8903	↩️ Kullanıcı isteği geri çekti
+cb7da55c2	↩️ İstek geri çekildi
+b30c05510	🔑 @BotFather'dan aldığın bot token'ını yaz (ör. <code>123456789:ABC...</code>).
+0adaad0bb	Vazgeçmek için: iptal
+661af98d3	123456789:ABC...
+a54c0e304	Bu klon senin değil.
+8f8af330e	Geçersiz.
+ec93a493c	⏸ Durduruldu
+6a47f34ed	Bu klon silinmiş.
+21d148b57	🗑 @⟨0⟩ klonu silinsin mi? Bot durur, gruplardaki ayarlar kalır.
+e53f197f7	🗑 Evet, sil
+cb1a5e233	🗑 Klon botun @⟨0⟩ bot sahibi tarafından silindi.
+19e55244e	Link https://t.me/ ile başlamalı. Tekrar yaz ya da iptal.
+6e97fcc27	✅ ⟨0⟩ güncellendi.
+feae94615	❌ Bu bir bot token'ına benzemiyor. @BotFather'daki tam token'ı gönder.
+19769e756	❌ Bu ana botun token'ı.
+d305390e4	❌ Token geçersiz. @BotFather'dan doğru token'ı kopyala.
+82a945d00	❌ Bu bot zaten başka birinin klonu.
+d190f37f5	❌ Bu bot için başka birinin bekleyen isteği var.
+fa9063dd4	❌ Bot başlatılamadı: ⟨0⟩
+8ffa38acb	✅ <b>Klon botun hazır!</b> @⟨0⟩
+9b90f4091	Gruba eklemek için: https://t.me/⟨0⟩?startgroup=ulus&admin=⟨1⟩
+34ed30a8e	↩️ Yerine yeni istek gönderildi
+98545fdcd	✅ Onayla
+b3bf17908	📨 <b>@⟨0⟩</b> için isteğin bot sahibine gönderildi.
+988ee3c22	Onaylanınca botun açılacak ve sana haber vereceğim.
+eb51d0e12	Bu bot zaten başka birinin klonu.
+dfe2324b4	⟨0⟩ @⟨1⟩ — sahip <code>⟨2⟩</code>
+1cd8c4513	⏳ @⟨0⟩ — isteyen <code>⟨1⟩</code>
+92021a063	🤖 <b>Klon botlar</b> (⟨0⟩) · Onay bekleyen: ⟨1⟩
+21bb22c3f	Henüz klon yok.
+32f6170ef	<b>Onay bekleyenler</b>
+4e4068d8f	bot_data_⟨0⟩.db
+f666e1d93	🗄 Veritabanı yedeği · ⟨0⟩ MB (sıkıştırılmış ⟨1⟩ MB)
+9cfd9973e	Geri yüklemek için zip'teki .db dosyasını bot_data.db adıyla bot klasörüne koy.
+391c8e6d0	🗄 Yedek alındı ama Telegram'a sığmıyor (⟨0⟩ MB): ⟨1⟩
+c3fcc95df	🗄 Yedek alınıyor...
+96773f704	message to delete not found
+dcdd537ba	message is not modified
+e7aab0f82	query is too old
+7629ed7f1	message can't be deleted
+103ec5f85	Sohbet: ⟨0⟩
+0f97d9633	⚠️ Bot hatası
+176712105	⟨0⟩<pre>⟨1⟩</pre>
+15781d4a0	⚠️ Bu buton eskimiş veya geçersiz. Menüyü yeniden aç.
+043246756	⚠️ Bir sorun oluştu, işlem tamamlanamadı. Lütfen tekrar dene.
+4e9b13c4d	⛔ Bu komutu sadece yöneticiler kullanabilir.
+af7654ae4	⏳ Admin listesi az önce yenilendi. ⟨0⟩ sn sonra tekrar dene.
+7117a9ab8	⚠️ Admin listesi alınamadı. Bot bu grupta yönetici mi?
+48b81ffc1	🔄 <b>Admin listesi yenilendi</b> — ⟨0⟩ yönetici
+10701ad0a	➕ Rütbe verildi: ⟨0⟩
+7eed3b278	➖ Rütbesi alındı (artık yönetici değil): ⟨0⟩
+3ffb1dffa	Kayıt zaten güncel.
+be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
+2a8ec5530	🟢 ULUS başladı
+82459fdce	Veritabanı: <code>⟨0⟩</code> (⟨1⟩ KB)
+d2e59a824	Kayıtlı grup/kanal: <b>⟨0⟩</b>
+6c20c0dd0	⚠️ Veritabanı boş açıldı, son yedekten geri yüklendi: <code>⟨0⟩</code>
+0e4276ce2	⚠️ Kayıtlı sohbet yok. Bot yeniden başlatılınca bu sayı düşüyorsa veritabanı dosyası silinmiş ya da farklı bir klasörden çalıştırılıyor olabilir.
+3831f1221	Sunucuya ulaşılamadı
+ca576aa9b	Hata ⟨0⟩
+44d8a56f0	Kaydet (⟨0⟩)
+8c5f53f0b	🖼 ⟨0⟩ ekli — kaldırmak için işaretle
+6050fb2fa	Zorunlu kanal: ⟨0⟩
+2101bb05d	⟨0⟩ silinsin mi?
+210266e99	Aç/kapat
+ac3d94f38	Mesaj (7 gün)
+251aa63e3	Aktif kişi
+7782d329c	Katılan (7 gün)
+f515fefde	Uyarılı
+b32121bc6	Banlı
+4136a9068	📋 Log kanalı: ⟨0⟩
+1f589ad54	ayarlı değil (botta /setlog)
+91e55d41e	🌙 Gece modu
+5a572078e	· şu an aktif
+db433084f	· açık
+841c11292	Seçili izinler bu saatlerde kapanır, bitince eski izinler geri gelir (UTC+3).
+587308129	Başlangıç
+2a2a44bc3	Bitiş
+e07763331	Kapatılacaklar:
+fb5b6de88	Gece modunu kaydet
+626b1b386	📝 Notlar (⟨0⟩)
+9ba887ab0	Henüz not yok. Üyeler #isim yazınca not gönderilir.
+0ebe5615b	Not adı (örn. kurallar)
+83fff7c73	Not içeriği (biçim: <b>kalın</b>, butonlar: Etiket - https://link)
+0c4734df9	🧩 Filtreler / otomatik yanıt (⟨0⟩/⟨1⟩)
+40d6aee5f	💬 içinde: ⟨0⟩
+25ea7b948	Henüz filtre yok.
+8e0bb1fb8	Tetikleyici (içinde geçsin: *kelime*)
+db212635d	Cevap ({kullanıcı} {ad} {grup} değişkenleri, buton satırları)
+75a77232d	➕ Filtre ekle
+ed3622d45	Medyalı (sticker/foto) cevap için grupta medyaya yanıt verip /filter kullan.
+aa7a25249	⏰ Zamanlanmış mesajlar (⟨0⟩)
+3eb72af09	Her ⟨0⟩ · sıradaki: ⟨1⟩
+240088248	Açık/kapalı
+f479b96fd	Bu zamanlanmış mesaj
+158f37bff	Henüz zamanlanmış mesaj yok.
+38f7fb835	Mesaj (buton satırları ve %%% ile rastgele seçenek desteklenir)
+67866ebd3	Aralık
+039052532	➕ Zamanlanmış mesaj ekle
+ec1ffce3d	🚫 Engelli medya (⟨0⟩)
+39590ef60	Bu engel
+35fb023cf	Eklemek için grupta medyaya yanıt verip /medyaengel, sticker paketi için /paketengel yaz.
+2de76a779	👮 Yetkililer (⟨0⟩)
+bf3bc5b16	Rütbe vermek/almak için grupta /admin, /basadmin, /yardimcikurucu; kişiye özel yetkiler için botta /yetkiler.
+3a5e96d47	Yükleniyor…
+7419f16f9	✅ Kaydedildi
+69efe9b3e	Değişiklik yok
+4c12da56f	Yönettiğin gruplar
+b57672cb0	Yönettiğin grup yok
+03396c6dd	Botun yönetici olduğu ve senin yetkili olduğun bir grup bulunamadı.
+274139b9d	Kaydedilmemiş değişiklikler silinsin mi?
+67b14047c	Butonlar: her satıra  Etiket - https://link  (yan yana: &&) · Kurallar - rules · Bilgi - popup:metin · Değişkenler: {kullanıcı} {ad} {grup} {uye_sayisi} · Rastgele mesaj: araya tek başına %%% satırı · Kalın/italik için <b> <i> etiketleri. Medyayı bota /setwelcome ile ekle.
+'''
+
+I18N_EN = r'''
+d86fae223	✅ Language set: ⟨0⟩
+972caaca5	🌍 <b>Language</b>
+0c1e30399	Choose your language:
+fea7d950e	✅ Group language: ⟨0⟩
+1b6f202bc	🌍 <b>Group language</b>
+9ab6017a5	Current: ⟨0⟩
+9d13d74f6	Choose the bot's language for this group:
+448e35ffe	You don't have permission!
+17665e8c1	🌍 Group language: ⟨0⟩ | ⟨1⟩
+4c9e57207	👑 Founder
+bfa3235c4	🔱 Co-Founder
+ef61a4d09	⭐ Senior Admin
+8d0d91abe	⚠️ Warn
+9a83dd2de	🗑 Delete messages
+d7d2f6eb2	🔇 Mute
+4acd35f89	👢 Kick
+41605b650	🔨 Ban / unban
+1a7979b5e	↩️ Remove warnings
+5b4929b15	📌 Pin
+6880a0676	🧹 Purge / slow mode
+1b5d5b3d1	📩 Join requests / appeals
+6a285730c	📜 Rules / welcome / notes
+eab57b3ab	🚨 Emergency lock (unlock)
+932bdd7e5	⚙️ Protection settings
+6628cf302	👑 Give / remove ranks
+178f46a47	🧩 Filters (auto replies)
+5d856e480	🏷 Mass tagging (/tag)
+8c664bc3f	🔗 Invite link
+5fc826495	🚫 Restrict / ban
+52e1acc4f	🎙 Voice chats
+c264fb5af	💬 Manage topics
+5e74fa6f0	📖 Post stories
+1e9853465	✏️ Edit stories
+f56347abf	🗑 Delete stories
+fc5b6f247	ℹ️ Group info
+16f35c22f	⭐ Add admins
+fce0709e2	❌ The action failed, please try again.
+c1a2c3bf9	You can't do this to yourself.
+58503ae82	This action can't be applied to this account.
+c93d8e442	⛔ ⟨0⟩ has your rank or higher; you can't act on them.
+7c6c0a917	This person
+980a088c1	⛔ You don't have permission! (⟨0⟩ or higher)
+f78cc4201	⛔ You must be a real admin in the group for this command.
+1a089160e	⛔ The bot is not an admin in this group or lacks permissions.
+ec502d773	⟨0⟩ hours
+1d683512c	⟨0⟩ minutes
+e0250a8c0	⟨0⟩ seconds
+4f52d88ec	Hello {user}, welcome to {group}!
+41006f31c	🙏 Thanks! Bot added: ⟨0⟩
+e89ec2f7d	Type: ⟨0⟩
+484b4f591	Type /help for commands.
+fbb8f4be4	Bot added: ⟨0⟩ (⟨1⟩) | owner: ⟨2⟩
+417b3cc01	✅ Bot added and registered! /help for commands, /settings for settings.
+189f689b9	🌍 Language: /setlang
+e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> warnings
+ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Warning: ⟨3⟩/⟨4⟩ | ⟨5⟩
+9e23d2151	temporary ban (⟨0⟩)
+953cd28f3	kicked from the group
+090d91568	📨 To appeal, they can message the bot privately with /appeal.
+ddd70b55a	⟨0⟩ ⟨1⟩ reached ⟨2⟩ warnings → <b>⟨3⟩</b> (⟨4⟩)⟨5⟩
+f05514a4b	🚫 ⟨0⟩ ⟨1⟩ | Reason: ⟨2⟩ | ⟨3⟩
+33762701b	🗑 ⟨0⟩ → message of ⟨1⟩ deleted | ⟨2⟩
+e83ba4992	🔇 ⟨0⟩ ⟨1⟩ → muted for ⟨2⟩
+4689a9495	👢 ⟨0⟩ ⟨1⟩ → kicked from the group
+24b70b24b	🚫 ⟨0⟩ ⟨1⟩ → banned
+f881648dd	🗑 Message deleted
+a1ce809b5	⚠️ Deleted + warned
+4d4d20ba3	🔇 Deleted + muted for 1 hour
+3a4a2408d	🚫 Deleted + banned
+184e9ea25	✅ Ignored
+1cd1dbdf9	🗑 Delete
+d193c645a	⚠️ Warn
+bb7ad37ac	🔇 Mute 1h
+ebe01fecc	🚫 Ban
+e7e0e2df9	✅ Ignore
+3397853de	Reports are sent by replying to a message in the group: /report [reason]
+b61b50bf7	Reply to a message and type /report to report it.
+9cf259e34	Staff can't be reported.
+c5bbdb405	You're reporting too often, please wait a bit.
+bd7e0099e	This message was already reported.
+896d1ca10	🚩 <b>New report</b> #⟨0⟩
+cec4cf481	Group: <b>⟨0⟩</b>
+c3a6b7566	Reported by: ⟨0⟩
+5083aeebb	Reported user: ⟨0⟩ (<code>⟨1⟩</code>)
+9b4b6cd06	<a href="⟨0⟩">Go to message</a>
+679ec2d36	✅ ⟨0⟩, your report was sent to the staff.
+008e3c181	⚠️ ⟨0⟩, report received but no staff member is reachable right now.
+ad6b780a2	Report not found.
+04f22133c	This report was already handled: ⟨0⟩
+4f0282227	report
+94cea35e5	↩️ Undo warning
+2446ce8e3	🔊 Unmute
+d3d996724	↩️ Warning removed (⟨0⟩/⟨1⟩)
+2ffab4aa4	🔇 Muted for 1 hour
+969014784	🔊 Unmuted
+96524e022	🚫 Banned
+c1ef156c4	✅ Unbanned
+7181ac4be	Invalid action.
+3461c44ea	You must be an admin in the group for this.
+74042fc88	The bot is not an admin in this group or lacks permissions.
+aec9fe5ec	Can't be applied to staff.
+14fea3d87	👋 Hello ⟨0⟩!
+b6ba013b6	To write in the group, answer the question below.
+30a234e49	⏰ Time limit: ⟨0⟩. A wrong answer or timeout gets you removed from the group.
+5941a96e3	⏰ Captcha timeout → ID:⟨0⟩ removed | ⟨1⟩
+47de968f7	Error.
+371e8fa90	This captcha isn't yours!
+4b056df52	The captcha has expired.
+16a67ec53	✅ Correct!
+13e7c138f	✅ ⟨0⟩ verified!
+d8c5044b0	✅ Captcha passed: ⟨0⟩ | ⟨1⟩
+d4d19c221	❌ Wrong answer!
+be0ff1965	❌ ⟨0⟩ answered wrong and was removed.
+921ae23b1	❌ Captcha failed → ⟨0⟩ removed | ⟨1⟩
+a1d75b185	🗑 ⟨0⟩ — message sent as a channel (⟨1⟩) deleted | ⟨2⟩
+c537f5f16	🆕 ⟨0⟩, new members can't send links/media/forwards during their first ⟨1⟩ minutes. (~⟨2⟩ min left)
+df471627f	blocked sticker pack
+d3bfcdff9	blocked media
+c82923d6d	dangerous file (⟨0⟩)
+c83f1da6c	inappropriate content
+5fb084a5f	AI: ⟨0⟩
+51da96b93	inappropriate content (⟨0⟩)
+c5baa0aed	Inappropriate media (⟨0⟩)
+acae614af	automatic: inappropriate media in a row (suspected attack)
+f77a6df47	🚨 <b>Media attack</b> detected, media sending in the group is locked.
+d6fc51018	unsigned post
+93f2e53e1	🔞 <b>Inappropriate media deleted in the channel</b>
+a99d18293	Sender: ⟨0⟩
+d6c8546a4	Channel: <code>⟨0⟩</code>
+cb902699f	Inappropriate media in a row in the channel (suspected attempt to get the channel banned)
+ade12807b	🔒 <b>Media lock</b>: photos, videos, stickers, GIFs and files are disabled for ⟨0⟩.
+d21e8724d	Reason: ⟨0⟩
+0ca7ff868	🔓 Media lock lifted, previous permissions restored.
+874318f86	🔓 Media lock lifted | ⟨0⟩
+4bf6387ff	Use this command in the group, replying to the media you want to block.
+b38691ea2	Reply to the photo/video/GIF/sticker/file you want to block.
+19a0caff5	Reply to a sticker to block its pack.
+a6fdf7132	sticker pack <code>⟨0⟩</code>
+478778014	(in all groups)
+350c5b7db	🚫 ⟨0⟩ blocked. If it's sent again it will be deleted.
+3506ca524	This is already blocked.
+4d19611fc	🚫 Media blocked (⟨0⟩) | ⟨1⟩
+63de95c9c	First select a group with /select!
+0d2990bb6	🔓 Media lock lifted.
+5efbe835d	Media lock is already off.
+bc8817800	🔒 Media locked.
+57dd35ab6	Couldn't lock (a raid lock may be active or the bot lacks permission).
+6fc9219df	⟨0⟩ d ⟨1⟩ h
+184dd1447	⟨0⟩ h ⟨1⟩ min
+65f0ede73	⟨0⟩ min
+c55e9eeb2	✏️ ⟨0⟩, messages older than ⟨1⟩ minutes can't be edited; your edited message was deleted.
+e4ec4ef08	<i>no record (the message was sent before the protection was enabled)</i>
+4f135e257	<a href="⟨0⟩">Message location</a>
+a81c7ed8d	✏️ <b>Late-edited message deleted</b>
+ff6af8a83	User: ⟨0⟩ (<code>⟨1⟩</code>)
+6c94268e3	Sent: ⟨0⟩ · edited ⟨1⟩ later
+eba784f45	<b>Before:</b>
+817e491aa	<b>After:</b>
+330690bdd	forward (#⟨0⟩)
+a00507082	media flood (⟨0⟩/⟨1⟩ s)
+a77f997a9	flood (⟨0⟩ messages/⟨1⟩ s)
+74c953a60	🔗 Link deleted → ⟨0⟩ | ⟨1⟩
+427c1fec3	posting links
+794910b1f	Banned word
+8fb66aa89	banned word
+4e5efb06d	repeated spam
+c91e153a9	Anti-forward is now: ⟨0⟩
+6d6d358e6	Usage: /antiforward on|off
+117ba2454	ON
+6a2055cc2	Anti-forward ⟨0⟩.
+596cfaf0b	Anti-forward ⟨0⟩ | ⟨1⟩
+d2102fa46	Anti-media is now: ⟨0⟩
+332b15c14	Usage: /antimedia on|off
+3227848c2	Anti-media flood ⟨0⟩.
+48d9c6287	Anti-media flood ⟨0⟩ | ⟨1⟩
+8cc0eba99	Anti-spam flood is now: ⟨0⟩
+d1a5f38ec	Limit: ⟨0⟩ messages / ⟨1⟩ seconds
+3599fb42c	Usage: /antispam on|off
+64adfe1a4	Change the limit: /antispam on 10 5 (10 messages/5 seconds)
+1a836ee8e	Anti-spam flood ⟨0⟩. (Limit: ⟨1⟩ messages/⟨2⟩ s)
+27867ef23	Anti-spam ⟨0⟩ | ⟨1⟩
+5a6f48edd	Anti-link is now: ⟨0⟩
+d947593b7	Usage: /antilink on|off
+5ddc225c5	Link blocking ⟨0⟩. (Admins exempt)
+298cef31c	Anti-link ⟨0⟩ | ⟨1⟩
+dc5c98faf	Captcha is now: ⟨0⟩
+0742b23d4	Usage: /captcha on|off
+f8303f57c	✅ ⟨0⟩ is no longer staff.
+eb3b60248	🗑 Rank of ⟨0⟩ removed | ⟨1⟩
+36a946671	User not found!
+92274adac	📂 ⟨0⟩ is now a folder manager!
+b7a687056	📂 ⟨0⟩ assigned as folder manager | ⟨1⟩
+3b49b9b50	No reason given
+d34c44d0e	permanent ban
+42ca54745	🚫 ⟨0⟩ got a ⟨1⟩! Reason: ⟨2⟩
+023576cd7	Specify a user! Reply to them or give an ID/username.
+bad97a937	✅ ⟨0⟩ unbanned!
+b83344e83	✅ ⟨0⟩ unbanned | ⟨1⟩
+dee699309	👢 ⟨0⟩ kicked!
+16d07ca95	👢 ⟨0⟩ kicked | ⟨1⟩
+299422191	24 hours (admin limit)
+b2fbfc457	🔇 ⟨0⟩ muted for ⟨1⟩!
+9247b48e0	🔇 ⟨0⟩ muted for ⟨1⟩ | ⟨2⟩
+b13185722	⟨0⟩ ⟨1⟩ unmuted!
+dd3fea678	⟨0⟩ ⟨1⟩ unmuted | ⟨2⟩
+08ccab800	manual unmute
+f990c822c	Unmute failed: ⟨0⟩
+fa5f86984	⟨0⟩ ⟨1⟩: warning removed (⟨2⟩/⟨3⟩).
+e222d2c43	↩️ ⟨0⟩ warning removed (⟨1⟩) | ⟨2⟩
+b26226e44	📊 ⟨0⟩ warnings: ⟨1⟩/⟨2⟩
+fcbd59f04	Reply to a message and type /pin to pin it!
+821dc813a	📌 Message pinned!
+f07ba3194	📌 Message pinned | ⟨0⟩
+84ce06e7a	✅ Unpinned!
+7a8e925ad	📍 Unpinned | ⟨0⟩
+a166505b1	Usage: /slowmode <seconds> (0 = off)
+5efa94a44	Example: /slowmode 30
+d9e0a5f25	⏩ Slow mode disabled.
+c9f3d97aa	🐢 Slow mode set: ⟨0⟩ seconds.
+90fc9c4e8	🐢 Slowmode ⟨0⟩ s | ⟨1⟩
+04ee47e62	Enter a valid number of seconds!
+ec7dc1340	First select a group with /select!
+ef6a75200	Use this command inside the group you want to clean.
+8ab6d8456	Usage: /purge <count> or /purge all
+f726b6834	Last 20,000 messages
+ad1696ee9	Last ⟨0⟩ messages
+09bed8e26	🧹 Deleting messages, please wait...
+1f937217d	🧹 ⟨0⟩ cleaned.
+f6a3aa1c3	🧹 ⟨0⟩ cleaned | ⟨1⟩
+ca1480b4e	📋 Ban list is empty.
+3df0209e0	🚫 <b>Ban List</b> (last 20):
+a2ef54f04	📋 Mute list is empty.
+f3ad3e028	🔇 <b>Mute List</b> (last 20):
+4d02c60e6	⟨0⟩ min left
+e9fa5b6c6	expired
+50bd44457	Usage: /antispam on|off
+aaf3e3fa7	Spam protection ⟨0⟩!
+032f12948	⚙️ Spam protection ⟨0⟩ | ⟨1⟩
+db5c288ba	Usage: /wordban <word>
+5ce049d2e	Invalid regex: ⟨0⟩
+382054e7a	'⟨0⟩' added to the banned words list!
+a061e639e	'⟨0⟩' is already banned!
+c690df9b8	Word ban system enabled!
+a04bd920f	Word ban system disabled!
+908cb2d50	Usage: /setautoaccept on|off
+ad89cff79	Auto accept ⟨0⟩!
+8a77c7461	Usage: /setautoreject on|off
+de72bc915	Auto reject ⟨0⟩!
+f4661e0bb	Usage: /setautorejectbot on|off
+4f2789f4b	Bot/fake account rejection ⟨0⟩!
+19f41bbbf	No invite statistics yet!
+8618c4bd5	📈 Invite Statistics:
+4dff67686	⟨0⟩: ⟨1⟩ members
+fae5737f3	🚨 RAID DETECTED!
+7b14ac650	⟨0⟩ members / ⟨1⟩ seconds
+cf9fdec29	Group locked for ⟨0⟩ min. To unlock: /unlockdown
+1124ad26d	🔒 Group locked for ⟨0⟩ min: ⟨1⟩
+93ff62fcf	The group is already locked.
+0182255e2	🚨 Emergency lock: ⟨0⟩
+121e5db73	🔒 Group locked for ⟨0⟩ min. Co-Founders and above can unlock it with /unlockdown.
+2aadb84f8	Couldn't lock (check the bot's permissions).
+aff77f945	✅ Raid lock lifted automatically | ⟨0⟩
+8fcabef94	🔒 Currently LOCKED
+94a774e51	🔓 Open
+376d9283f	🚨 Anti-Raid: ⟨0⟩
+8827355aa	Usage: /antiraid on|off
+f0e5d75da	Change the limit: /antiraid on 15 20 (15 members/20 s)
+ecbb4a7da	🚨 Anti-raid ⟨0⟩.
+4f3192d13	Limit: ⟨0⟩ members / ⟨1⟩ seconds
+bdf82e0b3	🚨 Anti-raid ⟨0⟩ | ⟨1⟩
+cc103ac23	The group isn't locked.
+374c81aa3	✅ Raid lock lifted, the group's previous permissions are back.
+2551f6fe1	✅ Raid lock lifted manually | ⟨0⟩
+4918e916d	Error: couldn't unlock (check the bot's permissions).
+bce49f901	Couldn't get the profile!
+9131de73e	User not found!
+bf84ddcb3	Muted (⟨0⟩h ⟨1⟩min left)
+08c52b8c6	Muted (⟨0⟩ min left)
+c5a6c0399	👤 <b>User Profile</b>
+8359545a8	Name: ⟨0⟩
+16d1a3d6f	Status: ⟨0⟩
+c90e09fec	Warnings: ⟨0⟩/⟨1⟩
+f7b55484b	Recent actions:
+245846708	system
+1ebb0f458	No moderation actions.
+ea0db6b35	Word ban: ⟨0⟩
+67b2688cb	No banned words.
+ab2a94371	To add: /wordban <word>
+bc50a233e	Delete: ⟨0⟩
+ea1ef9198	Delete all
+9e6ecd595	Close
+d4ff2fcbb	Word Ban: ⟨0⟩
+1e892c51e	Total: ⟨0⟩ words
+d6c5bc3c9	Use the buttons below to delete:
+3e285778b	ON
+86fc112e5	OFF
+3b9e05b52	Word list closed.
+a9b768614	All banned words deleted.
+baa6a8908	All banned words deleted | ⟨0⟩
+f3b918935	Banned word deleted: ⟨0⟩ | ⟨1⟩
+09e3ab40d	All words deleted.
+4b153db82	Word Ban: ON
+dbddb7434	Sending messages
+399307b2e	Sending media
+17dec3f5f	Sending links
+a6d462ad9	Sending files
+b80944077	Save
+b0bd84b1e	Cancel
+eec2005a5	First select the channel with /select!
+056d48fa9	Night mode turned on manually.
+aad062b54	Night mode turned off manually.
+511a5144a	Night mode hours set:
+cb1460461	Start: ⟨0⟩:⟨1⟩
+771bcaf96	End: ⟨0⟩:⟨1⟩
+7989dd84a	To set the restrictions: /nightmod
+79514002a	Format error. Usage: /nightmod 23:00 07:00
+204b48fc8	Configure (DM)
+42031a2a7	Night mode is used for the first time! Message the bot privately to configure it:
+89f29d42a	Active
+3de48344f	Inactive
+de1f5c130	Night Mode: ⟨0⟩ (⟨1⟩)
+b1d3baa6d	Hours: ⟨0⟩:⟨1⟩ - ⟨2⟩:⟨3⟩ (UTC+3)
+b5356dbcd	Choose the permissions to restrict, then press Save:
+bc2943e26	🌙 Night mode started. Restrictions are active until ⟨0⟩:⟨1⟩ in the morning.
+86a8a2d6d	Night mode activated | ⟨0⟩
+2a8fea2da	☀️ Night mode ended. Normal permissions restored.
+19d0c7302	Night mode ended | ⟨0⟩
+5f5e93020	Night mode configuration cancelled.
+9ca4e6abd	Media
+c0ceeb976	Voice/Video notes
+02c5387be	No restriction selected
+8c6724096	Night mode saved!
+4c2f064b0	Restrictions: ⟨0⟩
+ec5110d51	To set the hours: /nightmod 23:00 07:00
+015f290e6	Night mode configured | ⟨0⟩
+a6ff502b6	⟨0⟩ Temporary ban expired but unban failed: <code>⟨1⟩</code>
+09caa25fa	⟨0⟩ Temporary ban ended → ⟨1⟩ unbanned
+a70e468cd	Messages with links, hidden (embedded) links and link buttons are deleted.
+a0c63db58	🔤 Banned word
+09f922f95	Words in the list are caught including Turkish letters, upper/lower case and leetspeak.
+58c8ebdab	🔁 Repeated spam
+61bbb7e24	If most of the last 10 messages within 60 s are the same, it's spam.
+a8ee9b9f5	More messages than the limit in a short time.
+93442a52b	Messages forwarded from other chats.
+4592320db	🖼 Media flood
+b65eef3f3	More photos/videos/stickers than the limit in a short time.
+32d0d473e	🔞 Inappropriate media
+cf1a8e3ca	Porn/nudity (AI, if installed), blocked media and sticker packs, dangerous files (.apk, .exe…).
+353ad5e39	Delete
+a79d71fbf	Warn
+229c67bd8	Mute
+0855009c4	Kick
+7f3fcf8f1	Ban
+bd3c8d60c	Temporary ban
+7c65bba4a	⟨0⟩ messages
+5df501398	⟨0⟩ s
+637c7d4eb	⟨0⟩ members
+2a687b503	⟨0⟩ people
+2dd4cbf18	⟨0⟩ actions/hour
+d507ef055	Messages
+cc9e030d6	Voice/Video notes
+1949df42c	Link previews
+01674713d	Files/Music
+0a4ef3c95	✏️ Write the new welcome message or send a photo/video/GIF (its caption becomes the message).
+a5e32e95a	Buttons: one per line  Label - https://link  (side by side: with &&)
+1ee44f2e2	Variables: {user} {first} {username} {group} {count} · Random: separate messages with a %%% line
+989ac76ce	Welcome {user}!
+f4b119f84	✏️ Write the goodbye message (media and buttons are allowed). Variables: {first} {user} {group}
+3fffcf251	👋 {name} has left us.
+e32be930c	📜 Write the group rules. Formatting (bold, links) and buttons are kept.
+8a546a91a	1) Be respectful  2) No ads
+369899a51	📢 Write the required channel: @channel, t.me/channel or the -100… ID. The bot must be an admin there.
+ffb95707b	@channel
+0bf3f943d	⏰ Write the interval first, then the message. E.g.: 6h Don't forget to read the rules!
+b7be418c7	Interval: 30m, 6h, 1d · For media, write in the photo's caption.
+dafcc65fa	6h Message
+c1e570e92	🔤 Write the words to ban (one per line). For regex, start with re:
+8031790fb	🔗 Write the domains to allow (separated by spaces). E.g.: youtube.com t.me/mychannel
+dd20fa7d1	📝 Write the note as: name content
+750db2552	rules Group rules...
+2f50f0128	🧾 Write the log channel/group ID (e.g. -1001234567890). The bot must be able to post there.
+0a89e21a0	🛟 Write the trusted person's user ID (they can get it by sending /id to the bot).
+678669669	Off
+5e05f56cb	⬅️ Back
+3425aebce	🛡 <b>Protection</b> — ⟨0⟩
+a9aa38570	Tap a protection to turn it on/off and set its penalty and limits.
+dfc009e83	⟨0⟩ <b>protection</b> — ⟨1⟩
+196e11b00	Penalty: <b>⟨0⟩</b>
+3b58939e6	(limit ⟨0⟩ → ⟨1⟩)
+e882e3937	Escalating mute: 10 min → 30 min → 5 hours
+10d361785	Protection ⟨0⟩
+a92c81c26	🔗 Allowed links ›
+05bd7ca2c	🔤 Word list ›
+7bb491e04	🚪 <b>Joining</b> — ⟨0⟩
+a956dd268	• <b>Captcha</b>: a new member can't write in the group until they solve a math question.
+29aad6032	• <b>Private verification</b>: the bot asks people who send a join request a question in private; those who answer correctly are accepted automatically. "Approve new members" must be on in the group and the bot needs the invite permission.
+d33b884be	Captcha (in group)
+6fe48b7bb	Private verification
+34c8b8ee3	Auto accept
+747e46068	Auto reject
+eb973fe6c	Reject bots / users without a username
+371ffa7fa	Mute new members without a username
+df3d708d0	🆕 New member restriction ›
+119163a69	🚨 <b>Anti-Raid</b> — ⟨0⟩
+3d6f3a6ef	If more members than the limit join within the set time, the group is locked for ⟨0⟩ min, then the previous permissions are restored.
+12e3f2f5a	🔒 Locked
+5ebba95e7	🔓 Unlock now
+80ea856ce	🆕 <b>New member restriction</b> — ⟨0⟩
+983dcd824	New members can't send links, media or forwards for the set time (their message is deleted and a notice is shown).
+b55881f2f	⚠️ <b>Warnings</b> — ⟨0⟩
+979ac1fa7	Protections with the "Warn" penalty and /warn give warnings; when the limit is reached, the selected penalty is applied.
+cd70c61ed	Now: <b>⟨0⟩</b> warnings → <b>⟨1⟩</b>
+e72447e76	Warning limit
+a380d0c65	Penalty duration
+c601b3f5f	Protection mute
+6a05e68f4	🌙 <b>Night Mode</b> — ⟨0⟩
+9ca9fb409	Status: <b>⟨0⟩</b>⟨1⟩
+d772b08c3	Hours: <b>⟨0⟩:⟨1⟩ – ⟨2⟩:⟨3⟩</b> (UTC+3)
+145d44a73	The selected permissions are turned off during these hours and restored afterwards.
+4a4847e71	(active now)
+ed1a5ae4e	Night mode
+58910c4c5	Start ⟨0⟩:⟨1⟩
+8e87dff1c	End ⟨0⟩:⟨1⟩
+586001e9d	🔗 <b>Allowed links</b> — ⟨0⟩
+53a0c084e	These domains are exempt from link protection (including subdomains). Total: ⟨0⟩
+0aa28d421	Tap to delete.
+c619b874d	➕ Add
+20540dbc7	<b>Delete all banned words?</b>
+b12c1611e	🔤 <b>Banned words</b> — ⟨0⟩
+cbdf733da	Filter: <b>⟨0⟩</b> · Total: ⟨1⟩
+acb2cf3c1	Word filter
+9de026dc8	🧹 Delete all
+866ffe59a	📝 <b>Notes</b> — ⟨0⟩
+8488244a4	Typing <code>#name</code> in the group shows the note. Total: ⟨0⟩
+6e5864d9f	➕ Add note
+64d1a5476	🧩 <b>Filters</b> — ⟨0⟩
+75e34f897	The bot replies when the trigger is written in the group. Total: ⟨0⟩
+c8063c80c	To add, in the group: <code>/filter</code> · Tap to delete.
+7cb292fe4	🧾 <b>Log channel</b> — ⟨0⟩
+399fb6ff5	All moderation records are sent here.
+6a7bdfba4	Current: <code>⟨0⟩</code>
+e76134e13	Only the group owner can change it.
+d92dcb23a	✏️ Set log channel
+c62c45415	🗑 Remove
+07210c024	⚙️ <b>⟨0⟩ — Group Settings</b>
+9006cb8f1	🛡 Active protections: ⟨0⟩
+16ccea6ec	🚪 Captcha: ⟨0⟩ · Private verification: ⟨1⟩
+cc096b5a7	⚠️ Warnings: ⟨0⟩ → ⟨1⟩
+06292addb	🌙 Night mode: ⟨0⟩
+e5044a295	🛡 Protection
+82a6a709d	🌙 Night Mode
+2eed1225e	🔗 Links
+d38c4e47a	🔤 Words
+6828b98dc	🧩 Filters
+7956a13a3	⏰ Scheduled message
+81bddc593	🏷 Tagging
+5961a42e8	✏️ Edits & Reports
+1ff65156a	🧾 Log Channel
+f1a57e125	🌐 Group Network
+f5c96387f	🛟 Recovery
+5244ca690	🌍 Language: ⟨0⟩
+1bd24917c	✖️ Close
+e38a49a6f	Channel Protection Settings
+f81ca3a77	Only the group's founder can change this setting.
+4081e665c	Invalid setting
+ce432606a	✅ Turned on
+ca037fcc4	❌ Turned off
+a006b158d	⚙️ ⟨0⟩ penalty → ⟨1⟩ | ⟨2⟩
+0ebfd3ac6	Penalty: ⟨0⟩
+286a11648	Limit penalty: ⟨0⟩
+c32110889	The list changed, refreshed
+cf6b53ca2	🗑 ⟨0⟩ deleted: ⟨1⟩ | ⟨2⟩
+64e48562d	Allowed link
+ed6b18d70	🗑 ⟨0⟩ deleted
+36a8cc3d4	🧹 All banned words deleted | ⟨0⟩
+5db717ed8	All words deleted
+0f2ad553f	Filter deleted
+3247c21b8	🌙 Night mode ⟨0⟩
+672441418	enabled
+ba4dc20d1	disabled
+d3d694451	Saved
+95bf688eb	Log channel removed
+e413c4b9e	Rules deleted
+0f514bbde	✅ Raid lock lifted from the panel | ⟨0⟩
+8e6a20f22	🔓 Unlocked
+f5014f259	Couldn't unlock (bot permissions?)
+7f0e2a142	Group not found.
+f41c17d41	You must be an admin in the group to use this panel.
+8213d6575	<i>To cancel: cancel</i>
+1465f36fd	Write your answer as a reply to the message that opened.
+3035a6b30	⏰ Time is up, try again from the panel.
+18363eae4	Cancelled.
+3a22b8f74	❌ The rules can't be empty.
+fa98ef9b6	Welcome message
+a9e0c5b00	✏️ ⟨0⟩ updated | ⟨1⟩
+074e8897f	✅ ⟨0⟩ updated (⟨1⟩). You can check it with 👁 Preview in the panel.
+4f4799ddf	✅ Required channel is on: <b>⟨0⟩</b>
+9dc44c973	❌ Write the message after the interval. E.g.: <code>6h Read the rules!</code>
+564247ab5	✅ Scheduled message #⟨0⟩: every ⟨1⟩.
+390237a11	✅ ⟨0⟩ words added, the word filter is on.
+28ebadbf6	❌ Invalid regex: ⟨0⟩
+8d642d759	✅ ⟨0⟩ domains added.
+f6b268d0d	❌ Format: <code>name content</code> (name: letters, digits, - or _)
+1b6abf7f2	✅ Note saved: <code>#⟨0⟩</code>
+d872c76cd	Only the group owner can change the log channel.
+1731f9a98	❌ Invalid ID. Example: <code>-1001234567890</code>
+e84190fc5	✅ ULUS log channel connected: ⟨0⟩
+9d4e14027	❌ I can't send messages to this chat. ⟨0⟩
+d8947ff95	✅ Log channel set.
+7f9f8fabc	Unknown action.
+c3ecef83d	s
+e3a725f35	Members only
+fb155ed20	Members + Admins
+5e998efe4	Members + Admins + Senior admins
+431e199fa	Everyone except the founder
+8b3606b03	🤖 AI scan⟨0⟩
+2abda5f05	(not installed)
+af96fe25f	📦 Dangerous files (.apk .exe …)
+c977dbc41	🔒 Automatic media lock during attacks
+1c409b726	Lock duration
+e4b73af2e	🚫 Blocked media list ›
+a5265e3d7	🔓 Lift media lock
+c1a903ce0	🔒 Lock media now
+678507459	on
+c293fc85c	off
+8dd94c76e	not installed (on the server: <code>pip install nudenet</code>)
+043b96df1	🔒 Media lock active until ⟨0⟩
+059a31b37	AI scan: ⟨0⟩
+c77da8b2d	To block, reply to the media with <code>/blockmedia</code> · sticker pack: <code>/blockpack</code>⟨0⟩
+a54dfcd87	🚫 <b>Blocked media</b> — ⟨0⟩
+b1fe46387	Deleted when the same media is sent again. Total: ⟨0⟩
+2d00f3347	Tap to remove. To add: reply to the media with <code>/blockmedia</code>
+0c575feaa	✏️ <b>Edits & 🚩 Reports</b> — ⟨0⟩
+fe3d0969d	• <b>Late edit protection</b>: a message edited more than ⟨0⟩ min after it was sent is deleted; the old and new versions are sent privately to the group's founder and the person who added the bot (they must have started the bot privately).
+48166d583	• <b>Reports</b>: members reply to a message with <code>/report</code> or <code>@admin</code>; staff get a notification with buttons.
+9a9d43302	👥 Applies to: <b>⟨0⟩</b> (tap the button to change; founder only)
+60543a144	Late edit protection
+2719eae25	👥 Applies to: ⟨0⟩
+8173539b7	Duration
+a95a8ac50	Notify the founder/adder
+337b927c6	Report system
+283ea618d	🌍 <b>Language</b> — ⟨0⟩
+ecfd0b504	The bot's messages, buttons and alerts in this group will be in the selected language. The welcome, rules and notes you wrote don't change.
+b04edf4df	👮 <b>Admin audit</b> — ⟨0⟩
+46926b2fa	• <b>Daily summary</b>: every evening the founder and the person who added the bot get who made how many bans, mutes, warnings and deletions.
+9e35dc551	• <b>Action limit</b>: if a staff member who isn't the founder makes more than ⟨0⟩ bans/kicks/mutes in 1 hour, their rights are suspended and you get a notification with buttons (their bans can be undone with one tap).
+dbc65734d	• <b>Deleted message log</b>: messages deleted with /del and /purge are copied to the log channel. (Telegram doesn't tell bots about messages deleted manually in the app.)
+fef769989	Instant summary: <code>/audit 7</code> · Message history: reply to a message with <code>/edits</code>
+5d565355a	Suspended staff: ⟨0⟩
+fbe3b7863	Only the founder can change these settings.
+011f51955	Daily admin summary
+f8f216c2d	Admin action limit
+c1017ac8a	Limit
+75d76fc04	Copy deleted messages to the log channel
+b91937b6d	🌐 <b>Group network</b> — ⟨0⟩
+e26434728	This group is in the network of ⟨0⟩ (⟨1⟩ groups):
+4515b950e	While ban sync is on, a person banned in one group is banned in all groups of the network (not kicks); when the ban is lifted, it's lifted everywhere.
+2a41a6019	Ban sync
+7b9394ab7	📋 Copy word & link lists to the network
+35c1578b6	⚙️ Copy protection settings to the network
+a0ec7c7bd	➖ Remove this group from the network
+db918b20f	This group isn't in a network. If you add the groups you manage to your network, bans spread to all of them and you can copy settings with one tap. (Founder / co-founder required.)
+e44c5b572	➕ Add this group to my network
+1c979a8ff	none yet
+9f41d74fa	🛟 <b>Admin recovery</b> — ⟨0⟩
+62477adfc	The admin list is saved every 6 hours. If someone removes the rights of 3+ admins in a short time, admins and trusted people get an alert with a recovery button. Trusted people can restore the admins by sending <code>/recover</code> to the bot privately.
+092c6482f	Last snapshot: ⟨0⟩
+ba8991412	Trusted people (⟨0⟩/3) — tap to remove:
+5729ee3a9	➕ Add trusted person
+72e9b014a	Restore automatically
+cdfef870d	📸 Save now
+521787de8	♻️ Restore ›
+c578b31d8	Snapshot not found.
+b5e5e7de1	Invalid language
+a85ca0330	Only the group's founder can change this.
+43ce9c01e	✏️ Edit protection scope: ⟨0⟩ | ⟨1⟩
+446ff86ee	Applies to: ⟨0⟩
+59e922883	🔒 Media locked
+dd43607b8	Couldn't lock (raid lock or bot permissions)
+650f54e0c	🔓 Media lock lifted
+a6220f5d4	The lock is already off
+1d4e3c6c4	Block removed
+de91565ff	You must be this group's founder to add it to a network.
+6b85bac2e	🌐 Group added to the network of ⟨0⟩
+6c4e9120a	Added to the network
+b605b46d7	This group isn't in a network
+4f36e2321	Removed from the network
+bd4ac87bb	Only the network owner can do this.
+f9a34a2ad	Ban sync ⟨0⟩
+78a09a0ea	🌐 Settings copied to ⟨0⟩ groups in the network | ⟨1⟩
+eacfa093c	Copied to ⟨0⟩ groups
+c39c747b1	Only the founder can change the recovery settings.
+95e917987	Removed
+87f3326f9	📸 Saved
+49c866e1e	Couldn't save (is the bot an admin?)
+b13ed05bb	♻️ ⟨0⟩ admins restored⟨1⟩
+8670a3a46	, ⟨0⟩ failed
+c3b595125	Only the founder can add trusted people.
+32cb829ea	❌ Person not found. Write their user ID (they can get it by sending /id to the bot).
+89f663ce6	At most 3 trusted people can be added.
+dfe9ba864	✅ ⟨0⟩ added as a trusted person. They must have started the bot privately.
+a4167566b	First select a group with /select!
+2ba2862f6	group
+62d623326	channel
+3fca554f2	people
+ffd1ee882	📝 draft
+4bf27d98f	⏰ scheduled
+4c10fb3fc	📤 sending
+2467aa607	✅ done
+578b9744b	❌ cancelled
+71db82dfe	Write the time like this: -time 20:00
+c3cd977ee	Write the template name like this: /broadcast -save update "message"
+530791023	no targets
+9a2c72e2d	🔕 Turn off announcements
+9f242a754	🗳 No votes yet
+37e3719ed	🗳 ⟨0⟩ votes: ⟨1⟩
+186e99c6e	✅ <b>Announcement #⟨0⟩ completed</b>
+53acfe01d	⏹ <b>Announcement #⟨0⟩ stopped</b>
+8fa7a67a9	📊 ⟨0⟩/⟨1⟩ processed
+6b12880d0	✅ Delivered: <b>⟨0⟩</b>
+ddb6da67b	🚫 Blocked / never started the bot: ⟨0⟩ (skipped in next announcements)
+814224bfc	⚠️ Couldn't send (bot removed / no permission): ⟨0⟩
+d4d2773cb	📌 Pinned: ⟨0⟩
+53ffa3f09	👆 Button clicks are shown in /broadcasts
+0d709ac7c	🗳 Poll results are shown in /broadcasts
+dd370224e	To stop: /stopbroadcast
+be085c333	📢 <b>Announcement</b>
+0b7be0b19	<code>/broadcast "message"</code> — groups + channels
+1e622cf6b	<code>/broadcast -users "message"</code> — people who use the bot privately
+25a35b0aa	<code>/broadcast -users -channels "message"</code> — people + channels (can be combined)
+0b87fef23	<code>/broadcast all "message"</code> — everyone
+bc83a4f15	Options: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (last 7 days; <code>-active 30</code>) · <code>-test</code> (only you) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+1aca894ba	🎯 In the preview you can pick specific groups/channels.
+9fa263da2	🗳 Poll: <code>/broadcast -poll -users "Question?
+735ec279d	Option 1
+98805337f	Option 2"</code> — all votes are collected in a single poll
+aaa59ea0d	💾 Template: <code>/broadcast -save name "message"</code> → <code>/broadcast -users #name</code> · /templates
+a3caa1df0	💡 If you reply to a message (image, video, with buttons or premium emoji) with <code>/broadcast -users</code>, that message is sent as is. You can also write button lines in the text: <code>Channel - https://t.me/channel</code> (clicks are counted)
+fb071e726	/broadcasts — history, clicks, poll results · /stopbroadcast — stop sending
+344eb221b	⚠️ Premium emojis were converted to normal emojis by Telegram (bots can't send premium emojis by writing them). Fix: write the message yourself, reply to it with /broadcast — the copied message keeps them.
+f87763b78	👆 <b>Announcement #⟨0⟩ preview</b>
+3790c85e6	🎯 Targets: ⟨0⟩
+d46292455	🔥 Only those active in the last ⟨0⟩ days
+019c9cc1b	✅ Selected groups/channels: ⟨0⟩
+14d962307	👤 People: those who use the bot privately; Telegram doesn't allow messaging people seen in groups who never started the bot (tried once, then skipped).
+f7bcd6c82	⏱ Estimated time: ~⟨0⟩ s
+aaca2bf64	⏰ Sending at: ⟨0⟩
+4046d6be5	📌 Will be pinned in groups and channels
+c3eded236	🔕 Silent
+cffb2a880	👆 Button clicks will be counted
+251fac5c6	🗳 The poll will be forwarded; votes are collected in this poll
+ba70fe09b	⏰ Schedule
+8241e1495	✅ Send
+86f2e67ab	❌ Cancel
+d53523fb6	There's nobody to send to.
+2882de09f	🎯 Select groups/channels
+78f17fac4	❌ Close
+e6b5975cd	◀️ Previous
+b84641c59	Next ▶️
+9a4dab900	🔄 Clear selection
+6044624ae	✅ Done
+786000738	🎯 <b>Announcement #⟨0⟩: select groups/channels</b> (page ⟨1⟩/⟨2⟩)
+8273973d4	Selected: <b>⟨0⟩</b> — if none is selected, it goes to all.
+0b988bbef	This command can only be used by the bot's owner!
+4b64d112c	Write a message or reply to one for the template.
+9cc026c97	💾 Template saved: #⟨0⟩
+12933b18c	To use it: /broadcast -users #⟨0⟩
+dcba9eba6	There's no template named #⟨0⟩. See the list with /templates.
+c3b81b13d	Write a poll like this:
+185c6d7a9	/broadcast -poll -users "Question?
+27ced0bf8	Option 2"
+9de509dc5	Couldn't create the poll: ⟨0⟩
+e8c8a3987	🧪 The test poll was sent only to you.
+f6c39b561	Couldn't send the test: ⟨0⟩
+3ccbd9c93	🧪 The test announcement was sent only to you.
+305ee0f9a	(privately)
+cb34b252b	Couldn't send the preview: ⟨0⟩
+68aa08ebf	🔕 Announcements turned off. To turn them back on: /subscribe
+ead4b09a2	🗑 Deleted
+6fc68153b	Unauthorized or invalid.
+5027629e8	This announcement was already processed.
+1b315a09e	⏰ Announcement #⟨0⟩ scheduled: ⟨1⟩
+08d8e26cc	You can see it with /broadcasts.
+d236ce6c8	📤 Sending announcement #⟨0⟩…
+e15ad036b	Cancelled
+8c0a53753	❌ Announcement #⟨0⟩ cancelled.
+32ff8287a	Not scheduled.
+95d0599f3	⏹ Stopping…
+a96302489	Not being sent right now.
+7afa989da	📢 No announcements yet.
+b0b0b34ae	📢 <b>Recent announcements</b>
+a2148c2a7	🗳 poll
+771c7f3fb	👆 ⟨0⟩ clicks⟨1⟩
+8139aea8f	(⟨0⟩ people)
+71fc8c6a3	❌ Cancel #⟨0⟩
+6b91bce73	⏹ Stop #⟨0⟩
+55b4c1882	💾 No saved templates.
+4dc8bf919	To save: <code>/broadcast -save name "message"</code> or reply to a message with <code>/broadcast -save name</code>
+a5f43a44d	💾 <b>Announcement templates</b>
+bd5b7fec5	📋 copied message
+8ebf8c6d8	Usage: <code>/broadcast -users #name</code>
+d9ecd93d0	⏹ Stopping the announcement…
+e6989213d	No announcement is being sent right now.
+1d2937461	🔔 Announcements turned on.
+b75b13003	➕ <b>I was added to a new ⟨0⟩</b>
+862253052	· ⟨0⟩ members
+7171ced0d	👤 Added by: ⟨0⟩⟨1⟩
+b0c699f59	🔐 Admin
+7505ec5cf	⚠️ Not an admin yet (a reminder will be sent in 24 hours)
+93e256834	➖ <b>I was removed from:</b> ⟨0⟩
+f6cedb404	👤 Removed by: ⟨0⟩ · <code>⟨1⟩</code>
+545d22c19	⚠️ I'm still not an admin in <b>⟨0⟩</b>, so the protection isn't working.
+e7c66ff8b	Group settings → Administrators → Add admin → @⟨0⟩ (deleting messages and restricting users is enough) or use the button below.
+519fdb65c	⚡ Make me an admin
+977c42cf0	📈 <b>⟨0⟩ weekly report</b> (⟨1⟩ – ⟨2⟩)
+075c08a00	👥 Groups: <b>⟨0⟩</b> · 📢 Channels: <b>⟨1⟩</b>
+626db2ea3	➕ Added to: <b>⟨0⟩</b> · ➖ Removed from: <b>⟨1⟩</b>
+3b300252b	👤 Private users: <b>⟨0⟩</b> (this week +⟨1⟩)
+8ebb70df7	💬 Messages: <b>⟨0⟩</b>⟨1⟩ · active people: <b>⟨2⟩</b>
+179fe6c75	🚪 Joined groups: <b>⟨0⟩</b> · left: <b>⟨1⟩</b>
+171919cd0	🆕 <b>New chats</b>
+8298e9706	… and ⟨0⟩ more
+7ba765796	🏆 <b>Most active groups</b>
+03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ messages
+57d75c0ab	🛠 The bot is in a short maintenance; it'll be back soon. Protections keep working.
+fc94758f1	🛠 Maintenance mode <b>on</b>⟨0⟩
+588994912	— ends at ⟨0⟩
+35ea18ef8	✅ Maintenance mode is off
+e1a334ce2	(indefinite)
+e7103f4b6	<code>/maintenance 30</code> — 30 minutes · <code>/maintenance on</code> — indefinite · <code>/maintenance off</code>
+c05840eb1	Add <code>-duyur</code> at the end to send a short note to the groups.
+fe8a047fd	During maintenance commands and buttons are disabled for everyone (except you); protections like spam, links, flood and captcha keep working.
+9fd9dff45	✅ Maintenance mode turned off.
+280c2df8e	Maintenance mode is already off.
+a476c76e4	✅ Maintenance is over, the bot is fully working.
+5a2d5c21d	🛠 Maintenance mode on, it turns off automatically at ⟨0⟩.
+321af0468	🛠 Maintenance mode on (indefinite). To turn it off: /maintenance off
+81851cbcd	Usage: /maintenance 30 · /maintenance on · /maintenance off
+0d8f36bae	Commands and buttons are disabled for everyone (except you); protections are working.
+0e64031cc	/invite is used in a group: it gives you a personal invite link and counts the people you bring.
+882848490	The invite contest is off in this group.
+b5811c1fa	I couldn't create an invite link: I need the "invite users" permission.
+c2dee7686	I couldn't create an invite link, try again a bit later.
+24b1d9ce7	🔗 ⟨0⟩, your invite link:
+1dafe45ec	👥 You brought: <b>⟨0⟩</b> people⟨1⟩
+6f74b2ba9	🏆 Ranking: /invites
+060348723	(⟨0⟩ people left)
+cb5bdaa5f	/invites is used in a group.
+1db2cf152	🏆 Nobody has joined through invites yet. Get your link with /invite!
+4ba6e3c96	🏆 <b>Invite ranking</b>⟨0⟩
+d7ee0f9c5	(last 7 days)
+b71ab530b	⟨0⟩ ⟨1⟩ — <b>⟨2⟩</b> people
+e309c956d	For your own link: /invite⟨0⟩
+ff021375b	· weekly: /invites 7
+db6ff4fd5	🚫 Block
+ead127c24	📨 Your message was forwarded to the bot's admin. You'll see the reply here.
+b3be121db	✅ Reply delivered.
+6a71974f7	❌ Couldn't deliver: the user blocked the bot.
+29d8bcae2	❌ Couldn't deliver: ⟨0⟩
+a299e6f40	Unauthorized!
+67149866b	no username
+546855b2f	Total messages: ⟨0⟩
+4caedc905	🚫 Blocked: their messages won't be forwarded anymore.
+aa1be6bef	✅ Unblocked.
+05fe7a9ae	✅ Unblock
+347667dc7	💬 Messages you write to the bot privately are forwarded to the bot's admin; the reply comes here too.
+fb6c079d1	💬 Support line: <b>⟨0⟩</b>
+29ab6a683	Last 7 days: ⟨0⟩ messages, ⟨1⟩ people
+d3a86e2ed	Messages users write to the bot privately are forwarded to you; if you <b>reply</b> to that message, your answer goes to the user (your identity stays hidden). Use 🚫 below it to block someone.
+2e8d13df7	/support off — turn off
+b9d5c0506	/support on — turn on
+69750b260	👢 kick
+ba949e0b3	🔇 mute
+499389526	⚠️ warning
+2146683b0	🗑 deletion
+29c555d38	✅ unban
+2adb56b78	🔊 unmute
+be630c265	↩️ warning removal
+4a1bf66db	kicked
+804ba7661	delete
+324073880	🔻 Their Telegram admin rights were also removed.
+cf9b454c2	⚠️ Couldn't remove their Telegram admin rights (the bot may not have promoted them); remove them manually in the group settings if needed. (⟨0⟩)
+b55e087a5	🚨 <b>Admin action limit exceeded</b> — ⟨0⟩
+427b5c6c1	⟨0⟩ made <b>⟨1⟩</b> bans/kicks/mutes in the last hour (limit ⟨2⟩). Their rights were suspended⟨3⟩.⟨4⟩
+95dbff4c7	(rank: ⟨0⟩)
+1f08073ce	♻️ Restore their rights
+007e62b21	↩️ Undo their bans from the last 2 hours
+62523d9c0	✅ OK, keep suspended
+edef2b326	Only the group's founder can do this.
+c2ee2c9d8	↩️ ⟨0⟩ people unbanned
+91b30283d	↩️ Recent bans of ⟨0⟩ undone (⟨1⟩) | ⟨2⟩
+9ed54f7b6	Not suspended (already resolved).
+65e104036	(Telegram rights couldn't be restored: ⟨0⟩)
+fdec34132	♻️ Rights restored⟨0⟩
+e44b14d39	♻️ Rights of ⟨0⟩ restored | ⟨1⟩
+caddb66f3	✅ Rights stay removed
+a9968a219	⛔ ⟨0⟩: rights suspended
+5d7617657	👮 <b>Daily admin summary</b> — ⟨0⟩
+053473339	<i>Telegram doesn't tell bots about messages deleted manually in the app; deletions count only those made with /del and /purge.</i>
+46faeb5b0	First select a group with /select!
+c1c404194	This command is for the founder and co-founders.
+3960d6a99	No staff actions in this period.
+42c00ba90	👮 <b>Admin audit</b> — ⟨0⟩ (last ⟨1⟩ days)
+5cb08e285	Number of days: <code>/audit 7</code>
+3de0d27b9	📩 The audit summary was sent privately.
+57a762312	I couldn't message you privately: send /start to the bot first.
+6accc9fd5	… and ⟨0⟩ more messages
+37de34f22	🗑 <b>Deleted messages</b>⟨0⟩ | Deleted by: ⟨1⟩
+9a1505c99	/del is used in a group, as a reply to the message to delete.
+d223e7b03	Reply to the message to delete with /del.
+9fada83b0	🗑 <b>Message deleted</b> | Author: ⟨0⟩ | Deleted by: ⟨1⟩
+a1c331d8e	/edits is used in a group, as a reply to a message.
+5f93a0deb	Reply to the message whose history you want to see with /edits.
+250e055ba	No edit history for this message (kept for the last ⟨0⟩ days).
+36da7c07e	📝 <b>Edit history</b> — ⟨0⟩ · ⟨1⟩ edits
+27ec83d6a	original
+afea26f62	edit #⟨0⟩
+39562283b	🌐 Globally banned user joined and was banned: ⟨0⟩
+b42c13323	🤖 Suspicious account restricted: ⟨0⟩ → ⟨1⟩
+3c4fe05e5	👋 ⟨0⟩ joined → ⟨1⟩
+aa9673f91	TODAY
+fe5b02de1	THIS WEEK
+05e451c40	THIS MONTH
+a65b592d7	ALL TIME
+fa5c481c7	User → Messages
+11a5c6c19	├ Total active users: ⟨0⟩
+d8524730d	└ Total messages: ⟨0⟩
+cd18a00ba	Your ⟨0⟩ : ⟨1⟩
+8b57b7048	This group isn't registered! If you're using it privately, first select a group with /select.
+d2fc8f52c	The 15 most active people of the month in your group:
+10710d7e5	📊 This ranking is for this month.
+0bffc9609	The 15 most active people of all time in your group:
+5552d868e	📊 All-time ranking.
+9d75c68d7	No message statistics yet!
+54dbc7053	The 15 most active people of the day in your group:
+86767b480	📊 This ranking is for the past day.
+25670a03f	The 15 most active people of the week in your group:
+17af6b262	📊 This ranking is for the past week.
+43d197ca4	📅 Daily
+f70fa8d28	📅 Weekly
+1b9326b3c	📅 Monthly
+c9c0e3bcd	📊 All time
+d4d0010bd	📋 Details
+674ed30af	👥 Choose the ranking type for this group.
+0f3a59f6a	This menu was opened by ⟨0⟩.
+bbf0e9940	👥 The ⟨0⟩ most active in your group:
+62e79a0f9	Your group's interactions since the bot became an admin:
+f55378a92	👥 Active users:
+503794387	💬 Total messages:
+ef5bd5de0	📊 Total interactions:
+c6c4664dd	For a specific user, use /info @user or reply to their message.
+7e811e0d2	👱 Name: ⟨0⟩
+9b0e7b293	🌐 Username: ⟨0⟩
+14ed29970	👥 Number of groups you're in: ⟨0⟩
+ba33e26dc	💬 Total messages in your groups:
+8cb7f31a3	├📆 Daily: ⟨0⟩
+5ee653a06	🔍 Totals in your groups:
+0df3dab20	├🃏 Stickers: ⟨0⟩
+e93a634c3	📊 Statistics of ⟨0⟩:
+ae2b984ac	💬 Message count:
+3e08d6dfd	┌📆 Daily: ⟨0⟩
+037b7c646	├📆 Weekly: ⟨0⟩
+9f577c2b5	├📆 Monthly: ⟨0⟩
+e1ed2556f	📊 Interaction details:
+0327b318b	┌🃏 Stickers: ⟨0⟩
+68fa09ce3	├📷 Photos: ⟨0⟩
+886e342ec	├🎥 Videos: ⟨0⟩
+a11d703a7	├💾 Files: ⟨0⟩
+0afb08ea1	├🎙 Voice messages: ⟨0⟩
+5199486f9	└📼 Music: ⟨0⟩
+7d244b585	🏆 Overall rank: #⟨0⟩
+9394cb52f	Restore all admins
+846fa3804	Restore all except the spammer
+ea0ec5a8c	Suspect: ⟨0⟩
+40ab78429	🚨 <b>CHANNEL PROTECTION MODE ACTIVE</b>
+65bfd4f34	⟨0⟩Channel: <code>⟨1⟩</code>
+d5d022cd9	All admin rights were removed except for the founder and the admin who added the bot.
+11b7596d5	⟨0⟩ admins restored
+19c35e8f0	🌐 Network ban lifted: ⟨0⟩ (in all groups of the network)
+c2e7013a3	🌐 Network ban: ⟨0⟩ spread to ⟨1⟩ more groups in the network
+9fe755831	no record found
+d121e65b8	couldn't get bot info: ⟨0⟩
+463126054	♻️ Admin recovery: ⟨0⟩ admins restored⟨1⟩
+90d9a6b20	, failed: ⟨0⟩
+caa60fdc5	🚨 <b>Mass demotion</b>
+8ba5e6709	Group/channel: <b>⟨0⟩</b>
+5d095f637	⟨0⟩ (<code>⟨1⟩</code>) removed the rights of ⟨2⟩ admins within 10 minutes.
+8d21e12ea	Last good snapshot: ⟨0⟩
+9ba30f2ce	♻️ Restore admins
+a96545d83	♻️ Restored automatically: ⟨0⟩ admins⟨1⟩
+a556aedb4	(failed: ⟨0⟩)
+ee38d1474	No usable admin snapshot.
+d94586a2d	There's no group/channel you can recover. The group owner must add you as a 'trusted person' in the panel.
+a186abeb7	Which group's/channel's admins do you want to restore?
+358350243	No admin snapshot for this group yet (snapshots are taken every 6 hours).
+e0f04d2e3	⟨0⟩ · ⟨1⟩ admins
+629844d31	<b>⟨0⟩</b> — choose the snapshot to restore:
+b5ad3a8e7	No permission or no snapshot.
+0644770db	♻️ The admins in the ⟨0⟩ snapshot will be restored:
+700b3ac82	Do you confirm?
+1ca35b0e1	✅ Yes, restore
+e6a5e85cd	❌ Cancel
+805c38798	Restoring...
+cf63ea900	♻️ ⟨0⟩ admins restored.⟨1⟩
+b8058c528	❌ Failed: ⟨0⟩
+e82edc1de	(The bot can't grant rights it doesn't have and can't change admins promoted by someone else.)
+f13124b3b	Admin list restored (⟨0⟩ admins).
+400c018e5	media flood
+60ff56604	⟨0⟩ messages / ⟨1⟩ s
+97268aded	2+ admins spammed within 30 min
+d739884a3	⚠️ <b>Admin Spam Detected!</b>
+3cbc92eef	Action: ⟨0⟩
+3d7963ca4	Channel protection mode: Not active
+72f491ffe	Ban + rights removed
+35cf8f7fb	Rights removed
+b6331605b	🤖 Bot addition blocked
+a7c242666	Added by: ⟨0⟩
+9b75f55a2	⚠️ Unauthorized admin promotion detected!
+e97409070	Promoted by: ⟨0⟩ (<code>⟨1⟩</code>)
+c065dbd5f	Promoted: ⟨0⟩ (<code>⟨1⟩</code>)
+17a403bbb	Mass ban detected: ⟨0⟩ (⟨1⟩) ⟨2⟩ bans / ⟨3⟩ s
+e21052fad	Title: '⟨0⟩' → '⟨1⟩'
+eb38d7d1c	Description changed
+b2209389a	Channel clone protection triggered!
+85a87d615	Changes reverted:
+b79ccad39	📋 <b>Weekly Channel Log Report</b>
+546658b9b	Ban + Remove rights
+2c124f337	Remove rights only
+a5505fdbd	⟨0⟩ Admin Spam Protection
+183b4aa2e	Spam action: ⟨0⟩
+5d5673266	⟨0⟩ Admin Media Flood
+652974e14	Media action: ⟨0⟩
+9123863e2	⟨0⟩ Link Protection
+3d1465b74	⟨0⟩ Clone Protection
+a03517abc	⟨0⟩ Bot Addition Protection
+b27f8f968	⟨0⟩ Mass Ban Protection
+006229c38	👥 Safe Admins
+ec411a6b8	💾 Save Channel Title/Description
+a8d6a7aa4	🔙 Close
+e0a90af5c	Channel not found!
+9abd1a97e	This command is for channel settings. For group settings use /settings.
+d63cd9886	Saved: ⟨0⟩
+c3d254196	Safe admin list:
+ff4ef369c	(Allowed to post links)
+5243a71a1	Channel posts
+f6489e475	channel admin
+29bb8c58f	Approving requests, please wait...
+218960722	No pending join requests found.
+1b385aeaa	✅ ⟨0⟩ requests approved.
+fb8bc6b23	(⟨0⟩ requests couldn't be approved; they may have expired or been withdrawn)
+05d63d7c6	Request approval: ⟨0⟩ approved | ⟨1⟩
+9ea0064d2	You have been blocked from using this bot.
+db8a1871b	Usage: /membertag @user <tag> or reply + /membertag <tag>
+584a09e9f	User and tag required!
+84aa89869	A tag can be at most 32 characters!
+fcd61489e	⛔ You can't give a tag to someone with your rank or higher.
+5f53e65d3	⟨0⟩ is not an admin! Tags can only be given to admins.
+f4fc9906d	🏷 Tag given: ⟨0⟩ → ⟨1⟩
+be06d3d2f	Only the founder can appoint co-founders.
+0ef49a704	User not found! Use an ID, @username or a reply.
+4de20141f	Usage: /⟨0⟩ @user [tag]
+e1b55fb8a	Tag: ⟨0⟩
+b60f7c81a	⟨0⟩ appointed: ⟨1⟩⟨2⟩
+9adcfd5da	Usage: /block <id> [reason]
+dd3f79560	Invalid ID!
+b53956227	✅ ⟨0⟩ blocked.
+68a3942e7	Usage: /unblock <id>
+7f14d47f5	✅ ⟨0⟩ unblocked.
+a07c6c04c	Current warning limit: ⟨0⟩
+eeceb0ee6	Usage: /setwarnlimit <2-20>
+68cb7aa9e	The limit must be between 2 and 20!
+7fdd7a44f	Warning limit set to ⟨0⟩.
+32cb8952a	The spam exemption list is empty.
+804f32102	Add with /whitelist @user.
+7ec4b51e6	Spam Exemption List:
+c0c03c505	⟨0⟩ removed from the exemption list.
+e6695a6db	⟨0⟩ added to the spam exemption list.
+9e5f1a353	Private group
+688f939e9	Word Filter
+cbabb7d8b	None
+28b8f5479	👥 Members: ⟨0⟩
+ceb987630	👮 Admins: ⟨0⟩
+af72a68a6	📈 Statistics
+28086b0d5	├ Total messages: ⟨0⟩
+01c7b8d8a	├ Active users: ⟨0⟩
+12279a365	├ Total bans: ⟨0⟩
+74d4fdeab	├ Total warnings: ⟨0⟩
+69516a922	└ Warning limit: ⟨0⟩
+c77739311	Active protection: ⟨0⟩
+58b3e5e14	Heads! 🪙
+561c75012	Tails! 🪙
+1a786e9bf	⟨0⟩ Dice: ⟨1⟩
+e7e394f96	🤖 ⟨0⟩ — Bot Owner Commands
+f4e511a55	/panel — Your bot's groups and statistics
+94da61b33	/broadcast — Announcement to groups, channels and people (type /broadcast to see usage)
+5d08c9107	/broadcasts — Announcement history, clicks, poll results
+cbbbbd1fd	/templates — Announcement templates
+70215bc5f	/growth — Weekly growth report (comes automatically every Monday)
+7a7fa1e0f	/support — Support line (private messages are forwarded to you)
+0d05bfd3b	/gban <id|@user> [reason] — Ban in all your bot's groups
+1db86c395	/ungban <id|@user> — Lift the ban
+2eb535697	/gbanlist — Ban list
+eeedac8d1	/select — Select a group
+98b86d999	🤖 Bot Owner Commands
+6e9bfe3b7	/clones — Manage clone bots (stop/start/delete)
+e48ef6b31	/clone — Your own clone bot
+3f50c5d54	/panel — Management panel (groups/channels, remove the bot, 🧹 cleanup)
+5e0335772	/perf — Performance: slow operations, memory, queue
+6d08e2352	/maintenance — Maintenance mode (commands off, protections on)
+f160302c5	/block <id> [reason] — Block
+b1c36dc93	/unblock <id> — Unblock
+647651cb8	/gban <id|@user> [reason] — Ban in all groups
+86ee8d200	/ungban <id|@user> — Lift the global ban
+d094b4c43	/gbanlist — Global ban list
+d729d3ba2	/backup — Take a database backup
+0e556fad9	/gblockmedia — Block the replied media in all groups
+8af5e8c17	/recover — Admin recovery
+f0032f0c7	/select — Select a channel
+97a1889ae	/channelsettings — Channel settings
+def1847f5	⟨0⟩/start — Start
+f467f5a12	/menu — Show the menu
+579f051c8	/settings — Button settings panel of the selected group
+0ecfed5c8	/help — Help
+d1d491df3	/select — Connect a group/channel
+a64b799ed	/appeal <explanation> — Send a ban appeal
+3aaf39bd7	/recover — Admin recovery (for trusted people)
+e8a9f2564	💬 Messages you write to the bot are forwarded to the bot's admin; the reply comes here.
+90b35c202	/clone — Create a clone bot with your own name
+53ff31717	👤 User Commands
+a6ac25fa6	📊 Statistics & Profile
+7c1cddd9b	/profile — View your profile
+4794e486d	/daily — Daily message ranking
+9304026c3	/weekly — Weekly ranking
+0f2144ac5	/monthly — Monthly ranking
+dab273f01	/alltime — All-time ranking
+ffca95898	/top — Ranking menu with buttons
+f6859df4f	/info @user — User statistics
+f739f3e69	/chatinfo — Information about the group
+96d41dfbc	/rules — See the group rules
+cf6de9a2b	/afk [reason] — Go AFK (people who tag you are told; it's removed when you write)
+427ccde79	/votemute — Start a mute vote for the person you replied to
+f2f9f9eaf	/notag — Leave the /tag list (type again to rejoin)
+6de9402ed	/invite — Your personal invite link (people you bring are counted) · /invites — ranking
+82789607f	📝 Notes
+f9f2a17b9	/notes — Saved notes
+46ba4fefd	#note — Get a note (example: #rules)
+a37fbde9a	/get <name> — Get a note
+5ff3c9cb2	🎰 Fun
+b0d9549b8	/coin — Flip a coin
+3ab74dacf	/dice — Roll a dice
+b4031dc89	/help — This menu
+6467c9dbe	/id — Show ID
+0af5bde71	/appeal <explanation> — Ban appeal (privately to the bot)
+aff60c67d	/report [reason] or @admin — Report the replied message to the staff
+15575b067	👮 Staff Commands — your rank: ⟨0⟩
+d955391ce	Rank order: 👑 Founder > 🔱 Co-Founder > ⭐ Senior Admin > 🛡 Admin
+cb1ecf135	🛡 Admin and above
+ba31c6e75	/warn @user [reason] — Warn
+9db2b48b7	/mute @user [time] — Mute (Admins: at most 24 hours)
+0d7e990d0	/unmute @user — Unmute
+258592394	/kick @user — Kick from the group
+40e58c981	/warns · /banlist · /mutelist — Lists
+07722765d	/giveaway · /endgiveaway — Giveaway
+faabdc38a	/filter — Auto reply (e.g. hello → Hi there; media and buttons allowed)
+0e48d2662	/filters · /stop <word> · /stopall — Filter list / delete
+a295c1d2b	/tag <message> · /stoptag — Tag members in batches / stop
+43f5db5d3	/record @user — Penalty history and old names in all the bot's groups (sent privately)
+4268b44a9	/giveaway 1d 3 Prize | channel=@channel messages=20 days=7 — Giveaway with conditions and duration
+f9892b61b	/myrank — Your rank and permissions
+10ead6ab1	⭐ Senior Admin and above
+667e625bc	/ban @user [time] [reason] · /unban — Ban
+387e5f34e	/unwarn @user — Remove 1 warning
+48c85c764	/purge <count/all> · /slowmode <sec> — Purge, slow mode
+2454c2b92	/pin · /unpin — Pinning
+d0ffce66f	/lockdown [min] · /lockmedia [min] — Emergency lock
+f6b07290c	/approveall — Approve join requests
+f252c350e	/setrules · /setwelcome · /setgoodbye · /save · /clear — Rules, welcome, goodbye, notes
+7bf273598	(media, buttons, formatting and random messages are supported; type /setwelcome for help)
+8c7cbbe68	/welcome · /goodbye · /resetwelcome — Preview / reset to default
+df2e5eccc	/schedule 6h <message> · /schedules — Scheduled (repeating) messages
+de546f6e8	🔱 Co-Founder and above
+d18538a2d	/settings — Button settings panel (all protection settings)
+00043ba1c	/setup — Quick setup (preset + welcome + protections)
+bfe1425f8	/forcesub @channel — Users must join the channel to write (turn off: /forcesub off)
+886d570db	/unlockdown · /unlockmedia — Lift locks
+5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
+443a00692	/setwarnlimit · /setwarnaction · /captchatime
+3d2493394	/blockmedia · /blockpack — Block media/packs
+20abda0cf	/admin (/addadmin) · /senioradmin @user [tag] — Give a rank
+3c7389596	/remove @user — Remove a rank
+a83e94dc8	/perms — Personal permissions panel (privately to the bot)
+13accc070	/membertag @user <tag> — Admin tag
+775ec46f0	/reload — Refresh the admin list from Telegram (rights given manually/by another bot)
+9a654a567	👑 Founder only
+f0d85c250	/cofounder @user — Make co-founder
+aed09d232	/setlog — Log channel · Group network · Backup admin recovery
+81fcecc0c	📊 Info
+99e6db648	/stats · /chatinfo · /leaderboard · /staff
+a475e9c96	Time format: 30m, 2h, 7d
+78f33d7b8	Telegram admin
+5a0e84cda	⚙️ Settings Panel
+f910032f2	🌍 Language: /setlang⟨0⟩
+215259316	⚙️ Settings
+96fccfef2	🛡 My groups
+5e167ed13	📊 Statistics
+4ab530c07	❓ Help
+3f15c0b6a	🤖 Clone bot
+a2c4fcfa1	🔗 Select group
+ed11ea7cd	📢 Select channel
+d7f837819	Pick from the menu or type a command…
+2ac5318f5	➕ Add to group
+7357057be	📢 Add to channel
+2dadb70db	Menu below 👇
+71aa20a4d	First pick a group: use the 🛡 My groups or 🔗 Select group button.
+3224664d6	The bot isn't an admin in this chat. Add the bot there as an admin and select it again.
+78ad7212f	You don't have permission in this chat.
+2216a64f4	✅ Selected: <b>⟨0⟩</b>
+e107177fc	Help menu
+9e88862d9	Group rules
+07efa78b4	Saved notes
+cf90a04f1	Your profile and warnings
+b79df54d5	Activity ranking
+a0d54db08	User statistics
+c3da965fe	Group info
+aa6b818af	Show ID
+c23bc7fa5	Roll a dice
+cbd34c9f1	Flip a coin
+1a6e6af53	Report the replied message to the staff
+61e89c9ef	Go AFK
+c51b37c71	Leave the tag list
+d1076c2fa	Group language
+03811f00b	Mute vote (reply to a message)
+ef4e5e596	Your personal invite link
+1db922722	Invite ranking
+53d58e1ac	Button settings panel
+0c4051b76	Refresh the admin list
+c55aa4167	Warn
+cec03bba0	Remove 1 warning
+263cc2188	See warnings
+76f0023be	Unmute
+9d1a81717	Unban
+6118dce5a	Kick from the group
+18bbd14ee	Delete messages in bulk
+2d7017ef2	Pin a message
+d7722a3e3	Unpin
+a263e4e53	Slow mode
+9da046535	Ban list
+6d6c46eda	Mute list
+a84a2a1e7	Save a note
+385c7d8ec	Delete a note
+a60cb06d0	Quick setup
+d2dd24bcc	Add an auto reply
+364057e43	Filter list
+5d24c4032	Delete a filter
+e46d6d528	Welcome message (media/buttons)
+2c1419a05	Goodbye message
+27f1ba342	Write the rules
+3d5b58779	Add a scheduled message
+943458e1e	Scheduled messages
+2331d765c	Tag members
+b0d7d4f3d	Stop tagging
+e912877cd	Required channel
+29cc4c872	User record
+8871a3c02	Start a giveaway
+dfae805ce	End the giveaway
+1945bd345	Emergency: lock the group
+c0559b5cc	Unlock the group
+422c89bec	Your rank and permissions
+fa7d4e18f	Staff list
+84be9db5d	Group statistics
+3a085165d	Block the replied media
+414c8153f	Block a sticker pack
+c3e7837f2	Lock media sending
+956c0ce19	Lift the media lock
+4e382259e	Start and menu
+1c4ce1da4	Show the menu
+7e27a3b5a	Select a group/channel
+dc6cac394	Settings of the selected group
+e78fa8e35	Send a ban appeal
+eaba0a794	Help
+cbad220d3	Admin recovery (trusted people)
+fcea72bad	Quick setup for the selected group
+495825a5e	Web panel (all settings on one page)
+9674953cf	Turn off bot announcements
+99ab93b21	Language
+333895635	Write to the admin (support line)
+0d0187ac4	Your bot's groups and statistics
+8938961a5	Announcements to groups, channels, people
+be4f2dea9	Announcement history
+0c8b2de83	Announcement templates
+ecced9e02	Weekly growth report
+52b5b2176	Turn the support line on/off
+32791cc9a	Ban in your bot's groups
+a7b61f397	Manage clone bots
+205162f9b	Performance stats
+5d22ead7d	Management panel
+68cd0b7eb	Lift a global ban
+a38b6848f	Global ban list
+45a767875	Block a user/chat
+4902bf286	Unblock
+cfc719f1d	Database backup
+efdd2ee59	Maintenance mode
+bf65fdcd0	Block media in all groups
+8f13119d3	⟨0⟩ — group and channel protection bot: spam, links, flood, raids and captcha.
+7ebe2ab6b	Protects your group and channel against spam, links, flood, raids and fake accounts. All settings are made from a panel with buttons.
+287dec170	To get started: /start⟨0⟩
+81daf5632	Your request to join <b>⟨0⟩</b> was received. Answer the question to be approved:
+784db6bac	⏰ Time: ⟨0⟩
+90d0b5f0a	🔐 Private verification sent: ⟨0⟩ | ⟨1⟩
+49349d70e	This verification has expired.
+6af257079	The request is no longer valid (it may have been handled already).
+d7eff8c3b	✅ Verified! You've been accepted into <b>⟨0⟩</b>.
+69af7d417	✅ Verified privately and accepted: ⟨0⟩ | ⟨1⟩
+99c1bac07	❌ Wrong answer. Your request to join <b>⟨0⟩</b> was declined; you can send a new request.
+86e28712b	❌ Private verification failed, declined: ⟨0⟩ | ⟨1⟩
+9dbf30953	⏰ Time is up, your join request was declined. You can send a new request.
+2ec5e8129	⏰ Private verification timeout → ID:⟨0⟩ declined | ⟨1⟩
+12ae98fff	⚠️ Channel flood detected! ⟨0⟩ posts in 10 seconds
+f271bb123	🌐 Join request from a globally banned user declined: ⟨0⟩
+7b944f9a5	❌ Bot/fake declined: ⟨0⟩ → ⟨1⟩
+d5d491f80	✅ Auto accepted: ⟨0⟩ → ⟨1⟩
+5f7e623cd	❌ Auto declined: ⟨0⟩ → ⟨1⟩
+f8cddb848	📩 New request: ⟨0⟩ → ⟨1⟩
+a984efcca	You can't act on this person.
+30a92b565	⛔ Rank management requires ⟨0⟩ or higher.
+f57eaa44e	⛔ You can't edit someone with your rank or higher.
+c8857eea2	⛔ Only a higher rank can give the ⟨0⟩ rank.
+fd71ebc88	User not found.
+fa5ded262	❌ The bot can't promote admins!
+889786c65	❌ User not found in the group!
+3c0a7e1f2	⚙️ Permissions
+e9e94dc59	This person has no rank. Give a rank first with /admin or /senioradmin.
+627b90668	⚠️ ⟨0⟩ (the bot lacks it)
+ae8f6f509	📡 Telegram permissions
+033d23563	🤖 Bot permissions
+3d3a3d682	→ 📡 Telegram permissions
+8bff101a7	→ 🤖 Bot permissions
+daddb4f0e	❌ Remove rank
+12ec1558f	✅ Close
+8f4a3cad6	👤 <b>Editing permissions:</b> ⟨0⟩
+2a138f61a	Rank: <b>⟨0⟩</b>
+9d0d28c34	✅ on · ❌ off · 🔒 rank too low
+bc2ec6c27	<i>Changes apply immediately. Rank buttons change the rank.</i>
+4dd50d885	Invalid button.
+2f00bbdcd	This permission is above their rank.
+da5fcba10	Invalid rank.
+8ba8423be	Already ⟨0⟩.
+aac33021a	⟨0⟩ appointed: ⟨1⟩ | ⟨2⟩
+d37ea2c16	Rank: ⟨0⟩
+222dfbc00	Rank removed.
+f97fd51ad	✅ Rank of ⟨0⟩ removed.
+570da29a3	You don't have permission.
+c119667e9	✅ Permissions panel closed. Changes saved.
+cf9f2e455	⟨0⟩ is not staff in this group.
+d4df62038	🔒 This permission is above your rank or the bot doesn't have it.
+ca3e89467	There's no staff you can edit. To give a rank, type /admin @person in the group.
+9befd0808	👑 <b>Permission management</b>
+6fcfd3b55	Choose the person to edit:
+770d8a43d	Night Mode Configuration
+0d3da9061	Choose the permissions to restrict, then press Save:
+3014d10c7	To change the hours: /nightmod 23:00 07:00
+8b386c8fe	Night mode configuration error.
+441634b34	🛡 ⟨0⟩ is active! /settings for settings, /help for commands.
+a299d1e4f	Spam, link, flood, raid and captcha protection for your groups and channels.
+b40285a71	1️⃣ Add the bot to your group with the required permissions using the button below.
+15b8ba9ba	2️⃣ Pick your group from the menu below and manage everything with ⚙️ Settings.
+eae59de08	💬 Support
+81e22b47b	Invalid permissions link.
+5af6c10c1	Group registered! Now you can select it privately with 🛡 My groups.
+425ac7c01	Group ID: ⟨0⟩
+60a03153e	Couldn't register: make the bot an admin in this group first.
+08cdd8869	This group is registered (ID: ⟨0⟩)
+7b80705e1	Type /select in DM to go to the management panel.
+c6668e444	No registered group/channel of yours was found.
+489f886fe	Pick your chat with the 🔗 Select group / 📢 Select channel button below: if the bot is an admin there it's recognized automatically. If the bot isn't added yet, use the Add to group button first.
+529f5b296	Choose the channel/group to manage:
+3b561f5ba	✅ Selected: ⟨0⟩
+e537ee79f	Now you can use commands in DM.
+5da9ca5b4	Your ID: <code>⟨0⟩</code>
+758b4fa2f	Replied person's ID: <code>⟨0⟩</code>
+a52056450	Example:
+8db290527	Channel not found!
+d7db3c4cf	Current log: ⟨0⟩
+354f04cc0	Usage: /setlog -1001234567890
+9cc790504	✅ Log channel updated: ⟨0⟩
+f40d6696a	GROUP STAFF
+511c4973a	Total: ⟨0⟩ staff
+284837aa3	Usage: /gban <id|@user> [reason] (or reply to a message)
+e2d4f8ab8	This person can't be banned.
+01c3bd4a0	in all bots
+cb8da44a3	in the groups of ⟨0⟩
+49aed1394	🌐 Banning ⟨0⟩ ⟨1⟩...
+73497703d	🌐 ⟨0⟩ banned ⟨1⟩.
+a960dfa59	✅ ⟨0⟩ chats | ❌ ⟨1⟩ (no permission/not a member)
+ffc42c25d	Usage: /ungban <id|@user>
+ad983fea1	✅ ⟨0⟩ ⟨1⟩ban lifted.
+63de87994	The ban list is empty.
+d65a4bee5	Global Ban List
+c58c96fc0	⟨0⟩ Ban List
+6d34fa6d2	🌐 <b>⟨0⟩</b> (last 50):
+15db0d20b	Current: ⟨0⟩ (⟨1⟩)
+08771c47b	Usage:
+9ebd56f1c	✅ Penalty applied when the warning limit is reached: ⟨0⟩⟨1⟩
+bd06580b1	New member restriction: ⟨0⟩
+d8eaa4a1a	Usage: /newbie <minutes> or /newbie off
+4986c7002	Enter minutes between 0-1440 or type off.
+7e4bdbce0	✅ New member restriction turned off.
+d5a3095ed	✅ New members can't send links/media/forwards for the first ⟨0⟩ min.
+d4c80a6a7	🔗 Link exemption list:
+f3425da9b	/allowlink add youtube.com
+71399725d	/allowlink del youtube.com
+99d71c223	(paths like t.me/mychannel can be added too)
+d555eadad	(empty)
+4bcfe1994	✅ ⟨0⟩ added to the link exemption list.
+e6dffb4e9	✅ ⟨0⟩ removed from the list.
+c22e23f31	Usage: /captchatime 2m (between 30s and 60min)
+b4b2c0b74	✅ Captcha time: ⟨0⟩
+42cf26778	To appeal, message me privately: /appeal <explanation>
+ef023696b	Usage: /appeal <why should your ban be lifted?>
+294f98c41	You don't have a recorded ban.
+78158a307	Which group is your appeal for?
+0072d91b7	You can appeal once every 24 hours for this group.
+0799f76c1	✅ Lift the ban
+1358a154b	❌ Decline
+6d20aaa15	📨 <b>Ban appeal</b> #⟨0⟩
+1040c08fa	Group: <code>⟨0⟩</code>
+fae78e9bb	Ban reason: ⟨0⟩
+76700df28	✅ Your appeal was sent to the admins. You'll be notified of the result here.
+53667435f	Time is up, type /appeal again.
+6486efe3d	Sending...
+6c9744f83	Appeal not found.
+e2457d551	This appeal was already handled: ⟨0⟩
+07b34dcdd	✅ Your appeal was accepted, your ban was lifted. You can rejoin the group.
+ed103ceb6	❌ Your appeal was declined.
+f7480a2b3	<b>Result:</b> ⟨0⟩ — ⟨1⟩
+b497d1353	✅ Accepted
+6c25e020d	❌ Declined
+97239bc70	📨 Appeal #⟨0⟩ ⟨1⟩ | ⟨2⟩
+7a80eefec	🖼 no media
+573052e01	🔘 ⟨0⟩ buttons
+b81be0f7f	🎲 ⟨0⟩ variants
+d542cb1c4	💎 exact copy
+03cb45a36	Photo
+638bbfe15	File
+867b291d2	Music
+e8bff35ea	Voice
+966648de4	Video note
+7d472b473	hours
+f4a9f3249	This button is no longer valid.
+30dc00c2e	This link is no longer valid.
+c9910a305	This note no longer exists.
+0e89955b2	👋 {name} has left us. Farewell!
+e41edf275	📜 <b>Rules of ⟨0⟩</b>
+3f1696378	<b>Formatting:</b> the message is saved exactly as you write it in Telegram (bold, italic, links, spoilers, quotes).
+06c164645	<b>Media:</b> reply to a photo/video/GIF/sticker and type the command.
+6a1a1a0ad	<b>Buttons</b> (each line is a row, side by side with <code>&amp;&amp;</code>):
+a1c3d2c0b	<code>Our channel - https://t.me/channel &amp;&amp; Support - @support</code>
+3424e60cc	<code>Read the rules - rules</code> · <code>Info - popup:Text</code> · <code>Note - #name</code>
+dd3608634	Color: at the end of the line <code>#green</code> <code>#red</code> <code>#blue</code> · Rose style: <code>[Channel](buttonurl://t.me/channel)</code>
+90f26740a	<b>Variables:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
+23adc295f	<b>Random:</b> separate several messages with a line containing only <code>%%%</code>.
+7d75ab43e	This message can't be used in channels.
+93a792a44	Welcome
+06ba336bf	Goodbye
+ff0fe91d4	Rules
+86eca05aa	✏️ <b>⟨0⟩ message</b>
+0d20c41d6	Usage: <code>/⟨0⟩ text</code> or reply to a message/media: <code>/⟨1⟩</code>
+ee9b02bb7	💎 Premium emojis are kept: the message is copied exactly. Don't delete the source message (if it's deleted, it's sent with normal emojis).
+d54d1a799	✅ ⟨0⟩ message saved (⟨1⟩).⟨2⟩
+32bc1141c	Preview:
+a4fd88326	✏️ ⟨0⟩ message updated | ⟨1⟩
+f2ecba035	No rules have been set in this group yet.
+f6d49a8a4	You can add them with /setrules.
+3dadf54ab	⟨0⟩ message: ⟨1⟩ · ⟨2⟩
+42b967a7b	To change it: /set⟨0⟩
+6d2d95e97	👋 Welcome
+46af570c5	🚪 Goodbye
+6413cb724	✅ Welcome message reset to default.
+14324da2a	Interval format: <code>30m</code>, <code>6h</code>, <code>1d</code>
+a44cbb972	The interval must be at least 10 minutes and at most 7 days.
+7e69525ad	A group can have at most ⟨0⟩ scheduled messages.
+ee86ab412	⏰ <b>Scheduled message</b>
+8dada6c44	Usage: <code>/schedule 6h Don't forget to read the rules!</code>
+82c791f2c	or reply to a message/media: <code>/schedule 6h</code>
+7939ca797	List and delete: /schedules
+62c97be15	✅ Scheduled message #⟨0⟩: will be sent every ⟨1⟩ (first one in ⟨2⟩). List: /schedules
+bd18601d1	⏰ Scheduled message added (every ⟨0⟩) | ⟨1⟩
+e2d35adb1	⟨0⟩ <b>#⟨1⟩</b> every ⟨2⟩ · next ⟨3⟩
+76c241937	🧹 Delete previous
+b35d597c9	📌 Keep previous
+225f856c3	⏰ <b>Scheduled messages</b>
+207dc0f12	To add: <code>/schedule 6h message</code> (media/buttons supported)
+351e8911a	None yet.
+242c0f02c	Not found
+e388dd558	▶️ Started
+d08a36466	➕ New scheduled message
+25cda8fe6	🚪 <b>Goodbye message</b> — ⟨0⟩
+b61184fea	Status: <b>⟨0⟩</b> · ⟨1⟩
+0eec2952d	Only sent to people who leave on their own (not kicked/banned). The auto-delete time is the same as the welcome.
+b0037f2fb	👋 <b>Welcome</b> — ⟨0⟩
+611ef08d1	Welcome: <b>⟨0⟩</b> · ⟨1⟩
+a4530174c	📜 Rules: ⟨0⟩ · 🚪 Goodbye: ⟨1⟩ · ⏰ Scheduled messages: ⟨2⟩
+d0b1d849f	For media, buttons and variables press ✏️ Edit (or type /setwelcome in the group to see its help).
+2b7ced272	On
+e5b4e786e	yes
+68b8326a2	none
+2bae1a721	✏️ Edit
+894e0e55f	👁 Preview
+099ae3d9c	🖼 Remove media
+8bb5bb494	↩️ Reset to default
+adcf7aa93	🧹 Delete the old one
+1eaf255d1	👥 One message for many
+7ef1d92b8	⏱ Auto delete
+e0454a0ce	📩 Send privately
+060b7f669	📜 Write the rules
+ee89e73e1	👁 Rules
+b6669596d	🚪 Goodbye message ›
+0c2dc5967	⏰ Scheduled messages ›
+9a8a538db	Blacklist: ⟨0⟩
+0eed14a22	No rules
+a6aea5676	👁 Preview sent
+eb9f11f93	↩️ Reset to default
+14af210b4	🖼 Media removed
+f615cd8f5	⏹ Tagging stopped
+ce76be77d	✅ Tagging finished
+98452c88d	⟨0⟩: ⟨1⟩/⟨2⟩ people tagged.
+7f535520c	/tag is used in a group.
+59b9ad51d	⏳ Tagging is already running in this group. To stop: /stoptag
+46a8f403f	⏳ There's a cooldown between taggings so the group doesn't get spammed. Try again in ⟨0⟩ min.
+02343ede4	Nobody to tag was found. (The bot knows the members who wrote or joined in the group.)
+29099e290	🏷 Tagging started: <b>⟨0⟩</b> people, ⟨1⟩ per message · about ⟨3⟩ min
+5a101718d	To stop: /stoptag
+f64e607e0	⏹ Stop
+87e8dab7e	🏷 /tag started (⟨0⟩ people) | ⟨1⟩
+93e9f8e23	There's no tagging running right now.
+de3fd2d6f	⏹ Stopping the tagging…
+6e637aa42	⏹ Stopping
+a0fd2c146	The tagging has already finished.
+60c103470	Write this in the group where you don't want to be tagged.
+170599775	🔔 You're on the /tag list again.
+3812eb431	🔕 You won't be tagged with /tag in this group anymore. To undo, type /notag again.
+21946f144	⚠️ The required channel can't be checked: is the bot an admin in the channel? (set it again with /forcesub)
+8e87bf498	Join the channel
+cbb50c7c3	✅ I joined
+0ca6d0da1	📢 ⟨0⟩, to write in this group you must first join the <b>⟨1⟩</b> channel.
+c0ec4b2f3	This button isn't yours.
+aaed7d345	✅ Thanks, now you can write!
+bd2685273	You haven't joined the channel yet. Join with the 📢 button first, then press again.
+1886b3d17	Write the channel as <code>@username</code>, <code>t.me/channel</code> or the <code>-100…</code> ID.
+f02d79616	Channel not found or the bot isn't in the channel. ⟨0⟩
+87bee0af3	This isn't a channel.
+4171be67d	First add the bot to the channel as an <b>admin</b> (needed to see the members).
+9d38f82c5	On — <b>⟨0⟩</b>
+4adcca7b1	📢 <b>Required channel</b>: ⟨0⟩
+a3407edfd	Set: <code>/forcesub @channel</code>
+95acb52af	Turn off: <code>/forcesub off</code>
+045928d81	The bot must be an admin in the channel. Admins and the bot owner are exempt.
+fe929a5d7	📢 Required channel turned off.
+53a5e40c2	Messages of people who haven't joined the channel are deleted and a join button is shown.
+cef984319	📢 Required channel: ⟨0⟩ | ⟨1⟩
+d48d5b5ae	a short time
+05260e946	⟨0⟩ days
+b04fc7f5d	just now
+21aaa5a62	for ⟨0⟩ min
+7448bebe4	for ⟨0⟩ h
+5ba98ca40	for ⟨0⟩ days
+ad5b41977	💤 ⟨0⟩ is now AFK⟨1⟩
+44c5de771	👋 ⟨0⟩ is back (was AFK for ⟨1⟩).
+e117178d7	💤 ⟨0⟩ is AFK right now (⟨1⟩)⟨2⟩
+44140939f	📢 <b>Required channel</b> — ⟨0⟩
+e5b1aac1e	Status: <b>⟨0⟩</b>
+0716f7bc2	Channel: ⟨0⟩
+0d5b480e5	Messages of members who haven't joined the channel are deleted and a notice with '📢 Join the channel / ✅ I joined' buttons appears. Admins are exempt. The bot must be an admin in the channel.
+7d73e8088	not set
+6ba5f155e	✏️ Set channel
+c9606c43c	🏷 <b>Tag settings</b> — ⟨0⟩
+203ce8b22	<code>/tag message</code> tags members in batches. <code>/stoptag</code> stops it, members can leave the list with <code>/notag</code>.
+b86bf2507	Per message: <b>⟨0⟩ people</b> · Style: <b>⟨1⟩</b> · Who: <b>⟨2⟩</b>
+1da63df5e	active in the last 7 days
+4e45e032a	People
+4dd25e398	⟨0⟩By name
+c39394400	⟨0⟩By emoji
+b48e5cb08	Only those active in the last 7 days
+b1d807974	Notify
+ca39fe0f8	banned in ⟨0⟩ other groups of the bot
+9872ca74d	listed in the CAS spam list
+9396a2730	🚩 ⟨0⟩ is blacklisted (⟨1⟩) → <b>banned</b>.
+545b1c5c1	🚩 ⟨0⟩ is blacklisted (⟨1⟩) → <b>muted</b>. Admins can release them.
+07441d924	🚩 Warning: ⟨0⟩ ⟨1⟩.
+45358021b	✏️ Name change: ⟨0⟩ (ID <code>⟨1⟩</code>)
+281b2747a	Old: ⟨0⟩
+059547382	New: ⟨0⟩
+a2c2bec19	📋 <b>Record</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
+0786218b9	🏷 Old names: ⟨0⟩
+14c5bccb9	🚩 Shared blacklist: ⟨0⟩
+38fd7e621	<b>banned in ⟨0⟩ groups</b>
+66b71c0f8	⚠️ listed
+5a25bd323	📊 Last ⟨0⟩ days: ⚠️ ⟨1⟩ warnings · 🔇 ⟨2⟩ mutes · 👢 ⟨3⟩ kicks · 🚫 ⟨4⟩ bans
+5f914853f	No recorded penalties.
+05d9f273c	Usage: /record @user, /record ID or /record as a reply to a message
+f3ac03616	📩 The record was sent privately.
+5d8b9aade	📩 To send the record privately, first send me /start in private.
+2e3efd222	🤖 Go to the bot
+859b5bb09	🔇 Mute (⟨0⟩/⟨1⟩)
+4d8231ce2	❌ Cancel (admin)
+39229bf11	/votemute is used in a group, as a reply to a message.
+6a2b8f19c	Vote mute is off in this group.
+61afc3c7f	Reply to the message of the person you want muted with /votemute.
+89cfeb825	A vote can't be started for this person.
+77053150c	New members can't start a vote (you must have been in the group for at least 1 day).
+ebb86ddce	You started a vote recently, wait a bit.
+2848c7501	A vote is already running for this person.
+97509d3a2	🗳 <b>Mute vote</b> for ⟨0⟩ (⟨1⟩)
+49efb6ab2	Started by: ⟨0⟩ · ⟨1⟩ votes needed · within ⟨2⟩ min
+dc6640321	This vote has expired.
+608b293ec	Vote cancelled
+0fdae78cf	❌ The vote was cancelled by ⟨0⟩.
+a0e2f43f9	You can't vote for yourself.
+ffff3ff40	New members can't vote (you must have been in the group for at least 1 day).
+fe7fa73cc	You already voted.
+e0e085981	✅ Your vote was counted
+73e49db75	Couldn't mute (bot permissions?)
+aa6350471	🔇 Muted
+75f1001f2	🔇 ⟨0⟩ was muted for ⟨2⟩ by ⟨1⟩ votes.
+8555c063c	🗳 Vote: ⟨0⟩ was muted for ⟨2⟩ by ⟨1⟩ votes | ⟨3⟩
+18fb9aaaa	🧑‍⚖️ <b>Community protection</b> — ⟨0⟩
+f1deffa09	🚩 <b>Shared blacklist:</b> when someone banned in another group of the bot joins here, the selected action is applied.
+43a185211	🌐 <b>CAS:</b> accounts listed in the worldwide spam list are caught too.
+6e4660beb	✏️ <b>Name tracking:</b> name/username changes are written to the log channel (history in /record).
+adabf49fe	🗳 <b>Vote mute:</b> members can vote on a message with /votemute to temporarily mute someone (new members can't vote, it can't be used on staff).
+b800b8e5f	🚩 Shared blacklist
+97bceca81	✏️ Name tracking
+c5772d4e7	🗳 Vote
+f12c4aec5	Votes needed
+662158acd	Mute
+5c4935039	🎁 <b>Giveaway</b>⟨0⟩
+0dad0ba32	🏆 Number of winners: <b>⟨0⟩</b>
+7c606f70b	⏰ Ends: <b>⟨0⟩</b>
+92b031d27	📢 be a member of the ⟨0⟩ channel
+1a822445f	💬 at least ⟨0⟩ messages in the group (last ⟨1⟩ days)
+d9e82561c	📅 be in the group for at least ⟨0⟩ days
+d0610eddb	🛡 a real account with a profile photo or username
+208622235	📋 <b>Requirements</b>
+99c8d7297	👥 Participants: <b>⟨0⟩</b>
+cadb40104	🎁 Join (⟨0⟩)
+5ccfb1128	Channel
+eb533cc4f	A giveaway is running in this group. To end it: /endgiveaway
+10870143e	The duration must be between 1 minute and 30 days.
+9c50f1ba5	❌ Channel requirement: ⟨0⟩
+ec58b461d	✅ The giveaway started.⟨0⟩
+9d6e7b1e0	Example with requirements: /giveaway 1d 3 Prize | channel=@channel messages=20 days=7
+8a942b576	To end it: /endgiveaway [number of winners]
+05fd915f2	🎉 ⟨0⟩ started a giveaway: ⟨1⟩ | ⟨2⟩
+30f5e7aae	Bots can't join.
+f03d1a2cb	You must join the group first.
+b5417cc27	Your group membership couldn't be verified.
+004bfc204	Accounts without a profile photo or username can't join (fake account protection).
+39a47e334	You must join ⟨0⟩ first.
+99797f0e4	You need at least ⟨0⟩ messages in the group (now ⟨1⟩).
+f21f9c94c	You must have been in the group for at least ⟨0⟩ days.
+ff2167b09	This giveaway has ended.
+b5116fff1	You already joined, good luck! 🍀
+5c88f09bc	🎉 You joined the giveaway, good luck!
+b05652dd1	✅ <b>Giveaway ended</b>
+4cc381328	🎉 The giveaway has ended! No participant met the requirements.
+8e2d564a7	🎉 <b>The giveaway has ended!</b>⟨0⟩
+5aa86da43	🏆 Winner⟨0⟩: ⟨1⟩
+e9ade43fd	👥 Participants: ⟨0⟩
+7438ab083	🏆 Giveaway ended: ⟨0⟩ | ⟨1⟩
+1e5f2647b	no winner
+12a0187af	No active giveaway.
+9de1a5b57	✅ Giveaway ended.
+ff647517b	Daily messages — last 30 days
+34673a626	Messages by hour (Turkey time, 30 days)
+fa46923fb	Joined / left — last 30 days
+0edbd3fce	Joined (⟨0⟩)
+03822ea5b	Left (⟨0⟩)
+5b09123ba	Most active members — last 7 days
+8faf5f37f	No data yet
+c68b2a090	💬 Messages: 7 days <b>⟨0⟩</b> · 30 days <b>⟨1⟩</b> · active members (7 days): <b>⟨2⟩</b>
+efd6992e0	👥 In 30 days joined <b>⟨0⟩</b> · left <b>⟨1⟩</b>
+980151f9d	🛡 Total: 🚫 ⟨0⟩ bans · 🔇 ⟨1⟩ mutes · 👢 ⟨2⟩ kicks · 🔁 ⟨3⟩ spam · 🙋 ⟨4⟩ requests
+8b3ad8463	⟨0⟩ — statistics
+afd536817	Penalty
+74a1b4f70	🌊 Flood: message limit
+7d5fdce06	🌊 Flood: time window
+6eec7f346	🖼 Media flood: media limit
+188dc2ac4	🖼 Media flood: time window
+4cb84b51a	🔇 Mute duration
+3b723e30f	🕊 Spam-exempt people
+62af570a8	One user ID per line. Spam, flood and link protection don't apply to these people.
+97559aa34	🛡 Protections
+eaecb6e7c	🔤 Word and link lists
+50e7fc41b	Banned words
+5d70efcb4	One word per line. For regex, start with re:
+a59a817c8	Allowed domains
+98ae8882f	One domain per line (e.g. youtube.com).
+17dfd3589	🚪 Joining
+47bc3cee8	Captcha time
+31a22d269	📩 Private verification for join requests
+51640d5b4	Raid: member limit
+33500eff3	Raid: time window
+bcd337aa1	🐣 New member restriction
+b7e0a1cb1	Mute users without a username
+3fe9d6820	✅ Auto-accept join requests
+876437b88	❌ Auto-decline join requests
+94dd4d1bd	🤖 Decline bots / users without a username
+b582c2d59	🖼 Inappropriate media
+ca770c605	🤖 AI scan for 18+ content
+737b0637b	Photos, stickers and GIFs are scanned (nudenet must be installed on the server).
+1903d3d63	📦 Delete dangerous files
+9c0ff36ee	files like .apk .exe .bat .scr
+c79ee4fbb	If a lot of inappropriate media arrives in a short time, the group's media is locked temporarily.
+b43510a81	✏️ Edits and reports
+e97c80f7b	✏️ Late edit protection
+7f9f3195d	A message edited some time after it was sent is deleted; the old and new versions go to the founder.
+5e74ca845	👥 Applies to
+ddd26077d	Ranks not selected are exempt. Only the founder can change this.
+66613016d	Edit time limit
+e0d3940a6	📨 Notify the founder / adder
+9b1e938f3	🚩 Report system (/report, @admin)
+44d53d26e	⚠️ Warnings
+70d607de5	Warning limit
+a8dd080ee	When the limit is reached
+453982208	Temporary penalty duration
+bfbfead91	👋 Welcome
+e8a88eb95	🧹 Delete the old one when someone new joins
+5c2fbdfa8	👥 One message for mass joins
+90de79bd5	🚪 Goodbye message
+0f39f1096	📜 Rules
+f9c17c1f0	🏷 Tagging and channel
+4f7b4fd4f	/tag: per message
+4aa6ce6cc	/tag style
+6b93199e3	By name
+aa42b8748	By emoji
+1d365363e	📢 Required channel
+7b7afd285	Set the channel with /forcesub @channel.
+87bb0ff1a	🔗 Invite contest
+1c0fda956	Members get their own link with /invite, ranking with /invites.
+c8d05f85f	🧑‍⚖️ Community protection
+33af72703	When someone banned in another group of the bot joins.
+25347c8be	Blacklist action
+f7e588100	🌐 CAS spam list
+4a02f552b	✏️ Name change tracking
+32a52c44c	🗳 Vote mute
+9b96d57aa	Vote mute duration
+d51893a35	🌍 Language
+8d6c8a4a5	The bot's language in this group
+45ac69c17	The bot's messages, buttons and alerts will be in this language. Content you wrote doesn't change.
+a53ce8e7e	👮 Admin audit
+d06ffe7b8	📋 Daily admin summary
+79c2f9928	Every evening: who made how many bans, mutes, warnings and deletions (to the founder and the person who added the bot).
+c1b823489	🚨 Admin action limit
+b05a27d38	If a staff member who isn't the founder makes more bans/kicks/mutes than the limit in 1 hour, their rights are suspended.
+2a6b6f7f9	Hourly limit
+99f28dbae	🗑 Copy deleted messages to the log channel
+704d44996	Those deleted with /del and /purge. Telegram doesn't tell bots about manual deletions.
+bf952a57c	🛟 Admin recovery
+c4395cbb9	Trusted people (at most 3)
+94f3d0e2c	One user ID per line. If admins are mass-demoted, these people can send /recover to the bot.
+44ada5469	♻️ Restore automatically after a mass demotion
+fe85b70c6	#green
+485f81ade	#red
+9cfcbc726	Invalid choice
+4094a1250	Too long: ⟨0⟩…
+3994c99a9	Invalid ID: ⟨0⟩ (numbers only)
+5055a2323	At most ⟨0⟩ people
+abe802098	Invalid
+43936b588	The message can't be empty
+45313b745	Unknown field
+98d2db628	Every 30 minutes
+15ff62ef8	Every hour
+3ff28dc87	Every 2 hours
+b7b8f6424	Every 3 hours
+b5416f932	Every 6 hours
+d74bcca07	Every 12 hours
+e07f13000	Once a day
+f1868872f	Every 3 days
+b09892476	Once a week
+fe3e896af	📦 Sticker pack: ⟨0⟩
+cce0f0bc2	You don't have permission
+b91959e41	The time format must be HH:MM
+6ed0b041b	🌙 Night mode saved
+04f474277	Note name: letters, digits, - or _ (at most 32)
+064f4b29e	The note content can't be empty
+a918fc143	📝 #⟨0⟩ saved
+8af22b61d	🗑 Note deleted
+bdf64f16d	Note not found
+2550a4e51	Invalid trigger (at most 100 characters; *word* to match inside a message)
+65d904f46	The reply can't be empty
+543b45aca	There can be at most ⟨0⟩ filters
+75dac4689	🧩 Filter ⟨0⟩: ⟨1⟩
+833cd7a4f	updated
+8421922af	🗑 Filter deleted
+d52273a24	Filter not found
+737953689	Invalid interval
+8f07eb02e	⏰ Scheduled message added
+4a5a1fa05	✅ Updated
+e10b8c2a9	🗑 Block removed
+e750a9371	Unknown action
+233235be6	Unknown setting
+64198f47f	First set the channel with /forcesub @channel
+794ac0486	🖥 Changed from the web panel: ⟨0⟩ | ⟨1⟩
+c5340e8d3	Session couldn't be verified. Open the panel inside Telegram.
+650c37e3f	Group not found
+ed8d9ddd6	You're not an admin in this group (or the bot couldn't reach Telegram).
+d1d4f67c2	The bot is under maintenance, try again a bit later.
+e2d7c5c97	POST required
+33edae1a5	Request too large
+bcde64b8a	Invalid request
+0429402e5	Invalid link
+ed8c751c4	Unsupported request
+a5bfc246e	Server error
+6b75a37b8	🖥 Open the web panel
+b76f92e63	The web panel isn't enabled for this bot (WEBAPP_URL in .env is empty).
+61267ecf8	🖥 The web panel opens in a private chat with the bot:
+1503ed392	🖥 Open privately
+ffdbfe849	All settings on one page: protections, edit protection, inappropriate media, joining, welcome, lists, night mode, notes, filters, scheduled messages, blocked media, staff and group statistics. Changes reach the bot within a few seconds.
+72019bbac	main
+62ca31689	⟨0⟩: ⟨1⟩ waiting⟨2⟩
+3f8811338	, ⟨0⟩ in progress
+e5136258e	⚡ <b>Performance</b> — uptime ⟨0⟩
+be1d477f1	💬 Updates processed: <b>⟨0⟩</b> · queue: ⟨1⟩
+fdd4f90c1	🧠 Memory: <b>⟨0⟩ MB</b> (peak ⟨1⟩ MB) · CPU: ⟨2⟩ s
+3da2a45ed	🧠 CPU: ⟨0⟩ s
+3d0951b3b	🗄 Database: ⟨0⟩ MB · batch writes: ⟨1⟩ times, ⟨2⟩ rows · pending: ⟨3⟩
+22a8d336d	⏱ Loop lag: avg ⟨0⟩ · max ⟨1⟩ (over 100 ms = an operation is blocking the bot)
+7f78c41d0	👥 Groups: ⟨0⟩ · Channels: ⟨1⟩ · Clones: ⟨2⟩
+a860ce1ad	🐢 <b>Slowest (average)</b>
+6ea19cdf0	⟨0⟩. <code>⟨1⟩</code> — ⟨2⟩ avg · max ⟨3⟩ · ⟨4⟩ times
+b46e47f18	⏳ <b>Most total time</b>
+5d3700941	⟨0⟩. <code>⟨1⟩</code> — total ⟨2⟩ · ⟨3⟩ times
+3e186b7ac	🔄 Refresh
+0b681bc34	🧹 Reset
+7866cfd7a	🧹 Measurements reset
+8ed3799c7	🔄 Refreshed
+e8f595afe	🪦 Bot removed / unreachable
+fbd3f68b8	⚠️ Bot is not an admin
+7950587b4	🕳 Empty (≤⟨0⟩ members)
+c7417acd3	💤 Silent for ⟨0⟩ days
+b2d73a5b7	🤖 <b>⟨0⟩ Security Bot Panel</b>
+6dcd06cc1	📊 Statistics:
+2934c79d8	├ Total groups: ⟨0⟩
+e11665156	├ Total channels: ⟨0⟩
+98ee4dccc	├ Total users: ⟨0⟩
+2cdc2cc48	└ Private users: ⟨0⟩
+f93b0152d	📢 Channels
+774aa2184	👥 Groups
+de09056f1	🧹 Cleanup
+d03041124	📊 Statistics
+9782862bd	🚫 Blocked
+c5249c21a	⚡ Performance
+9e1bd9726	Channels
+009c2e489	Groups
+43dd9b917	⟨0⟩ <b>⟨1⟩</b> (⟨2⟩) — page ⟨3⟩/⟨4⟩
+1e4e3b199	Tap the name: info · 🚪: remove the bot
+7035c59fd	📢 No registered channels.
+a6492303c	👥 No registered groups.
+e5b94ef1a	🔙 Back
+8b1164c1a	🔙 Back to the list
+6abf2b290	This chat has no record (deleted).
+deacf11c1	✅ admin
+19ae8c1fe	✅ owner
+c5de3cdae	⚠️ member (not admin)
+6d25c19b2	❌ not in the group
+9f9a5ad1c	❌ kicked
+84ba3029b	👥 Members: ⟨0⟩ · 🤖 Bot: ⟨1⟩
+c86df7e48	📅 Registered: ⟨0⟩⟨1⟩
+079fe4cc3	💬 Last message: ⟨0⟩ · ⟨1⟩ messages in 7 days
+33a131ec1	🛡 Active protections: ⟨0⟩
+cac2ce338	never
+d4f5955f6	🚪 Remove the bot
+84297554a	🗑 Delete the record
+5b1da6456	📋 Apply its settings to other groups
+f9c565e5d	🧹 <b>Cleanup scan</b> — ⟨0⟩ chats scanned
+9309c9a8c	🗑 Delete records
+f9dc0c92a	🚪 Leave + delete
+3939c3aa3	📋 Show
+4fd13b5b2	✅ Nothing to clean.
+71017a253	Note: ‘Leave + delete’ removes the bot from those chats and deletes their settings.
+78c3f116c	🔄 Scan again
+f73473dc3	This command only works in private!
+42c9a2045	📋 Apply the settings of <b>⟨0⟩</b> to the other <b>⟨1⟩</b> groups?
+3e1a4c661	Copied: protection settings, penalties, captcha, night mode, warning limit, etc.
+ac2c708cc	Not copied: welcome/goodbye/rules messages, required channel, locks, group-specific lists.
+46d884196	<b>+ lists</b>: banned words and allowed link lists are added too (existing ones aren't deleted).
+cc53a5889	✅ Apply + lists
+4bbf7625d	The source group has no record.
+8b18be741	✅ Applied to ⟨0⟩ groups
+a27027da6	📋 This group's settings were applied to ⟨0⟩ groups | ⟨1⟩
+584db30d0	🚪 Remove the bot from <b>⟨0⟩</b>?
+5cb08b81f	• <b>Keep settings</b>: if the bot is added again, the settings come back.
+c988453c1	• <b>Delete the record too</b>: settings, ranks and statistics are deleted.
+29f10e48b	🚪 Leave, keep settings
+874976382	🗑 Leave and delete the record
+1a6229583	Couldn't leave: ⟨0⟩
+c8614638e	✅ Left⟨0⟩
+588b8a501	and the record was deleted
+4dd5e9778	Scanning…
+f127b4d7a	🧹 Scanning ⟨0⟩ chats, this may take a while…
+c04373159	The scan is outdated, scan again.
+f3c33c83f	🔙 Back to the scan
+1a3a3e54d	have their records deleted
+84c117afe	be left and have their records deleted
+1f67427da	⚠️ ⟨0⟩: should <b>⟨1⟩</b> chats ⟨2⟩? This can't be undone.
+eb3f9ab14	✅ Yes
+33889c985	Processing…
+5ac06101c	✅ ⟨0⟩ chats cleaned⟨1⟩
+73500e336	Main bot owner only.
+6a8179ecc	The blocked list is only available to the main bot owner.
+7ec9c6536	🚫 <b>Blocked</b>
+2f8268ac0	Nobody is blocked.
+13f3c860d	📊 <b>Bot Statistics</b>
+25fdf74b3	├ Total message records: ⟨0⟩
+31d1735c8	└ Total bans: ⟨0⟩
+511d1c70c	Usage: /save <name> <text>  (or reply to a message: /save <name>)
+b9050868c	The note content can't be empty.
+fe73e61b7	✅ Note saved: #⟨0⟩
+e2c814129	Usage: /get <name>
+6d1ba3c3a	There's no such note. See the list with /notes.
+fdb9a02af	No saved notes. Add one with /save.
+da2bf5ed4	📝 <b>Notes</b>
+755923919	To see one, type #name in the group.
+80841e69d	Usage: /clear <name>
+41afe3456	✅ Note deleted.
+bd44e9b93	There's no such note.
+c74724c97	🔗 Link block
+a2e8d7dd3	↪️ Forward block
+65984a6d2	🚨 Raid protection
+64de715c0	🐣 New member restriction (60 min)
+da5934c57	🔤 Word filter
+90879408f	🟢 Light
+79b39bda7	🔴 Strict
+58c29a09a	⚡ <b>Quick setup</b> — ⟨0⟩
+bf650f464	<b>1/3</b> Choose a protection preset. You can change each one afterwards.
+51a1926be	🟢 <b>Light</b>: links + flood
+14630f04b	🟡 <b>Normal</b>: + repeated spam, captcha, inappropriate media
+b89411ab4	🔴 <b>Strict</b>: + new member restriction, forward block, raid protection
+ce91c6e00	⚙️ Let me choose
+e45f19110	✖️ Skip for now
+d6c79520c	Default
+e62d3857f	My own text
+3c5a1bd73	<b>2/3</b> Send a welcome message to newcomers?
+4a80c8576	Now: <b>⟨0⟩</b>
+f4b2ad895	🚫 Off
+b8723d469	👋 Default
+5566ef1f3	✏️ I'll write my own text
+0a255f736	<b>3/3</b> Which protections should be on? Tap to turn on/off.
+b229f24f3	➡️ Continue
+39c7bad60	default text
+05c1aeb32	your own text
+d405d7c75	<b>Summary</b>
+5618672c1	👋 Welcome: ⟨0⟩
+f2adce74f	Press Apply to save the settings. You can change everything later with /settings.
+77676a86d	✅ Apply
+eebb82b20	🛡 Change protections
+2e80a5fce	This group isn't registered. Make the bot an admin first.
+762cfa3fa	⚡ Quick setup is done privately with the bot:
+32f93f6ae	⚡ Open setup
+ab8bc5e3f	First pick a group with 🛡 My groups, then type /setup.
+008c8e774	Setup skipped. You can open it any time with /setup.
+6f6bec44f	✅ Settings saved
+5dc655d64	✅ <b>Setup complete!</b> — ⟨0⟩
+46d73ff37	Detailed settings: /settings · Auto replies: /filter in the group
+d9a9eba4a	⚡ Quick setup applied | ⟨0⟩
+161bbf828	🧩 <b>Filter usage</b>
+8344bd8fb	• Reply to a message: <code>/filter Hi there</code> (the trigger is the message you replied to)
+7e201996f	• Without a reply: <code>/filter hello Hi there</code>
+cf1db6a05	• Several words: <code>/filter "good night" Good night to you too!</code>
+812fb6d89	• If it appears inside a message: <code>/filter *hello* Hi!</code>
+206f91a6d	• Reply with a sticker/photo/GIF: reply to the media → <code>/filter hello</code>
+b0b395569	• Buttons: below the reply, one per line <code>Channel - https://t.me/channel</code>
+380f07344	Variables: <code>{user}</code> <code>{first}</code> <code>{group}</code> · Formatting (bold, links…) is kept
+528d066d4	List: /filters · Delete: /stop hello · Delete all: /stopall
+7315f262e	⚠️ A group can have at most ⟨0⟩ filters. Delete old ones with /stop.
+cf56cd5da	when it appears in a message
+0272debab	when it's written
+3045102b7	✅ Filter ⟨0⟩: <b>⟨1⟩</b> — I'll reply ⟨2⟩.
+67c264f1a	added
+c64b0c3ca	🧩 Filter added: ⟨0⟩ | ⟨1⟩
+830911851	There are no filters in this group. To add one: /filter
+32a5d5ddb	🧩 <b>Filters</b> (⟨0⟩)
+3b8b66dd5	To delete: /stop &lt;trigger&gt;
+8b3a30608	Usage: /stop <trigger>
+f2ba0c77b	✅ Filter deleted.
+77a5db13d	There's no such filter. Check the list with /filters.
+b7301e99a	There are no filters in this group.
+bd0505102	⚠️ Delete all <b>⟨0⟩</b> filters in this group?
+8d8252e68	🗑 Yes, delete all
+9b6fcea87	↩️ Cancel
+272826aad	Cancelled.
+cf9d69e94	🗑 ⟨0⟩ filters deleted.
+13c07c249	🧹 All filters deleted (⟨0⟩) | ⟨1⟩
+0451d6399	🏷 Brand name
+93077ebd5	Write the name your bot will show in messages (e.g. Alpha Guard).
+efbbbb435	👋 Welcome text
+4e2fd1f48	Write the welcome text shown when someone types /start.
+e840e51a6	🔗 Support link
+2236aa076	Write the support group/channel link (https://t.me/...). To remove: -
+74af46bea	❓ Help title
+ce0e0d6dc	Write the title of the help menu.
+07075bae9	User
+8c59b527c	🤖 <b>Clone bot approval</b> #⟨0⟩
+673f5ba81	👤 Person who wants to open the bot: ⟨0⟩ — ID: <code>⟨1⟩</code>
+286285872	🔑 Bot token: <code>⟨0⟩</code>
+140e8742e	🏷 Bot name: ⟨0⟩ (@⟨1⟩)
+bbde0b439	The token is invalid or revoked.
+2f1be69b6	The token belongs to another bot.
+b8261ca98	⚠️ Your clone bot @⟨0⟩ was stopped: ⟨1⟩
+5b74bc345	Get a new token from BotFather and restart it with <b>Change token</b> in the 🤖 Clone menu.
+15f0441be	invalid token (⟨0⟩)
+c079ca840	⏳ <b>@⟨0⟩</b> is waiting for the bot owner's approval. It will start once approved.
+aa2e8a82e	🤖 <b>Clone bot</b>
+f3fc6979c	Open a protection bot with your own bot name that runs on the ULUS engine.
+4fbf35472	1) Create a bot with /newbot in @BotFather
+632cbf17b	2) Send the token you got with the button below
+883193ad7	3) When the bot owner approves, your bot starts working⟨0⟩
+3a5be4fd4	🔑 Send token
+e76ac71f1	🟢 Running
+f8a7fde2a	⚠️ Invalid token
+b535c1e0c	🤖 <b>Your clone bot</b>: @⟨0⟩
+0bc0356ba	Status: ⟨0⟩ · Groups/channels: ⟨1⟩
+47500a892	🏷 Brand: <b>⟨0⟩</b>
+ca0fe8e9a	🔗 Support: ⟨0⟩
+b07ee01ba	❓ Help title: ⟨0⟩
+8e9727f2e	👋 Welcome: ⟨0⟩⟨1⟩
+de54dae36	default
+53f82bc49	⏸ Stop
+b8abb05fb	▶️ Start
+60446c88d	↩️ Withdraw request
+ded7cc646	🔑 Change token
+d3fb29907	🗑 Delete clone
+367b6aa51	Clone actions are done privately with the bot.
+a51f7d30f	This request was already handled.
+c862658b2	A request from an old version; the user must send a token with /clone.
+a102e834e	🤖 The clone system was renewed: type /clone and send your bot token; your bot starts once the bot owner approves.
+982a0150c	Couldn't start: ⟨0⟩
+447501409	⚠️ Couldn't start: ⟨0⟩
+64fbe849e	⚠️ Your clone bot couldn't be started: ⟨0⟩
+03718599d	You can send a new token with /clone.
+ba7f6e886	✅ Approved, the bot started
+705bd8131	❌ Declined
+744d07117	✅ <b>Your clone bot was approved and started!</b> @⟨0⟩
+90edeb341	For the name, welcome text and support link: /clone
+172a66fda	❌ Your clone bot request for @⟨0⟩ was declined.
+dffc58eb3	You no longer need to ask for permission: send the token, your bot starts once the bot owner approves.
+7269890c3	Only the bot owner can do this.
+741c29704	You have no pending request.
+a353b8903	↩️ The user withdrew the request
+cb7da55c2	↩️ Request withdrawn
+b30c05510	🔑 Write the bot token you got from @BotFather (e.g. <code>123456789:ABC...</code>).
+0adaad0bb	To cancel: cancel
+a54c0e304	This clone isn't yours.
+8f8af330e	Invalid.
+ec93a493c	⏸ Stopped
+6a47f34ed	This clone was deleted.
+21d148b57	🗑 Delete the clone @⟨0⟩? The bot stops, settings in groups stay.
+e53f197f7	🗑 Yes, delete
+cb1a5e233	🗑 Your clone bot @⟨0⟩ was deleted by the bot owner.
+19e55244e	The link must start with https://t.me/. Write it again or cancel.
+6e97fcc27	✅ ⟨0⟩ updated.
+feae94615	❌ This doesn't look like a bot token. Send the full token from @BotFather.
+19769e756	❌ This is the main bot's token.
+d305390e4	❌ Invalid token. Copy the correct token from @BotFather.
+82a945d00	❌ This bot is already someone else's clone.
+d190f37f5	❌ Someone else has a pending request for this bot.
+fa9063dd4	❌ The bot couldn't be started: ⟨0⟩
+8ffa38acb	✅ <b>Your clone bot is ready!</b> @⟨0⟩
+9b90f4091	To add it to a group: https://t.me/⟨0⟩?startgroup=ulus&admin=⟨1⟩
+34ed30a8e	↩️ A new request was sent instead
+98545fdcd	✅ Approve
+b3bf17908	📨 Your request for <b>@⟨0⟩</b> was sent to the bot owner.
+988ee3c22	Once approved, your bot will start and I'll let you know.
+eb51d0e12	This bot is already someone else's clone.
+dfe2324b4	⟨0⟩ @⟨1⟩ — owner <code>⟨2⟩</code>
+1cd8c4513	⏳ @⟨0⟩ — requested by <code>⟨1⟩</code>
+92021a063	🤖 <b>Clone bots</b> (⟨0⟩) · Waiting for approval: ⟨1⟩
+21bb22c3f	No clones yet.
+32f6170ef	<b>Waiting for approval</b>
+f666e1d93	🗄 Database backup · ⟨0⟩ MB (compressed ⟨1⟩ MB)
+9cfd9973e	To restore, put the .db file from the zip into the bot folder named bot_data.db.
+391c8e6d0	🗄 Backup taken but it doesn't fit in Telegram (⟨0⟩ MB): ⟨1⟩
+c3fcc95df	🗄 Taking a backup...
+103ec5f85	Chat: ⟨0⟩
+0f97d9633	⚠️ Bot error
+15781d4a0	⚠️ This button is outdated or invalid. Open the menu again.
+043246756	⚠️ Something went wrong, the action couldn't be completed. Please try again.
+4e9b13c4d	⛔ Only admins can use this command.
+af7654ae4	⏳ The admin list was just refreshed. Try again in ⟨0⟩ s.
+7117a9ab8	⚠️ Couldn't get the admin list. Is the bot an admin in this group?
+48b81ffc1	🔄 <b>Admin list refreshed</b> — ⟨0⟩ admins
+10701ad0a	➕ Rank given: ⟨0⟩
+7eed3b278	➖ Rank removed (no longer an admin): ⟨0⟩
+3ffb1dffa	The records are already up to date.
+be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
+2a8ec5530	🟢 ULUS started
+82459fdce	Database: <code>⟨0⟩</code> (⟨1⟩ KB)
+d2e59a824	Registered groups/channels: <b>⟨0⟩</b>
+6c20c0dd0	⚠️ The database opened empty and was restored from the last backup: <code>⟨0⟩</code>
+0e4276ce2	⚠️ No registered chats. If this number drops when the bot restarts, the database file may have been deleted or the bot is running from a different folder.
+3831f1221	Couldn't reach the server
+ca576aa9b	Error ⟨0⟩
+44d8a56f0	Save (⟨0⟩)
+8c5f53f0b	🖼 ⟨0⟩ attached — check to remove it
+6050fb2fa	Required channel: ⟨0⟩
+2101bb05d	Delete ⟨0⟩?
+210266e99	On/off
+ac3d94f38	Messages (7 days)
+251aa63e3	Active people
+7782d329c	Joined (7 days)
+f515fefde	Warned
+b32121bc6	Banned
+4136a9068	📋 Log channel: ⟨0⟩
+1f589ad54	not set (use /setlog in the bot)
+91e55d41e	🌙 Night mode
+5a572078e	· active now
+db433084f	· on
+841c11292	The selected permissions are turned off during these hours and restored afterwards (UTC+3).
+587308129	Start
+2a2a44bc3	End
+e07763331	Turn off:
+fb5b6de88	Save night mode
+626b1b386	📝 Notes (⟨0⟩)
+9ba887ab0	No notes yet. Typing #name in the group sends the note.
+0ebe5615b	Note name (e.g. rules)
+83fff7c73	Note content (formatting: <b>bold</b>, buttons: Label - https://link)
+0c4734df9	🧩 Filters / auto replies (⟨0⟩/⟨1⟩)
+40d6aee5f	💬 contains: ⟨0⟩
+25ea7b948	No filters yet.
+8e0bb1fb8	Trigger (match inside a message: *word*)
+db212635d	Reply ({user} {first} {group} variables, button lines)
+75a77232d	➕ Add filter
+ed3622d45	For a reply with media (sticker/photo), reply to the media in the group with /filter.
+aa7a25249	⏰ Scheduled messages (⟨0⟩)
+3eb72af09	Every ⟨0⟩ · next: ⟨1⟩
+240088248	On/off
+f479b96fd	This scheduled message
+158f37bff	No scheduled messages yet.
+38f7fb835	Message (button lines and %%% random variants are supported)
+67866ebd3	Interval
+039052532	➕ Add scheduled message
+ec1ffce3d	🚫 Blocked media (⟨0⟩)
+39590ef60	This block
+35fb023cf	To add, reply to the media in the group with /blockmedia, or /blockpack for a sticker pack.
+2de76a779	👮 Staff (⟨0⟩)
+bf3bc5b16	To give/remove ranks use /admin, /senioradmin, /cofounder in the group; for personal permissions use /perms in the bot.
+3a5e96d47	Loading…
+7419f16f9	✅ Saved
+69efe9b3e	No changes
+4c12da56f	Groups you manage
+b57672cb0	You don't manage any group
+03396c6dd	No group was found where the bot is an admin and you're staff.
+274139b9d	Discard unsaved changes?
+67b14047c	Buttons: one per line  Label - https://link  (side by side: &&) · Rules - rules · Info - popup:text · Variables: {user} {first} {group} {count} · Random message: a %%% line in between · Use <b> <i> tags for bold/italic. Add media via the bot with /setwelcome.
+a9826a4de	⟨0⟩ Security Bot
+89c80575f	⚡ Main bot : @⟨0⟩
+6d4a7341c	<tg-emoji emoji-id="⟨0⟩">⟨1⟩</tg-emoji>
+4352d25d9	<blockquote expandable>⟨0⟩</blockquote>
+f52bff073	flood_notice_⟨0⟩_⟨1⟩
+d2cdf97e4	⟨0⟩<blockquote expandable>⟨1⟩</blockquote>⟨2⟩
+090ff92f5	<blockquote expandable>⟨0⟩</blockquote>⟨1⟩
+348974ec8	Captcha ⟨0⟩.
+070cf47b7	Captcha ⟨0⟩ | ⟨1⟩
+5ed531a43	⟨0⟩</blockquote>
+0fd8daf31	ID: <code>⟨0⟩</code>
+82b029e57	<code>#⟨0⟩</code> — ⟨1⟩
+404522550	https://t.me/⟨0⟩?startgroup=kurulum&admin=⟨1⟩
+8290f7d5e	· <code>⟨0⟩</code>
+e9d283a8a	ID: ⟨0⟩
+eaf7ea115	<blockquote expandable>⟨0⟩⟨1⟩</blockquote>
+b667cf812	├🙃 Emoji: ⟨0⟩
+3302869c8	Admin: ⟨0⟩ (<code>⟨1⟩</code>)
+ad9ead387	Bot: ⟨0⟩
+a510b1897	<code>⟨0⟩</code>
+385efb5c0	⚡ Main bot: @⟨0⟩
+63edd3296	🛡 ⟨0⟩ Security Bot
+c9e24da4b	ch_flood_⟨0⟩
+f9f826fff	🛡 <b>⟨0⟩ Security Bot</b>
+f679032d2	• <code>/admin ⟨0⟩</code>
+ae44f58ab	• <code>/ban ⟨0⟩</code>
+29fa938c6	• <code>⟨0⟩</code> — ⟨1⟩ (⟨2⟩)
+1ea2795d4	https://t.me/⟨0⟩
+a4439e0c5	<a href="tg://user?id=⟨0⟩">⟨1⟩</a>
+04a2454bb	🌐 CAS: ⟨0⟩
+4b6ea2e22	https://api.telegram.org/bot⟨0⟩/⟨1⟩
+33337525a	🆔 <code>⟨0⟩</code>⟨1⟩
+817dbc364	• ⟨0⟩ (<code>⟨1⟩</code>)
+cd8533168	• ⟨0⟩: <code>⟨1⟩</code> — ⟨2⟩
+4e4068d8f	bot_data_⟨0⟩.db
+176712105	⟨0⟩<pre>⟨1⟩</pre>
 '''
 
 _i18n_load()
@@ -16631,5 +21229,7 @@ _i18n_load()
 if __name__ == '__main__':
     if len(sys.argv) == 3 and sys.argv[1] == '--web-request':
         web_request_cli(sys.argv[2])
+    elif len(sys.argv) == 2 and sys.argv[1] == '--i18n-check':
+        i18n_check()
     else:
         main()
