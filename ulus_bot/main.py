@@ -922,11 +922,33 @@ async def _main_bot_absent(cid: str, via) -> bool:
         return False
     return getattr(m, 'status', 'left') in ('left', 'kicked')
 
+# Kişi hedefleyen komutlar (Türkçe asıl adlarıyla; İngilizce eş adlar canon_cmd ile buna döner)
+TARGET_CMDS = {'addadmin', 'remove', 'ban', 'unban', 'kick', 'mute', 'unmute', 'warn', 'unwarn', 'warns', 'klasorcu',
+               'sicil', 'whitelist', 'profil', 'info', 'admin', 'basadmin', 'yardimcikurucu', 'uyeetiketi',
+               'engelle', 'engelkaldir', 'gban', 'ungban'}
+
+def _mention_to_id(msg) -> None:
+    """Yönetici @ yazıp listeden kişiyi seçince Telegram mesaja kişinin ID'sini gömer (text_mention).
+    Bot o kişiyi hiç görmemiş olsa da tanınsın diye hedef komutlarda bu kısım ID ile değiştirilir:
+    '/admin Ali Veli yardımcı' → '/admin 123456 yardımcı'."""
+    if msg is None or not msg.text or not msg.text.startswith('/'):
+        return
+    ents = [e for e in (msg.entities or ()) if e.type == 'text_mention' and e.user]
+    if not ents or canon_cmd(msg) not in TARGET_CMDS:
+        return
+    raw = msg.text.encode('utf-16-le')  # Telegram konumları UTF-16 birimiyle verir
+    for e in sorted(ents, key=lambda x: x.offset, reverse=True):
+        raw = raw[:e.offset * 2] + str(e.user.id).encode('utf-16-le') + raw[(e.offset + e.length) * 2:]
+    with msg._unfrozen():
+        msg.text = raw.decode('utf-16-le')
+        msg.entities = tuple(e for e in (msg.entities or ()) if e.type == 'bot_command' and e.offset == 0)
+
 async def bot_context_handler(update: Update, context):
     """Her güncellemenin en başında: hangi botla çalışıldığını işaretler; başka botumuzun yönettiği sohbetin
     güncellemelerini (aynı grupta iki botumuz varsa çift işlem olmasın diye) yok sayar."""
     _ctx_bot.set(context.bot)
     PERF['updates'] += 1
+    _mention_to_id(update.message)
     if getattr(update, 'callback_query', None) is not None:
         note_callback_lang(update)
     chat = update.effective_chat
