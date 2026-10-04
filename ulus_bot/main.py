@@ -15759,8 +15759,26 @@ async def _main_send(chat_id, text, **kw):
 async def start_clone(row: dict) -> str | None:
     """Klonu başlatır. Hata metni ya da None döner."""
     bid = row['bot_id']
-    if bid in CLONE_APPS:
+    if bid in CLONE_APPS or bid in CLONE_STARTING:
         return None
+    CLONE_STARTING.add(bid)
+    try:
+        return await _start_clone(row)
+    finally:
+        CLONE_STARTING.discard(bid)
+
+CLONE_STARTING: set = set()  # açılmakta olan klonlar (aynı anda ikinci başlatma/durdurma yapılmasın)
+
+async def _clone_profile(app):
+    """Klonun komut menüsü ve açıklaması (dil başına istek; uzun sürer, açılışı bekletmez)."""
+    token = _ctx_bot.set(app.bot)
+    try:
+        await setup_bot_profile(app.bot)
+    finally:
+        _ctx_bot.reset(token)
+
+async def _start_clone(row: dict) -> str | None:
+    bid = row['bot_id']
     app = (Application.builder().token(row['token']).rate_limiter(UlusRateLimiter(max_retries=3))
            .job_queue(UlusJobQueue()).concurrent_updates(CONCURRENT_UPDATES).build())
     register_handlers(app, main_bot=False)
@@ -15778,13 +15796,22 @@ async def start_clone(row: dict) -> str | None:
     CLONES[bid] = row
     RUNNING_BOTS[bid] = app.bot
     CLONE_APPS[bid] = app
-    token = _ctx_bot.set(app.bot)
     try:
-        await setup_bot_profile(app.bot)
-    finally:
-        _ctx_bot.reset(token)
-    await app.start()
-    await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+    except TelegramError as e:
+        logger.warning(f"Klon başlatılamadı {bid}: {e}")
+        CLONE_APPS.pop(bid, None)
+        RUNNING_BOTS.pop(bid, None)
+        CLONES.pop(bid, None)
+        try:
+            if app.running:
+                await app.stop()
+            await app.shutdown()
+        except Exception:
+            pass
+        return friendly_error(e)
+    app.create_task(_clone_profile(app))
     with get_db() as conn:
         conn.execute("UPDATE clones SET status = 'active', username = ?, name = ? WHERE bot_id = ?",
                      (app.bot.username, app.bot.first_name, bid))
@@ -15794,6 +15821,10 @@ async def start_clone(row: dict) -> str | None:
     return None
 
 async def stop_clone(bid: int, status: str = 'stopped'):
+    for _ in range(120):  # açılmakta olan klonu yarıda kesme (kapanmış istemciyle "not initialized" hatası)
+        if bid not in CLONE_STARTING:
+            break
+        await asyncio.sleep(0.5)
     app = CLONE_APPS.pop(bid, None)
     RUNNING_BOTS.pop(bid, None)
     CLONES.pop(bid, None)
@@ -15905,8 +15936,20 @@ async def _decide_clone_request(query, rid: int, approve: bool):
         await query.answer("Eski sürümden kalan istek; kullanıcı /klon ile token göndermeli.", show_alert=True)
         await _main_send(r['user_id'], "🤖 Klon sistemi yenilendi: /klon yazıp bot token'ını gönder, bot sahibi onaylayınca botun açılır.")
         return
+    with get_db() as conn:  # çift tıklamada ikinci işlem başlamasın
+        claimed = conn.execute("UPDATE clone_requests SET status = 'processing' WHERE id = ? AND status = 'pending'",
+                               (rid,)).rowcount
+        conn.commit()
+    if not claimed:
+        await query.answer("Bu istek zaten işlendi.", show_alert=True)
+        return
     if approve:
-        err, me_username = await _activate_clone(r['user_id'], r['token'], r['bot_id'])
+        await _edit_req_msg(r, "⏳ Açılıyor…")
+        try:
+            err, me_username = await _activate_clone(r['user_id'], r['token'], r['bot_id'])
+        except Exception as e:
+            logger.exception(f"Klon açılamadı (istek {rid}): {e}")
+            err, me_username = (friendly_error(e) if isinstance(e, TelegramError) else "Beklenmeyen hata"), ''
         if err:
             with get_db() as conn:
                 conn.execute("UPDATE clone_requests SET status = 'failed', token = NULL, decided_at = ? WHERE id = ?",
@@ -16163,6 +16206,10 @@ async def _activate_clone(uid: int, token: str, bot_id: int):
     if me.id in CLONE_APPS:  # aynı bot yeni token'la: yeniden başlat
         await stop_clone(me.id, 'active')
     err = await start_clone(clone_row(me.id))
+    if err:
+        with get_db() as conn:
+            conn.execute("UPDATE clones SET status = 'invalid' WHERE bot_id = ?", (me.id,))
+            conn.commit()
     return err, me.username
 
 def _clones_admin_view():
@@ -19245,6 +19292,8 @@ d3fb29907	🗑 Klonu sil
 a51f7d30f	Bu istek zaten işlendi.
 c862658b2	Eski sürümden kalan istek; kullanıcı /klon ile token göndermeli.
 a102e834e	🤖 Klon sistemi yenilendi: /klon yazıp bot token'ını gönder, bot sahibi onaylayınca botun açılır.
+69fa64270	⏳ Açılıyor…
+48395174c	Beklenmeyen hata
 982a0150c	Açılamadı: ⟨0⟩
 447501409	⚠️ Açılamadı: ⟨0⟩
 64fbe849e	⚠️ Klon botun açılamadı: ⟨0⟩
