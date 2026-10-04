@@ -931,7 +931,7 @@ def _mention_to_id(msg) -> None:
     """Yönetici @ yazıp listeden kişiyi seçince Telegram mesaja kişinin ID'sini gömer (text_mention).
     Bot o kişiyi hiç görmemiş olsa da tanınsın diye hedef komutlarda bu kısım ID ile değiştirilir:
     '/admin Ali Veli yardımcı' → '/admin 123456 yardımcı'."""
-    if msg is None or not msg.text or not msg.text.startswith('/'):
+    if not isinstance(getattr(msg, 'text', None), str) or not msg.text.startswith('/') or not hasattr(msg, '_unfrozen'):
         return
     ents = [e for e in (msg.entities or ()) if e.type == 'text_mention' and e.user]
     if not ents or canon_cmd(msg) not in TARGET_CMDS:
@@ -948,7 +948,7 @@ async def bot_context_handler(update: Update, context):
     güncellemelerini (aynı grupta iki botumuz varsa çift işlem olmasın diye) yok sayar."""
     _ctx_bot.set(context.bot)
     PERF['updates'] += 1
-    _mention_to_id(update.message)
+    _mention_to_id(getattr(update, 'message', None))
     if getattr(update, 'callback_query', None) is not None:
         note_callback_lang(update)
     chat = update.effective_chat
