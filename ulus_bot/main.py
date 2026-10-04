@@ -6437,7 +6437,8 @@ async def help_settings_callback(update: Update, context: ContextTypes.DEFAULT_T
 
 # ═══════════════════════════ DUYURU: gruplar, kanallar, özelden kullanıcılar ═══════════════════════════
 # /duyuru [-kisiler] [-gruplar] [-kanallar] [all] [-test] [-sabitle] [-sessiz] [-saat 20:00] "mesaj"
-# ya da bir mesaja yanıt verip /duyuru [bayraklar] → o mesaj olduğu gibi kopyalanır (medya, biçim, premium emoji).
+# ya da bir mesaja yanıt verip /duyuru [bayraklar] → o mesaj olduğu gibi kopyalanır (medya, biçim, butonlar);
+# -ilet ile kopyalanmaz, iletilir (premium emoji korunur, üstünde "İletildi" yazar).
 DUYURU_DELAY = 0.05          # mesajlar arası bekleme (~20 mesaj/sn; Telegram sınırı ~30/sn)
 DUYURU_PROGRESS_EVERY = 5    # ilerleme mesajı en sık bu kadar saniyede bir güncellenir
 _PRIVATE_SEEN_EVERY = 6 * 3600
@@ -6450,7 +6451,7 @@ _DY_TARGET_FLAGS = {
     '-users': 'u', '-people': 'u', '-groups': 'g', '-channels': 'c',  # İngilizce
 }
 _DY_OPT_FLAGS = {'-test': 'test', '-sabitle': 'pin', '-pin': 'pin', '-sessiz': 'silent', '-anket': 'poll',
-                 '-silent': 'silent', '-poll': 'poll'}
+                 '-silent': 'silent', '-poll': 'poll', '-ilet': 'fwd', '-forward': 'fwd'}
 DUYURU_ACTIVE_DAYS = 7
 _DY_QUOTES = [('"', '"'), ('&quot;', '&quot;'), ('“', '”'), ('«', '»'), ("'", "'"), ('&#x27;', '&#x27;')]
 _DY_KIND_LABEL = {'g': "grup", 'c': "kanal", 'u': "kişi"}
@@ -6542,7 +6543,7 @@ def parse_duyuru(m) -> dict:
             break
     tpl = re.fullmatch(r'#(\w{1,32})', body.strip())
     return {'targets': targets or {'g', 'c'}, 'test': 'test' in opts, 'pin': 'pin' in opts,
-            'silent': 'silent' in opts, 'poll': 'poll' in opts, 'at': at, 'active': active, 'save': save,
+            'silent': 'silent' in opts, 'poll': 'poll' in opts, 'fwd': 'fwd' in opts, 'at': at, 'active': active, 'save': save,
             'template': tpl.group(1).lower() if tpl else None, 'html': body, 'error': err}
 
 def duyuru_targets(kinds, bot_id: int, flt: dict | None = None) -> list:
@@ -6813,17 +6814,18 @@ DUYURU_HELP = (
     "<code>/duyuru all \"mesaj\"</code> — hepsi\n\n"
     "Seçenekler: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (son 7 gün; "
     "<code>-aktif 30</code>) · <code>-test</code> (sadece sana) · <code>-sabitle</code> · <code>-sessiz</code> · "
-    "<code>-saat 20:00</code>\n"
+    "<code>-saat 20:00</code> · <code>-ilet</code> (yanıtlanan mesajı ilet; premium emoji korunur)\n"
     "🎯 Önizlemede belli grup/kanalları seçebilirsin.\n\n"
     "🗳 Anket: <code>/duyuru -anket -kisiler \"Soru?\nSeçenek 1\nSeçenek 2\"</code> — oylar tek ankette toplanır\n"
     "💾 Şablon: <code>/duyuru -kaydet isim \"mesaj\"</code> → <code>/duyuru -kisiler #isim</code> · /duyurusablon\n\n"
-    "💡 Bir mesaja (resim, video, butonlu ya da premium emojili) yanıt verip <code>/duyuru -kisiler</code> yazarsan "
+    "💡 Bir mesaja (resim, video, butonlu) yanıt verip <code>/duyuru -kisiler</code> yazarsan "
     "o mesaj olduğu gibi gönderilir. Metinde buton satırı da yazabilirsin: <code>Kanal - https://t.me/kanal</code> "
     "(tıklamalar sayılır)\n\n"
     "/duyurular — geçmiş, tıklamalar, anket sonuçları · /duyurudur — gönderimi durdur")
 
-DUYURU_EMOJI_WARN = ("⚠️ Premium emojiler Telegram tarafından normal emojiye çevrildi (botlar yazarak premium emoji "
-                     "gönderemiyor). Çözüm: mesajı kendin yaz, ona yanıt verip /duyuru yaz — kopyalanan mesajda korunur.")
+DUYURU_EMOJI_WARN = ("⚠️ Premium emojiler normal emojiye dönüşür: Telegram, botun gönderdiği mesajda (kopya dahil) premium "
+                     "emojiyi sadece botun Fragment'tan alınmış ek kullanıcı adı varsa gösterir. Korumak için mesaja "
+                     "yanıt verip /duyuru -ilet yaz (mesaj iletilir, üstünde \"İletildi\" yazar).")
 
 def _dy_poll_parts(body_html: str):
     lines = [ln.strip() for ln in _strip_html(body_html).split('\n') if ln.strip()]
@@ -6856,7 +6858,9 @@ def _dy_view(did: int) -> tuple:
         lines.append("🔕 Bildirimsiz")
     if payload['mode'] == 'rich' and WEBAPP_URL and _dy_url_buttons(payload['rich']):
         lines.append("👆 Buton tıklamaları sayılacak")
-    if payload['mode'] == 'forward':
+    if payload.get('fwd'):
+        lines.append("↪️ Mesaj iletilecek (üstünde \"İletildi\" yazar, premium emojiler korunur)")
+    elif payload['mode'] == 'forward':
         lines.append("🗳 Anket iletilecek; oylar bu ankette toplanır")
     if flt.get('emoji_bad'):
         lines.append(DUYURU_EMOJI_WARN)
@@ -6903,11 +6907,18 @@ def _dy_sel_view(did: int, page: int) -> tuple:
             f"Seçili: <b>{len(only)}</b> — hiçbiri seçili değilse hepsine gider.")
     return text, InlineKeyboardMarkup(rows)
 
+def _has_custom_emoji(m) -> bool:
+    ents = list(getattr(m, 'entities', None) or ()) + list(getattr(m, 'caption_entities', None) or ())
+    return any(getattr(e, 'type', '') == 'custom_emoji' for e in ents)
+
 def _dy_payload_from(msg, opt):
     """Yanıtlanan mesaj → kopya; değilse yazılan metin → zengin mesaj. Boşsa None."""
     src = msg.reply_to_message
     if src is not None and not getattr(src, 'forum_topic_created', None):
-        return {'mode': 'copy', 'from': src.chat_id, 'mid': src.message_id}
+        if opt.get('fwd'):  # iletme: premium emoji korunur (kopyada Telegram normal emojiye çevirir)
+            return {'mode': 'forward', 'from': src.chat_id, 'mid': src.message_id, 'fwd': True}
+        return {'mode': 'copy', 'from': src.chat_id, 'mid': src.message_id,
+                'premium': _has_custom_emoji(src)}
     if opt['html'].strip():
         return {'mode': 'rich', 'rich': build_rich(opt['html'], msg_media(msg))}
     return None
@@ -6958,6 +6969,9 @@ async def duyuru(update: Update, context):
         payload = {'mode': 'forward', 'from': pm.chat_id, 'mid': pm.message_id}
         poll_id = getattr(getattr(pm, 'poll', None), 'id', None)
     else:
+        if opt['fwd'] and msg.reply_to_message is None:
+            await msg.reply_text("-ilet için iletilecek mesaja yanıt verip yaz: /duyuru -ilet -kisiler")
+            return
         payload = _dy_payload_from(msg, opt)
         if not payload:
             await msg.reply_text(DUYURU_HELP, parse_mode=ParseMode.HTML)
@@ -6971,7 +6985,7 @@ async def duyuru(update: Update, context):
         note = "🧪 Test duyurusu sadece sana gönderildi."
         if str(msg.chat_id) != str(user.id):
             note += " (özelden)"
-        if emoji_ok is False:
+        if emoji_ok is False or payload.get('premium'):
             note += "\n" + DUYURU_EMOJI_WARN
         await msg.reply_text(note)
         return
@@ -6982,13 +6996,13 @@ async def duyuru(update: Update, context):
             "filters, poll_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (bid, user.id, str(msg.chat_id), time.time(), opt['at'], ''.join(sorted(opt['targets'])),
              json.dumps(payload), int(opt['pin']), int(opt['silent']), json.dumps(flt), poll_id)).lastrowid
-    if payload['mode'] != 'forward':  # anket zaten önizleme olarak gönderildi
+    if payload['mode'] != 'forward' or payload.get('fwd'):  # anket zaten önizleme olarak gönderildi
         try:
             emoji_ok = await _dy_preview(msg.chat_id, payload)
         except TelegramError as e:
             await msg.reply_text(f"Önizleme gönderilemedi: {e}")
             return
-        if emoji_ok is False:
+        if emoji_ok is False or payload.get('premium'):
             flt['emoji_bad'] = True
             with get_db() as conn:
                 conn.execute("UPDATE announcements SET filters = ? WHERE id = ?", (json.dumps(flt), did))
@@ -7110,7 +7124,7 @@ def _dy_list(owner_id: int) -> tuple:
     for r in rows:
         when = datetime.fromtimestamp(r['run_at'] or r['created_at'], TZ_TR).strftime('%d.%m %H:%M')
         payload = json.loads(r['payload'])
-        what = {'copy': "📋 kopya mesaj", 'forward': "🗳 anket"}.get(payload['mode']) \
+        what = ("↪️ iletilen mesaj" if payload.get('fwd') else {'copy': "📋 kopya mesaj", 'forward': "🗳 anket"}.get(payload['mode'])) \
             or html.escape(rich_plain(payload['rich'], 40) or "(medya)")
         line = (f"<b>#{r['id']}</b> {_DY_STATUS.get(r['status'], r['status'])} · {when}\n"
                 f"   {what}\n   🎯 {html.escape(r['summary'] or '')}")
@@ -11962,7 +11976,7 @@ def rich_from_command(msg, skip: int = 1) -> dict | None:
     rich = build_rich(text_html, media)
     if (reply is not None and not own and '<tg-emoji' in text_html and len(rich['v']) == 1
             and not rich['v'][0]['buttons'] and not re.search(r'\{\w+\}', text_html)):
-        # premium emoji: bot yazarak gönderemez ama mesajı kopyalayabilir → kaynak mesaj birebir kopyalanır
+        # premium emojili mesaj: kaynak birebir kopyalanır (Telegram premium emojiyi sadece Fragment kullanıcı adlı botlarda gösterir)
         rich['cp'] = {'c': reply.chat_id, 'm': reply.message_id}
     return rich
 
@@ -12101,8 +12115,8 @@ async def _set_rich_cmd(update: Update, context, kind: str):
     elif kind == 'goodbye':
         s['goodbye_enabled'] = True
     save_channel_settings(chat_id, channel)
-    note = ("\n💎 Premium emoji korunuyor: mesaj birebir kopyalanır. Kaynak mesajı silme (silinirse normal emoji "
-            "ile gönderilir).") if rich.get('cp') else ""
+    note = ("\n💎 Mesaj birebir kopyalanır, kaynak mesajı silme. Premium emojiler sadece botun Fragment'tan alınmış "
+            "ek kullanıcı adı varsa görünür; yoksa Telegram normal emojiye çevirir.") if rich.get('cp') else ""
     await msg.reply_text(f"✅ {label} mesajı kaydedildi ({rich_summary(rich)}).{note}\nÖnizleme:")
     await send_rich(msg.chat_id, rich, reply_msg=msg, users=[update.effective_user], title=await _chat_title(chat_id))
     await send_log(chat_id, f"✏️ {label} mesajı güncellendi | {mention(update.effective_user)}", ParseMode.HTML)
@@ -17927,15 +17941,15 @@ be085c333	📢 <b>Duyuru</b>
 1e622cf6b	<code>/duyuru -kisiler "mesaj"</code> — botu özelden kullananlar
 25a35b0aa	<code>/duyuru -kisiler -kanal "mesaj"</code> — kişiler + kanallar (birleştirilebilir)
 0b87fef23	<code>/duyuru all "mesaj"</code> — hepsi
-bc83a4f15	Seçenekler: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (son 7 gün; <code>-aktif 30</code>) · <code>-test</code> (sadece sana) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code>
+3de9e4464	Seçenekler: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (son 7 gün; <code>-aktif 30</code>) · <code>-test</code> (sadece sana) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (yanıtlanan mesajı ilet; premium emoji korunur)
 1aca894ba	🎯 Önizlemede belli grup/kanalları seçebilirsin.
 9fa263da2	🗳 Anket: <code>/duyuru -anket -kisiler "Soru?
 735ec279d	Seçenek 1
 98805337f	Seçenek 2"</code> — oylar tek ankette toplanır
 aaa59ea0d	💾 Şablon: <code>/duyuru -kaydet isim "mesaj"</code> → <code>/duyuru -kisiler #isim</code> · /duyurusablon
-a3caa1df0	💡 Bir mesaja (resim, video, butonlu ya da premium emojili) yanıt verip <code>/duyuru -kisiler</code> yazarsan o mesaj olduğu gibi gönderilir. Metinde buton satırı da yazabilirsin: <code>Kanal - https://t.me/kanal</code> (tıklamalar sayılır)
+737b04133	💡 Bir mesaja (resim, video, butonlu) yanıt verip <code>/duyuru -kisiler</code> yazarsan o mesaj olduğu gibi gönderilir. Metinde buton satırı da yazabilirsin: <code>Kanal - https://t.me/kanal</code> (tıklamalar sayılır)
 fb071e726	/duyurular — geçmiş, tıklamalar, anket sonuçları · /duyurudur — gönderimi durdur
-344eb221b	⚠️ Premium emojiler Telegram tarafından normal emojiye çevrildi (botlar yazarak premium emoji gönderemiyor). Çözüm: mesajı kendin yaz, ona yanıt verip /duyuru yaz — kopyalanan mesajda korunur.
+ae346b50b	⚠️ Premium emojiler normal emojiye dönüşür: Telegram, botun gönderdiği mesajda (kopya dahil) premium emojiyi sadece botun Fragment'tan alınmış ek kullanıcı adı varsa gösterir. Korumak için mesaja yanıt verip /duyuru -ilet yaz (mesaj iletilir, üstünde "İletildi" yazar).
 f87763b78	👆 <b>Duyuru #⟨0⟩ önizlemesi</b>
 3790c85e6	🎯 Hedef: ⟨0⟩
 d46292455	🔥 Sadece son ⟨0⟩ günde aktif olanlar
@@ -17946,6 +17960,7 @@ aaca2bf64	⏰ Gönderim: ⟨0⟩
 4046d6be5	📌 Gruplarda ve kanallarda sabitlenecek
 c3eded236	🔕 Bildirimsiz
 cffb2a880	👆 Buton tıklamaları sayılacak
+716ef3839	↪️ Mesaj iletilecek (üstünde "İletildi" yazar, premium emojiler korunur)
 251fac5c6	🗳 Anket iletilecek; oylar bu ankette toplanır
 ba70fe09b	⏰ Zamanla
 8241e1495	✅ Gönder
@@ -17969,6 +17984,7 @@ c3b81b13d	Anket şöyle yazılır:
 27ced0bf8	Seçenek 2"
 9de509dc5	Anket oluşturulamadı: ⟨0⟩
 e8c8a3987	🧪 Test anketi sadece sana gönderildi.
+f25d31e66	-ilet için iletilecek mesaja yanıt verip yaz: /duyuru -ilet -kisiler
 f6c39b561	Test gönderilemedi: ⟨0⟩
 3ccbd9c93	🧪 Test duyurusu sadece sana gönderildi.
 305ee0f9a	(özelden)
@@ -17987,6 +18003,7 @@ e15ad036b	İptal edildi
 a96302489	Şu an gönderilmiyor.
 7afa989da	📢 Henüz duyuru yok.
 b0b0b34ae	📢 <b>Son duyurular</b>
+b6eaec96e	↪️ iletilen mesaj
 a2148c2a7	🗳 anket
 a68f06db1	(medya)
 771c7f3fb	👆 ⟨0⟩ tıklama⟨1⟩
@@ -18703,7 +18720,7 @@ dd3608634	Renk: satır sonuna <code>#yeşil</code> <code>#kırmızı</code> <cod
 ff0fe91d4	Kurallar
 86eca05aa	✏️ <b>⟨0⟩ mesajı</b>
 0d20c41d6	Kullanım: <code>/⟨0⟩ metin</code> ya da bir mesaja/medyaya yanıt: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Premium emoji korunuyor: mesaj birebir kopyalanır. Kaynak mesajı silme (silinirse normal emoji ile gönderilir).
+f72f38f85	💎 Mesaj birebir kopyalanır, kaynak mesajı silme. Premium emojiler sadece botun Fragment'tan alınmış ek kullanıcı adı varsa görünür; yoksa Telegram normal emojiye çevirir.
 d54d1a799	✅ ⟨0⟩ mesajı kaydedildi (⟨1⟩).⟨2⟩
 32bc1141c	Önizleme:
 a4fd88326	✏️ ⟨0⟩ mesajı güncellendi | ⟨1⟩
@@ -20125,15 +20142,15 @@ be085c333	📢 <b>إعلان</b>
 1e622cf6b	<code>/broadcast -users "الرسالة"</code> — من يستخدمون البوت في الخاص
 25a35b0aa	<code>/broadcast -users -channels "الرسالة"</code> — الأشخاص + القنوات (يمكن الجمع)
 0b87fef23	<code>/broadcast all "الرسالة"</code> — الجميع
-bc83a4f15	الخيارات: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (آخر 7 أيام؛ <code>-active 30</code>) · <code>-test</code> (لك فقط) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	الخيارات: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (آخر 7 أيام؛ <code>-aktif 30</code>) · <code>-test</code> (لك فقط) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (إعادة توجيه الرسالة التي رددت عليها؛ تبقى الإيموجي المميزة)
 1aca894ba	🎯 يمكنك في المعاينة اختيار مجموعات/قنوات محددة.
 9fa263da2	🗳 استطلاع: <code>/broadcast -poll -users "السؤال؟
 735ec279d	الخيار 1
 98805337f	الخيار 2"</code> — تُجمع كل الأصوات في استطلاع واحد
 aaa59ea0d	💾 قالب: <code>/broadcast -save الاسم "الرسالة"</code> → <code>/broadcast -users #الاسم</code> · /templates
-a3caa1df0	💡 إذا رددت على رسالة (صورة، فيديو، بأزرار أو إيموجي مميز) بـ <code>/broadcast -users</code> فستُرسل كما هي. يمكنك أيضًا كتابة أسطر أزرار في النص: <code>قناة - https://t.me/channel</code> (تُحسب النقرات)
+737b04133	💡 إذا رددت على رسالة (صورة، فيديو، بأزرار) وكتبت <code>/duyuru -kisiler</code> تُرسل تلك الرسالة كما هي. يمكنك أيضًا كتابة سطر أزرار في النص: <code>القناة - https://t.me/channel</code> (تُحسب النقرات)
 fb071e726	/broadcasts — السجل والنقرات ونتائج الاستطلاعات · /stopbroadcast — إيقاف الإرسال
-344eb221b	⚠️ حوّل تيليجرام الإيموجي المميزة إلى عادية (لا تستطيع البوتات إرسالها كتابةً). الحل: اكتب الرسالة بنفسك ثم رد عليها بـ /broadcast — النسخة المنسوخة تحتفظ بها.
+ae346b50b	⚠️ تتحول الإيموجي المميزة إلى إيموجي عادية: في الرسائل التي يرسلها البوت (بما فيها النسخ) لا يعرض تيليجرام الإيموجي المميزة إلا إذا كان للبوت اسم مستخدم إضافي مشترى من Fragment. للحفاظ عليها رد على الرسالة واكتب /duyuru -ilet (تُعاد توجيه الرسالة ويظهر فوقها "معاد توجيهها").
 f87763b78	👆 <b>معاينة الإعلان #⟨0⟩</b>
 3790c85e6	🎯 المستهدفون: ⟨0⟩
 d46292455	🔥 النشطون فقط خلال آخر ⟨0⟩ يوم
@@ -20144,6 +20161,7 @@ aaca2bf64	⏰ وقت الإرسال: ⟨0⟩
 4046d6be5	📌 سيُثبَّت في المجموعات والقنوات
 c3eded236	🔕 بصمت
 cffb2a880	👆 ستُحسب نقرات الأزرار
+716ef3839	↪️ ستُعاد توجيه الرسالة (يظهر "معاد توجيهها"، وتبقى الإيموجي المميزة)
 251fac5c6	🗳 سيُعاد توجيه الاستطلاع؛ وتُجمع الأصوات فيه
 ba70fe09b	⏰ جدولة
 8241e1495	✅ إرسال
@@ -20167,6 +20185,7 @@ c3b81b13d	اكتب الاستطلاع هكذا:
 27ced0bf8	الخيار 2"
 9de509dc5	تعذر إنشاء الاستطلاع: ⟨0⟩
 e8c8a3987	🧪 أُرسل الاستطلاع التجريبي إليك فقط.
+f25d31e66	لاستخدام -ilet رد على الرسالة المراد توجيهها واكتب: /duyuru -ilet -kisiler
 f6c39b561	تعذر إرسال التجربة: ⟨0⟩
 3ccbd9c93	🧪 أُرسل الإعلان التجريبي إليك فقط.
 305ee0f9a	(في الخاص)
@@ -20185,6 +20204,7 @@ e15ad036b	أُلغي
 a96302489	لا يُرسل الآن.
 7afa989da	📢 لا إعلانات بعد.
 b0b0b34ae	📢 <b>أحدث الإعلانات</b>
+b6eaec96e	↪️ رسالة معاد توجيهها
 a2148c2a7	🗳 استطلاع
 771c7f3fb	👆 ⟨0⟩ نقرة⟨1⟩
 8139aea8f	(⟨0⟩ شخص)
@@ -20878,7 +20898,7 @@ dd3608634	اللون: في نهاية السطر <code>#green</code> <code>#red<
 ff0fe91d4	القوانين
 86eca05aa	✏️ <b>رسالة ⟨0⟩</b>
 0d20c41d6	الاستخدام: <code>/⟨0⟩ النص</code> أو رد على رسالة/وسائط: <code>/⟨1⟩</code>
-ee9b02bb7	💎 يُحتفظ بالإيموجي المميزة: تُنسخ الرسالة كما هي. لا تحذف الرسالة الأصلية (إن حُذفت تُرسل بإيموجي عادية).
+f72f38f85	💎 تُنسخ الرسالة كما هي، لا تحذف الرسالة الأصلية. لا تظهر الإيموجي المميزة إلا إذا كان للبوت اسم مستخدم إضافي من Fragment؛ وإلا يحولها تيليجرام إلى إيموجي عادية.
 d54d1a799	✅ حُفظت رسالة ⟨0⟩ (⟨1⟩).⟨2⟩
 32bc1141c	معاينة:
 a4fd88326	✏️ حُدّثت رسالة ⟨0⟩ | ⟨1⟩
@@ -21458,6 +21478,8 @@ d3fb29907	🗑 حذف النسخة
 a51f7d30f	عولج هذا الطلب مسبقًا.
 c862658b2	طلب من إصدار قديم؛ يجب أن يرسل المستخدم التوكن عبر /clone.
 a102e834e	🤖 جُدّد نظام النسخ: اكتب /clone وأرسل توكن بوتك؛ يبدأ بوتك بعد موافقة مالك البوت.
+69fa64270	⏳ جارٍ التشغيل…
+48395174c	خطأ غير متوقع
 982a0150c	تعذر التشغيل: ⟨0⟩
 447501409	⚠️ تعذر التشغيل: ⟨0⟩
 64fbe849e	⚠️ تعذر تشغيل بوتك المستنسخ: ⟨0⟩
@@ -22232,15 +22254,15 @@ be085c333	📢 <b>Elan</b>
 1e622cf6b	<code>/broadcast -users "mesaj"</code> — botdan şəxsi istifadə edənlər
 25a35b0aa	<code>/broadcast -users -channels "mesaj"</code> — insanlar + kanallar (birləşdirmək olar)
 0b87fef23	<code>/broadcast all "mesaj"</code> — hamıya
-bc83a4f15	Seçimlər: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (son 7 gün; <code>-active 30</code>) · <code>-test</code> (yalnız sən) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Seçimlər: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (son 7 gün; <code>-aktif 30</code>) · <code>-test</code> (yalnız sənə) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (cavab verdiyin mesajı yönləndir; premium emoji qorunur)
 1aca894ba	🎯 Önizləmədə konkret qrup/kanalları seçə bilərsən.
 9fa263da2	🗳 Sorğu: <code>/broadcast -poll -users "Sual?
 735ec279d	Variant 1
 98805337f	Variant 2"</code> — bütün səslər bir sorğuda toplanır
 aaa59ea0d	💾 Şablon: <code>/broadcast -save ad "mesaj"</code> → <code>/broadcast -users #ad</code> · /templates
-a3caa1df0	💡 Bir mesaja (şəkil, video, düyməli və ya premium emojili) <code>/broadcast -users</code> ilə cavab versən, həmin mesaj olduğu kimi göndərilir. Mətndə düymə sətirləri də yaza bilərsən: <code>Kanal - https://t.me/channel</code> (kliklər sayılır)
+737b04133	💡 Bir mesaja (şəkil, video, düyməli) cavab verib <code>/duyuru -kisiler</code> yazsan, həmin mesaj olduğu kimi göndərilir. Mətndə düymə sətri də yaza bilərsən: <code>Kanal - https://t.me/channel</code> (kliklər sayılır)
 fb071e726	/broadcasts — tarixçə, kliklər, sorğu nəticələri · /stopbroadcast — göndərməni dayandır
-344eb221b	⚠️ Telegram premium emojiləri adi emojilərə çevirdi (botlar premium emojiləri yazaraq göndərə bilmir). Həll: mesajı özün yaz, ona /broadcast ilə cavab ver — kopyalanan mesaj onları saxlayır.
+ae346b50b	⚠️ Premium emojilər adi emojiyə çevrilir: botun göndərdiyi mesajda (kopya daxil) Telegram premium emojini yalnız botun Fragment-dən alınmış əlavə istifadəçi adı varsa göstərir. Qorumaq üçün mesaja cavab verib /duyuru -ilet yaz (mesaj yönləndirilir, üstündə "Yönləndirildi" yazılır).
 f87763b78	👆 <b>#⟨0⟩ elanının önizləməsi</b>
 3790c85e6	🎯 Hədəflər: ⟨0⟩
 d46292455	🔥 Yalnız son ⟨0⟩ gündə aktiv olanlar
@@ -22251,6 +22273,7 @@ aaca2bf64	⏰ Göndərilmə vaxtı: ⟨0⟩
 4046d6be5	📌 Qrup və kanallarda sancaqlanacaq
 c3eded236	🔕 Səssiz
 cffb2a880	👆 Düymə klikləri sayılacaq
+716ef3839	↪️ Mesaj yönləndiriləcək (üstündə "Yönləndirildi" yazılır, premium emojilər qorunur)
 251fac5c6	🗳 Sorğu yönləndiriləcək; səslər bu sorğuda toplanır
 ba70fe09b	⏰ Planlaşdır
 8241e1495	✅ Göndər
@@ -22274,6 +22297,7 @@ c3b81b13d	Sorğunu belə yaz:
 27ced0bf8	Variant 2"
 9de509dc5	Sorğu yaradılmadı: ⟨0⟩
 e8c8a3987	🧪 Test sorğusu yalnız sənə göndərildi.
+f25d31e66	-ilet üçün yönləndiriləcək mesaja cavab verib yaz: /duyuru -ilet -kisiler
 f6c39b561	Testi göndərmək olmadı: ⟨0⟩
 3ccbd9c93	🧪 Test elanı yalnız sənə göndərildi.
 305ee0f9a	(şəxsi olaraq)
@@ -22291,6 +22315,7 @@ e15ad036b	Ləğv edildi
 a96302489	Hazırda göndərilmir.
 7afa989da	📢 Hələ elan yoxdur.
 b0b0b34ae	📢 <b>Son elanlar</b>
+b6eaec96e	↪️ yönləndirilən mesaj
 a2148c2a7	🗳 sorğu
 771c7f3fb	👆 ⟨0⟩ klik⟨1⟩
 8139aea8f	(⟨0⟩ nəfər)
@@ -22969,7 +22994,7 @@ dd3608634	Rəng: sətrin sonunda <code>#green</code> <code>#red</code> <code>#bl
 ff0fe91d4	Qaydalar
 86eca05aa	✏️ <b>⟨0⟩ mesajı</b>
 0d20c41d6	İstifadə: <code>/⟨0⟩ mətn</code> və ya mesaja/mediaya cavab ver: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Premium emojilər saxlanılır: mesaj olduğu kimi kopyalanır. Mənbə mesajı silmə (silinərsə, adi emojilərlə göndərilir).
+f72f38f85	💎 Mesaj olduğu kimi kopyalanır, mənbə mesajı silmə. Premium emojilər yalnız botun Fragment-dən alınmış əlavə istifadəçi adı varsa görünür; əks halda Telegram onları adi emojiyə çevirir.
 d54d1a799	✅ ⟨0⟩ mesajı yadda saxlanıldı (⟨1⟩).⟨2⟩
 32bc1141c	Önizləmə:
 a4fd88326	✏️ ⟨0⟩ mesajı yeniləndi | ⟨1⟩
@@ -23534,6 +23559,8 @@ ded7cc646	🔑 Tokeni dəyiş
 a51f7d30f	Bu sorğuya artıq baxılıb.
 c862658b2	Köhnə versiyadan sorğu; istifadəçi /clone ilə token göndərməlidir.
 a102e834e	🤖 Klon sistemi yeniləndi: /clone yaz və bot tokenini göndər; bot sahibi təsdiqləyəndə botun işə düşür.
+69fa64270	⏳ Başladılır…
+48395174c	Gözlənilməz xəta
 982a0150c	Başlatmaq olmadı: ⟨0⟩
 447501409	⚠️ Başlatmaq olmadı: ⟨0⟩
 64fbe849e	⚠️ Klon botunu başlatmaq olmadı: ⟨0⟩
@@ -24320,15 +24347,15 @@ be085c333	📢 <b>Ankündigung</b>
 1e622cf6b	<code>/broadcast -users "Nachricht"</code> — Personen, die den Bot privat nutzen
 25a35b0aa	<code>/broadcast -users -channels "Nachricht"</code> — Personen + Kanäle (kombinierbar)
 0b87fef23	<code>/broadcast all "Nachricht"</code> — alle
-bc83a4f15	Optionen: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (letzte 7 Tage; <code>-active 30</code>) · <code>-test</code> (nur du) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Optionen: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (letzte 7 Tage; <code>-aktif 30</code>) · <code>-test</code> (nur an dich) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (beantwortete Nachricht weiterleiten; Premium-Emojis bleiben)
 1aca894ba	🎯 In der Vorschau kannst du bestimmte Gruppen/Kanäle auswählen.
 9fa263da2	🗳 Umfrage: <code>/broadcast -poll -users "Frage?
 735ec279d	Option 1
 98805337f	Option 2"</code> — alle Stimmen werden in einer einzigen Umfrage gesammelt
 aaa59ea0d	💾 Vorlage: <code>/broadcast -save name "Nachricht"</code> → <code>/broadcast -users #name</code> · /templates
-a3caa1df0	💡 Antwortest du auf eine Nachricht (Bild, Video, mit Buttons oder Premium-Emojis) mit <code>/broadcast -users</code>, wird diese Nachricht unverändert gesendet. Du kannst auch Button-Zeilen in den Text schreiben: <code>Kanal - https://t.me/channel</code> (Klicks werden gezählt)
+737b04133	💡 Wenn du auf eine Nachricht (Foto, Video, mit Buttons) antwortest und <code>/duyuru -kisiler</code> tippst, wird diese Nachricht unverändert gesendet. Im Text kannst du auch Button-Zeilen schreiben: <code>Kanal - https://t.me/channel</code> (Klicks werden gezählt)
 fb071e726	/broadcasts — Verlauf, Klicks, Umfrageergebnisse · /stopbroadcast — Senden stoppen
-344eb221b	⚠️ Telegram hat Premium-Emojis in normale Emojis umgewandelt (Bots können Premium-Emojis nicht durch Eintippen senden). Lösung: Schreib die Nachricht selbst und antworte darauf mit /broadcast — die kopierte Nachricht behält sie.
+ae346b50b	⚠️ Premium-Emojis werden zu normalen Emojis: In Nachrichten eines Bots (auch Kopien) zeigt Telegram Premium-Emojis nur, wenn der Bot einen auf Fragment gekauften Zusatz-Benutzernamen hat. Um sie zu behalten, antworte auf die Nachricht und tippe /duyuru -ilet (die Nachricht wird weitergeleitet und zeigt „Weitergeleitet“).
 f87763b78	👆 <b>Vorschau der Ankündigung #⟨0⟩</b>
 3790c85e6	🎯 Empfänger: ⟨0⟩
 d46292455	🔥 Nur in den letzten ⟨0⟩ Tagen Aktive
@@ -24339,6 +24366,7 @@ aaca2bf64	⏰ Sendezeit: ⟨0⟩
 4046d6be5	📌 Wird in Gruppen und Kanälen angeheftet
 c3eded236	🔕 Lautlos
 cffb2a880	👆 Button-Klicks werden gezählt
+716ef3839	↪️ Die Nachricht wird weitergeleitet (zeigt „Weitergeleitet“, Premium-Emojis bleiben erhalten)
 251fac5c6	🗳 Die Umfrage wird weitergeleitet; die Stimmen werden in dieser Umfrage gesammelt
 ba70fe09b	⏰ Planen
 8241e1495	✅ Senden
@@ -24362,6 +24390,7 @@ c3b81b13d	Schreib eine Umfrage so:
 27ced0bf8	Option 2"
 9de509dc5	Umfrage konnte nicht erstellt werden: ⟨0⟩
 e8c8a3987	🧪 Die Testumfrage wurde nur an dich gesendet.
+f25d31e66	Für -ilet antworte auf die weiterzuleitende Nachricht und tippe: /duyuru -ilet -kisiler
 f6c39b561	Test konnte nicht gesendet werden: ⟨0⟩
 3ccbd9c93	🧪 Die Testankündigung wurde nur an dich gesendet.
 305ee0f9a	(privat)
@@ -24380,6 +24409,7 @@ e15ad036b	Abgebrochen
 a96302489	Wird gerade nicht gesendet.
 7afa989da	📢 Noch keine Ankündigungen.
 b0b0b34ae	📢 <b>Letzte Ankündigungen</b>
+b6eaec96e	↪️ weitergeleitete Nachricht
 a2148c2a7	🗳 Umfrage
 771c7f3fb	👆 ⟨0⟩ Klicks⟨1⟩
 8139aea8f	(⟨0⟩ Personen)
@@ -25068,7 +25098,7 @@ dd3608634	Farbe: am Zeilenende <code>#green</code> <code>#red</code> <code>#blue
 ff0fe91d4	Regeln
 86eca05aa	✏️ <b>Nachricht: ⟨0⟩</b>
 0d20c41d6	Verwendung: <code>/⟨0⟩ Text</code> oder auf eine Nachricht/ein Medium antworten: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Premium-Emojis bleiben erhalten: Die Nachricht wird exakt kopiert. Lösche die Originalnachricht nicht (wird sie gelöscht, wird mit normalen Emojis gesendet).
+f72f38f85	💎 Die Nachricht wird exakt kopiert, lösche die Originalnachricht nicht. Premium-Emojis erscheinen nur, wenn der Bot einen Zusatz-Benutzernamen von Fragment hat; sonst wandelt Telegram sie in normale Emojis um.
 d54d1a799	✅ Nachricht „⟨0⟩“ gespeichert (⟨1⟩).⟨2⟩
 32bc1141c	Vorschau:
 a4fd88326	✏️ Nachricht „⟨0⟩“ aktualisiert | ⟨1⟩
@@ -25643,6 +25673,8 @@ d3fb29907	🗑 Klon löschen
 a51f7d30f	Diese Anfrage wurde bereits bearbeitet.
 c862658b2	Eine Anfrage aus einer alten Version; der Nutzer muss mit /clone ein Token senden.
 a102e834e	🤖 Das Klon-System wurde erneuert: Tippe /clone und sende dein Bot-Token; dein Bot startet, sobald der Bot-Besitzer zustimmt.
+69fa64270	⏳ Wird gestartet…
+48395174c	Unerwarteter Fehler
 982a0150c	Start nicht möglich: ⟨0⟩
 447501409	⚠️ Start nicht möglich: ⟨0⟩
 64fbe849e	⚠️ Dein Klon-Bot konnte nicht gestartet werden: ⟨0⟩
@@ -26422,15 +26454,15 @@ be085c333	📢 <b>Announcement</b>
 1e622cf6b	<code>/broadcast -users "message"</code> — people who use the bot privately
 25a35b0aa	<code>/broadcast -users -channels "message"</code> — people + channels (can be combined)
 0b87fef23	<code>/broadcast all "message"</code> — everyone
-bc83a4f15	Options: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (last 7 days; <code>-active 30</code>) · <code>-test</code> (only you) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Options: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (last 7 days; <code>-aktif 30</code>) · <code>-test</code> (only to you) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (forward the replied message; premium emoji kept)
 1aca894ba	🎯 In the preview you can pick specific groups/channels.
 9fa263da2	🗳 Poll: <code>/broadcast -poll -users "Question?
 735ec279d	Option 1
 98805337f	Option 2"</code> — all votes are collected in a single poll
 aaa59ea0d	💾 Template: <code>/broadcast -save name "message"</code> → <code>/broadcast -users #name</code> · /templates
-a3caa1df0	💡 If you reply to a message (image, video, with buttons or premium emoji) with <code>/broadcast -users</code>, that message is sent as is. You can also write button lines in the text: <code>Channel - https://t.me/channel</code> (clicks are counted)
+737b04133	💡 If you reply to a message (photo, video, with buttons) and type <code>/duyuru -kisiler</code>, that message is sent as it is. You can also write button lines in the text: <code>Channel - https://t.me/channel</code> (clicks are counted)
 fb071e726	/broadcasts — history, clicks, poll results · /stopbroadcast — stop sending
-344eb221b	⚠️ Premium emojis were converted to normal emojis by Telegram (bots can't send premium emojis by writing them). Fix: write the message yourself, reply to it with /broadcast — the copied message keeps them.
+ae346b50b	⚠️ Premium emojis turn into normal emojis: in messages sent by a bot (copies included) Telegram shows premium emoji only if the bot has an extra username bought on Fragment. To keep them, reply to the message and type /duyuru -ilet (the message is forwarded and shows "Forwarded").
 f87763b78	👆 <b>Announcement #⟨0⟩ preview</b>
 3790c85e6	🎯 Targets: ⟨0⟩
 d46292455	🔥 Only those active in the last ⟨0⟩ days
@@ -26441,6 +26473,7 @@ aaca2bf64	⏰ Sending at: ⟨0⟩
 4046d6be5	📌 Will be pinned in groups and channels
 c3eded236	🔕 Silent
 cffb2a880	👆 Button clicks will be counted
+716ef3839	↪️ The message will be forwarded (shows "Forwarded", premium emojis are kept)
 251fac5c6	🗳 The poll will be forwarded; votes are collected in this poll
 ba70fe09b	⏰ Schedule
 8241e1495	✅ Send
@@ -26464,6 +26497,7 @@ c3b81b13d	Write a poll like this:
 27ced0bf8	Option 2"
 9de509dc5	Couldn't create the poll: ⟨0⟩
 e8c8a3987	🧪 The test poll was sent only to you.
+f25d31e66	For -ilet, reply to the message to forward and type: /duyuru -ilet -kisiler
 f6c39b561	Couldn't send the test: ⟨0⟩
 3ccbd9c93	🧪 The test announcement was sent only to you.
 305ee0f9a	(privately)
@@ -26482,6 +26516,7 @@ e15ad036b	Cancelled
 a96302489	Not being sent right now.
 7afa989da	📢 No announcements yet.
 b0b0b34ae	📢 <b>Recent announcements</b>
+b6eaec96e	↪️ forwarded message
 a2148c2a7	🗳 poll
 771c7f3fb	👆 ⟨0⟩ clicks⟨1⟩
 8139aea8f	(⟨0⟩ people)
@@ -27161,7 +27196,7 @@ dd3608634	Color: at the end of the line <code>#green</code> <code>#red</code> <c
 ff0fe91d4	Rules
 86eca05aa	✏️ <b>⟨0⟩ message</b>
 0d20c41d6	Usage: <code>/⟨0⟩ text</code> or reply to a message/media: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Premium emojis are kept: the message is copied exactly. Don't delete the source message (if it's deleted, it's sent with normal emojis).
+f72f38f85	💎 The message is copied exactly, don't delete the source message. Premium emojis show only if the bot has an extra username bought on Fragment; otherwise Telegram turns them into normal emojis.
 d54d1a799	✅ ⟨0⟩ message saved (⟨1⟩).⟨2⟩
 32bc1141c	Preview:
 a4fd88326	✏️ ⟨0⟩ message updated | ⟨1⟩
@@ -27735,6 +27770,8 @@ d3fb29907	🗑 Delete clone
 a51f7d30f	This request was already handled.
 c862658b2	A request from an old version; the user must send a token with /clone.
 a102e834e	🤖 The clone system was renewed: type /clone and send your bot token; your bot starts once the bot owner approves.
+69fa64270	⏳ Starting…
+48395174c	Unexpected error
 982a0150c	Couldn't start: ⟨0⟩
 447501409	⚠️ Couldn't start: ⟨0⟩
 64fbe849e	⚠️ Your clone bot couldn't be started: ⟨0⟩
@@ -28570,15 +28607,15 @@ be085c333	📢 <b>Anuncio</b>
 1e622cf6b	<code>/broadcast -users "mensaje"</code> — quienes usan el bot en privado
 25a35b0aa	<code>/broadcast -users -channels "mensaje"</code> — personas + canales (se pueden combinar)
 0b87fef23	<code>/broadcast all "mensaje"</code> — todos
-bc83a4f15	Opciones: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (últimos 7 días; <code>-active 30</code>) · <code>-test</code> (solo a ti) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Opciones: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (últimos 7 días; <code>-aktif 30</code>) · <code>-test</code> (solo a ti) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (reenviar el mensaje respondido; se conservan los emojis premium)
 1aca894ba	🎯 En la vista previa puedes elegir grupos/canales concretos.
 9fa263da2	🗳 Encuesta: <code>/broadcast -poll -users "¿Pregunta?
 735ec279d	Opción 1
 98805337f	Opción 2"</code> — todos los votos se reúnen en una sola encuesta
 aaa59ea0d	💾 Plantilla: <code>/broadcast -save nombre "mensaje"</code> → <code>/broadcast -users #nombre</code> · /templates
-a3caa1df0	💡 Si respondes a un mensaje (imagen, vídeo, con botones o emoji premium) con <code>/broadcast -users</code>, ese mensaje se envía tal cual. También puedes escribir líneas de botones en el texto: <code>Canal - https://t.me/channel</code> (se cuentan los clics)
+737b04133	💡 Si respondes a un mensaje (foto, vídeo, con botones) y escribes <code>/duyuru -kisiler</code>, ese mensaje se envía tal cual. También puedes escribir líneas de botones en el texto: <code>Canal - https://t.me/channel</code> (se cuentan los clics)
 fb071e726	/broadcasts — historial, clics, resultados de encuestas · /stopbroadcast — detener el envío
-344eb221b	⚠️ Telegram convirtió los emojis premium en normales (los bots no pueden enviar emojis premium escribiéndolos). Solución: escribe tú el mensaje y respóndele con /broadcast — la copia los conserva.
+ae346b50b	⚠️ Los emojis premium se convierten en emojis normales: en los mensajes que envía un bot (copias incluidas) Telegram solo muestra emojis premium si el bot tiene un nombre de usuario adicional comprado en Fragment. Para conservarlos, responde al mensaje y escribe /duyuru -ilet (el mensaje se reenvía y muestra "Reenviado").
 f87763b78	👆 <b>Vista previa del anuncio #⟨0⟩</b>
 3790c85e6	🎯 Destinatarios: ⟨0⟩
 d46292455	🔥 Solo activos en los últimos ⟨0⟩ días
@@ -28589,6 +28626,7 @@ aaca2bf64	⏰ Envío a las: ⟨0⟩
 4046d6be5	📌 Se fijará en grupos y canales
 c3eded236	🔕 Silencioso
 cffb2a880	👆 Se contarán los clics en botones
+716ef3839	↪️ El mensaje se reenviará (muestra "Reenviado", se conservan los emojis premium)
 251fac5c6	🗳 La encuesta se reenviará; los votos se reúnen en esta encuesta
 ba70fe09b	⏰ Programar
 8241e1495	✅ Enviar
@@ -28612,6 +28650,7 @@ c3b81b13d	Escribe la encuesta así:
 27ced0bf8	Opción 2"
 9de509dc5	No se pudo crear la encuesta: ⟨0⟩
 e8c8a3987	🧪 La encuesta de prueba se envió solo a ti.
+f25d31e66	Para -ilet, responde al mensaje que quieres reenviar y escribe: /duyuru -ilet -kisiler
 f6c39b561	No se pudo enviar la prueba: ⟨0⟩
 3ccbd9c93	🧪 El anuncio de prueba se envió solo a ti.
 305ee0f9a	(en privado)
@@ -28630,6 +28669,7 @@ e15ad036b	Cancelado
 a96302489	No se está enviando ahora.
 7afa989da	📢 Aún no hay anuncios.
 b0b0b34ae	📢 <b>Anuncios recientes</b>
+b6eaec96e	↪️ mensaje reenviado
 a2148c2a7	🗳 encuesta
 771c7f3fb	👆 ⟨0⟩ clics⟨1⟩
 8139aea8f	(⟨0⟩ personas)
@@ -29319,7 +29359,7 @@ dd3608634	Color: al final de la línea <code>#green</code> <code>#red</code> <co
 ff0fe91d4	Reglas
 86eca05aa	✏️ <b>Mensaje de ⟨0⟩</b>
 0d20c41d6	Uso: <code>/⟨0⟩ texto</code> o responde a un mensaje/multimedia: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Los emojis premium se conservan: el mensaje se copia exacto. No borres el mensaje original (si se borra, se envía con emojis normales).
+f72f38f85	💎 El mensaje se copia exactamente, no borres el mensaje original. Los emojis premium solo se ven si el bot tiene un nombre de usuario adicional de Fragment; si no, Telegram los convierte en emojis normales.
 d54d1a799	✅ Mensaje de ⟨0⟩ guardado (⟨1⟩).⟨2⟩
 32bc1141c	Vista previa:
 a4fd88326	✏️ Mensaje de ⟨0⟩ actualizado | ⟨1⟩
@@ -29895,6 +29935,8 @@ d3fb29907	🗑 Borrar clon
 a51f7d30f	Esta solicitud ya fue gestionada.
 c862658b2	Solicitud de una versión antigua; el usuario debe enviar un token con /clone.
 a102e834e	🤖 El sistema de clones se renovó: escribe /clone y envía el token de tu bot; tu bot empieza cuando el dueño del bot lo aprueba.
+69fa64270	⏳ Iniciando…
+48395174c	Error inesperado
 982a0150c	No se pudo iniciar: ⟨0⟩
 447501409	⚠️ No se pudo iniciar: ⟨0⟩
 64fbe849e	⚠️ No se pudo iniciar tu bot clon: ⟨0⟩
@@ -30690,15 +30732,15 @@ be085c333	📢 <b>اعلان</b>
 1e622cf6b	<code>/broadcast -users "پیام"</code> — کسانی که در خصوصی از ربات استفاده می‌کنند
 25a35b0aa	<code>/broadcast -users -channels "پیام"</code> — افراد + کانال‌ها (قابل ترکیب)
 0b87fef23	<code>/broadcast all "پیام"</code> — همه
-bc83a4f15	گزینه‌ها: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (۷ روز اخیر؛ <code>-active 30</code>) · <code>-test</code> (فقط شما) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	گزینه‌ها: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (۷ روز اخیر؛ <code>-aktif 30</code>) · <code>-test</code> (فقط برای تو) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (فوروارد پیامی که به آن پاسخ دادی؛ ایموجی پریمیوم حفظ می‌شود)
 1aca894ba	🎯 در پیش‌نمایش می‌توانید گروه/کانال‌های خاصی را انتخاب کنید.
 9fa263da2	🗳 نظرسنجی: <code>/broadcast -poll -users "سؤال؟
 735ec279d	گزینه ۱
 98805337f	گزینه ۲"</code> — همه رأی‌ها در یک نظرسنجی جمع می‌شوند
 aaa59ea0d	💾 قالب: <code>/broadcast -save نام "پیام"</code> → <code>/broadcast -users #نام</code> · /templates
-a3caa1df0	💡 اگر روی پیامی (عکس، ویدیو، دکمه‌دار یا با ایموجی پریمیوم) با <code>/broadcast -users</code> ریپلای کنید، همان پیام عیناً ارسال می‌شود. در متن هم می‌توانید خط دکمه بنویسید: <code>کانال - https://t.me/channel</code> (کلیک‌ها شمرده می‌شوند)
+737b04133	💡 اگر به یک پیام (عکس، ویدیو، دکمه‌دار) پاسخ دهی و <code>/duyuru -kisiler</code> بنویسی، همان پیام بدون تغییر ارسال می‌شود. در متن می‌توانی خط دکمه هم بنویسی: <code>کانال - https://t.me/channel</code> (کلیک‌ها شمرده می‌شوند)
 fb071e726	/broadcasts — تاریخچه، کلیک‌ها، نتایج نظرسنجی · /stopbroadcast — توقف ارسال
-344eb221b	⚠️ تلگرام ایموجی‌های پریمیوم را به ایموجی عادی تبدیل کرد (ربات‌ها نمی‌توانند با تایپ، ایموجی پریمیوم بفرستند). راه‌حل: پیام را خودتان بنویسید و با /broadcast روی آن ریپلای کنید — پیام کپی‌شده آن‌ها را حفظ می‌کند.
+ae346b50b	⚠️ ایموجی‌های پریمیوم به ایموجی معمولی تبدیل می‌شوند: تلگرام در پیام‌هایی که ربات می‌فرستد (حتی کپی) ایموجی پریمیوم را فقط وقتی نشان می‌دهد که ربات نام کاربری اضافهٔ خریداری‌شده از Fragment داشته باشد. برای حفظ آن‌ها به پیام پاسخ بده و /duyuru -ilet بنویس (پیام فوروارد می‌شود و بالای آن «فورواردشده» نوشته می‌شود).
 f87763b78	👆 <b>پیش‌نمایش اعلان #⟨0⟩</b>
 3790c85e6	🎯 هدف‌ها: ⟨0⟩
 d46292455	🔥 فقط فعال‌های ⟨0⟩ روز اخیر
@@ -30709,6 +30751,7 @@ aaca2bf64	⏰ زمان ارسال: ⟨0⟩
 4046d6be5	📌 در گروه‌ها و کانال‌ها سنجاق می‌شود
 c3eded236	🔕 بی‌صدا
 cffb2a880	👆 کلیک دکمه‌ها شمرده می‌شود
+716ef3839	↪️ پیام فوروارد خواهد شد (بالای آن «فورواردشده» نوشته می‌شود، ایموجی‌های پریمیوم حفظ می‌شوند)
 251fac5c6	🗳 نظرسنجی فوروارد می‌شود؛ رأی‌ها در همین نظرسنجی جمع می‌شوند
 ba70fe09b	⏰ زمان‌بندی
 8241e1495	✅ ارسال
@@ -30732,6 +30775,7 @@ c3b81b13d	نظرسنجی را این‌طور بنویسید:
 27ced0bf8	گزینه ۲"
 9de509dc5	نظرسنجی ساخته نشد: ⟨0⟩
 e8c8a3987	🧪 نظرسنجی آزمایشی فقط برای شما ارسال شد.
+f25d31e66	برای -ilet به پیامی که باید فوروارد شود پاسخ بده و بنویس: /duyuru -ilet -kisiler
 f6c39b561	آزمایش ارسال نشد: ⟨0⟩
 3ccbd9c93	🧪 اعلان آزمایشی فقط برای شما ارسال شد.
 305ee0f9a	(در خصوصی)
@@ -30750,6 +30794,7 @@ e15ad036b	لغو شد
 a96302489	الان در حال ارسال نیست.
 7afa989da	📢 هنوز اعلانی نیست.
 b0b0b34ae	📢 <b>اعلان‌های اخیر</b>
+b6eaec96e	↪️ پیام فورواردشده
 a2148c2a7	🗳 نظرسنجی
 771c7f3fb	👆 ⟨0⟩ کلیک⟨1⟩
 8139aea8f	(⟨0⟩ نفر)
@@ -31443,7 +31488,7 @@ dd3608634	رنگ: در انتهای خط <code>#green</code> <code>#red</code> <
 ff0fe91d4	قوانین
 86eca05aa	✏️ <b>پیام ⟨0⟩</b>
 0d20c41d6	استفاده: <code>/⟨0⟩ متن</code> یا ریپلای روی پیام/رسانه: <code>/⟨1⟩</code>
-ee9b02bb7	💎 ایموجی‌های پریمیوم حفظ می‌شوند: پیام دقیقاً کپی می‌شود. پیام منبع را حذف نکنید (اگر حذف شود با ایموجی عادی ارسال می‌شود).
+f72f38f85	💎 پیام دقیقاً کپی می‌شود، پیام اصلی را حذف نکن. ایموجی‌های پریمیوم فقط اگر ربات نام کاربری اضافه از Fragment داشته باشد دیده می‌شوند؛ وگرنه تلگرام آن‌ها را به ایموجی معمولی تبدیل می‌کند.
 d54d1a799	✅ پیام ⟨0⟩ ذخیره شد (⟨1⟩).⟨2⟩
 32bc1141c	پیش‌نمایش:
 a4fd88326	✏️ پیام ⟨0⟩ به‌روز شد | ⟨1⟩
@@ -32023,6 +32068,8 @@ d3fb29907	🗑 حذف کپی
 a51f7d30f	این درخواست قبلاً رسیدگی شده است.
 c862658b2	درخواست از نسخه قدیمی؛ کاربر باید با /clone توکن بفرستد.
 a102e834e	🤖 سیستم کپی نو شد: /clone بنویسید و توکن ربات خود را بفرستید؛ ربات شما پس از تأیید مالک ربات شروع می‌شود.
+69fa64270	⏳ در حال راه‌اندازی…
+48395174c	خطای غیرمنتظره
 982a0150c	شروع نشد: ⟨0⟩
 447501409	⚠️ شروع نشد: ⟨0⟩
 64fbe849e	⚠️ ربات کپی شما شروع نشد: ⟨0⟩
@@ -32814,15 +32861,15 @@ be085c333	📢 <b>Annonce</b>
 1e622cf6b	<code>/broadcast -users "message"</code> — personnes qui utilisent le bot en privé
 25a35b0aa	<code>/broadcast -users -channels "message"</code> — personnes + canaux (combinables)
 0b87fef23	<code>/broadcast all "message"</code> — tout le monde
-bc83a4f15	Options : <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (7 derniers jours ; <code>-active 30</code>) · <code>-test</code> (vous seulement) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Options : <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (7 derniers jours ; <code>-aktif 30</code>) · <code>-test</code> (à vous seul) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (transférer le message cité ; emojis premium conservés)
 1aca894ba	🎯 Dans l’aperçu, vous pouvez choisir des groupes/canaux précis.
 9fa263da2	🗳 Sondage : <code>/broadcast -poll -users "Question ?
 735ec279d	Option 1
 98805337f	Option 2"</code> — tous les votes sont réunis dans un seul sondage
 aaa59ea0d	💾 Modèle : <code>/broadcast -save nom "message"</code> → <code>/broadcast -users #nom</code> · /templates
-a3caa1df0	💡 Si vous répondez à un message (image, vidéo, avec boutons ou emoji premium) avec <code>/broadcast -users</code>, ce message est envoyé tel quel. Vous pouvez aussi écrire des lignes de boutons dans le texte : <code>Canal - https://t.me/channel</code> (les clics sont comptés)
+737b04133	💡 Si vous répondez à un message (photo, vidéo, avec boutons) et tapez <code>/duyuru -kisiler</code>, ce message est envoyé tel quel. Vous pouvez aussi écrire des lignes de boutons dans le texte : <code>Canal - https://t.me/channel</code> (les clics sont comptés)
 fb071e726	/broadcasts — historique, clics, résultats des sondages · /stopbroadcast — arrêter l’envoi
-344eb221b	⚠️ Telegram a converti les emoji premium en emoji normaux (les bots ne peuvent pas envoyer d’emoji premium en les tapant). Solution : écrivez le message vous-même, puis répondez-y avec /broadcast — le message copié les conserve.
+ae346b50b	⚠️ Les emojis premium deviennent des emojis normaux : dans les messages envoyés par un bot (copies comprises), Telegram n’affiche les emojis premium que si le bot possède un nom d’utilisateur supplémentaire acheté sur Fragment. Pour les garder, répondez au message et tapez /duyuru -ilet (le message est transféré et affiche « Transféré »).
 f87763b78	👆 <b>Aperçu de l’annonce #⟨0⟩</b>
 3790c85e6	🎯 Destinataires : ⟨0⟩
 d46292455	🔥 Seulement les personnes actives ces ⟨0⟩ derniers jours
@@ -32833,6 +32880,7 @@ aaca2bf64	⏰ Envoi à : ⟨0⟩
 4046d6be5	📌 Sera épinglée dans les groupes et canaux
 c3eded236	🔕 Silencieux
 cffb2a880	👆 Les clics sur les boutons seront comptés
+716ef3839	↪️ Le message sera transféré (affiche « Transféré », emojis premium conservés)
 251fac5c6	🗳 Le sondage sera transféré ; les votes sont réunis dans ce sondage
 ba70fe09b	⏰ Programmer
 8241e1495	✅ Envoyer
@@ -32856,6 +32904,7 @@ c3b81b13d	Écrivez un sondage ainsi :
 27ced0bf8	Option 2"
 9de509dc5	Impossible de créer le sondage : ⟨0⟩
 e8c8a3987	🧪 Le sondage de test n’a été envoyé qu’à vous.
+f25d31e66	Pour -ilet, répondez au message à transférer et tapez : /duyuru -ilet -kisiler
 f6c39b561	Impossible d’envoyer le test : ⟨0⟩
 3ccbd9c93	🧪 L’annonce de test n’a été envoyée qu’à vous.
 305ee0f9a	(en privé)
@@ -32874,6 +32923,7 @@ e15ad036b	Annulé
 a96302489	Rien n’est en cours d’envoi.
 7afa989da	📢 Pas encore d’annonces.
 b0b0b34ae	📢 <b>Annonces récentes</b>
+b6eaec96e	↪️ message transféré
 a2148c2a7	🗳 sondage
 771c7f3fb	👆 ⟨0⟩ clics⟨1⟩
 8139aea8f	(⟨0⟩ personnes)
@@ -33564,7 +33614,7 @@ dd3608634	Couleur : en fin de ligne <code>#green</code> <code>#red</code> <code>
 ff0fe91d4	Règles
 86eca05aa	✏️ <b>Message : ⟨0⟩</b>
 0d20c41d6	Utilisation : <code>/⟨0⟩ texte</code> ou répondez à un message/média : <code>/⟨1⟩</code>
-ee9b02bb7	💎 Les emojis premium sont conservés : le message est copié à l’identique. Ne supprimez pas le message source (s’il est supprimé, il est envoyé avec des emojis normaux).
+f72f38f85	💎 Le message est copié à l’identique, ne supprimez pas le message source. Les emojis premium ne s’affichent que si le bot a un nom d’utilisateur supplémentaire de Fragment ; sinon Telegram les remplace par des emojis normaux.
 d54d1a799	✅ Message « ⟨0⟩ » enregistré (⟨1⟩).⟨2⟩
 32bc1141c	Aperçu :
 a4fd88326	✏️ Message « ⟨0⟩ » mis à jour | ⟨1⟩
@@ -34141,6 +34191,8 @@ d3fb29907	🗑 Supprimer le clone
 a51f7d30f	Cette demande a déjà été traitée.
 c862658b2	Une demande d’une ancienne version ; l’utilisateur doit envoyer un jeton avec /clone.
 a102e834e	🤖 Le système de clones a été renouvelé : tapez /clone et envoyez le jeton de votre bot ; votre bot démarre dès que le propriétaire du bot l’approuve.
+69fa64270	⏳ Démarrage…
+48395174c	Erreur inattendue
 982a0150c	Impossible de démarrer : ⟨0⟩
 447501409	⚠️ Impossible de démarrer : ⟨0⟩
 64fbe849e	⚠️ Votre bot clone n’a pas pu démarrer : ⟨0⟩
@@ -34936,15 +34988,15 @@ be085c333	📢 <b>घोषणा</b>
 1e622cf6b	<code>/broadcast -users "संदेश"</code> — जो लोग बॉट को निजी में इस्तेमाल करते हैं
 25a35b0aa	<code>/broadcast -users -channels "संदेश"</code> — लोग + चैनल (साथ में इस्तेमाल हो सकते हैं)
 0b87fef23	<code>/broadcast all "संदेश"</code> — सभी
-bc83a4f15	विकल्प: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (पिछले 7 दिन; <code>-active 30</code>) · <code>-test</code> (केवल आप) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	विकल्प: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (पिछले 7 दिन; <code>-aktif 30</code>) · <code>-test</code> (सिर्फ़ आपको) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (जिस संदेश पर रिप्लाई किया उसे फ़ॉरवर्ड करें; प्रीमियम इमोजी बने रहते हैं)
 1aca894ba	🎯 प्रीव्यू में आप खास ग्रुप/चैनल चुन सकते हैं।
 9fa263da2	🗳 पोल: <code>/broadcast -poll -users "सवाल?
 735ec279d	विकल्प 1
 98805337f	विकल्प 2"</code> — सभी वोट एक ही पोल में जमा होते हैं
 aaa59ea0d	💾 टेम्पलेट: <code>/broadcast -save नाम "संदेश"</code> → <code>/broadcast -users #नाम</code> · /templates
-a3caa1df0	💡 अगर आप किसी संदेश (इमेज, वीडियो, बटन या प्रीमियम इमोजी वाला) का जवाब <code>/broadcast -users</code> से देते हैं, तो वही संदेश जैसा है वैसा भेजा जाता है। आप टेक्स्ट में बटन पंक्तियाँ भी लिख सकते हैं: <code>चैनल - https://t.me/channel</code> (क्लिक गिने जाते हैं)
+737b04133	💡 अगर आप किसी संदेश (फ़ोटो, वीडियो, बटन वाले) पर रिप्लाई करके <code>/duyuru -kisiler</code> लिखते हैं, तो वह संदेश जैसा है वैसा भेजा जाता है। टेक्स्ट में बटन लाइन भी लिख सकते हैं: <code>चैनल - https://t.me/channel</code> (क्लिक गिने जाते हैं)
 fb071e726	/broadcasts — इतिहास, क्लिक, पोल नतीजे · /stopbroadcast — भेजना रोकें
-344eb221b	⚠️ Telegram ने प्रीमियम इमोजी को सामान्य इमोजी में बदल दिया (बॉट टाइप करके प्रीमियम इमोजी नहीं भेज सकते)। उपाय: संदेश खुद लिखें और उसका जवाब /broadcast से दें — कॉपी किए गए संदेश में वे बने रहते हैं।
+ae346b50b	⚠️ प्रीमियम इमोजी सामान्य इमोजी बन जाते हैं: बॉट के भेजे संदेशों में (कॉपी सहित) Telegram प्रीमियम इमोजी तभी दिखाता है जब बॉट के पास Fragment से खरीदा गया अतिरिक्त यूज़रनेम हो। इन्हें बनाए रखने के लिए संदेश पर रिप्लाई करके /duyuru -ilet लिखें (संदेश फ़ॉरवर्ड होता है और ऊपर "फ़ॉरवर्ड किया गया" दिखता है)।
 f87763b78	👆 <b>घोषणा #⟨0⟩ का प्रीव्यू</b>
 3790c85e6	🎯 प्राप्तकर्ता: ⟨0⟩
 d46292455	🔥 केवल पिछले ⟨0⟩ दिनों में सक्रिय लोग
@@ -34955,6 +35007,7 @@ aaca2bf64	⏰ भेजने का समय: ⟨0⟩
 4046d6be5	📌 ग्रुप और चैनल में पिन किया जाएगा
 c3eded236	🔕 साइलेंट
 cffb2a880	👆 बटन क्लिक गिने जाएँगे
+716ef3839	↪️ संदेश फ़ॉरवर्ड किया जाएगा (ऊपर "फ़ॉरवर्ड किया गया" दिखेगा, प्रीमियम इमोजी बने रहेंगे)
 251fac5c6	🗳 पोल फ़ॉरवर्ड किया जाएगा; वोट इसी पोल में जमा होंगे
 ba70fe09b	⏰ शेड्यूल करें
 8241e1495	✅ भेजें
@@ -34978,6 +35031,7 @@ c3b81b13d	पोल ऐसे लिखें:
 27ced0bf8	विकल्प 2"
 9de509dc5	पोल नहीं बन सका: ⟨0⟩
 e8c8a3987	🧪 टेस्ट पोल केवल आपको भेजा गया।
+f25d31e66	-ilet के लिए फ़ॉरवर्ड किए जाने वाले संदेश पर रिप्लाई करके लिखें: /duyuru -ilet -kisiler
 f6c39b561	टेस्ट नहीं भेजा जा सका: ⟨0⟩
 3ccbd9c93	🧪 टेस्ट घोषणा केवल आपको भेजी गई।
 305ee0f9a	(निजी में)
@@ -34996,6 +35050,7 @@ e15ad036b	रद्द किया गया
 a96302489	अभी कुछ नहीं भेजा जा रहा।
 7afa989da	📢 अभी तक कोई घोषणा नहीं।
 b0b0b34ae	📢 <b>हाल की घोषणाएँ</b>
+b6eaec96e	↪️ फ़ॉरवर्ड किया गया संदेश
 a2148c2a7	🗳 पोल
 771c7f3fb	👆 ⟨0⟩ क्लिक⟨1⟩
 8139aea8f	(⟨0⟩ लोग)
@@ -35689,7 +35744,7 @@ dd3608634	रंग: लाइन के अंत में <code>#green</code>
 ff0fe91d4	नियम
 86eca05aa	✏️ <b>संदेश: ⟨0⟩</b>
 0d20c41d6	उपयोग: <code>/⟨0⟩ टेक्स्ट</code> या किसी संदेश/मीडिया पर रिप्लाई करें: <code>/⟨1⟩</code>
-ee9b02bb7	💎 प्रीमियम इमोजी बने रहते हैं: संदेश हूबहू कॉपी होता है। मूल संदेश न हटाएं (हटाने पर सामान्य इमोजी के साथ भेजा जाता है)।
+f72f38f85	💎 संदेश हूबहू कॉपी होता है, मूल संदेश न हटाएं। प्रीमियम इमोजी तभी दिखते हैं जब बॉट के पास Fragment का अतिरिक्त यूज़रनेम हो; वरना Telegram उन्हें सामान्य इमोजी में बदल देता है।
 d54d1a799	✅ "⟨0⟩" संदेश सेव किया गया (⟨1⟩)।⟨2⟩
 32bc1141c	पूर्वावलोकन:
 a4fd88326	✏️ "⟨0⟩" संदेश अपडेट किया गया | ⟨1⟩
@@ -36269,6 +36324,8 @@ d3fb29907	🗑 क्लोन हटाएं
 a51f7d30f	इस अनुरोध पर पहले ही फ़ैसला हो चुका है।
 c862658b2	पुराने संस्करण का अनुरोध; उपयोगकर्ता को /clone से टोकन भेजना होगा।
 a102e834e	🤖 क्लोन सिस्टम नया किया गया: /clone लिखें और अपने बॉट का टोकन भेजें; बॉट मालिक के स्वीकृत करते ही आपका बॉट शुरू हो जाएगा।
+69fa64270	⏳ शुरू हो रहा है…
+48395174c	अप्रत्याशित त्रुटि
 982a0150c	शुरू नहीं हो सका: ⟨0⟩
 447501409	⚠️ शुरू नहीं हो सका: ⟨0⟩
 64fbe849e	⚠️ आपका क्लोन बॉट शुरू नहीं हो सका: ⟨0⟩
@@ -37055,15 +37112,15 @@ be085c333	📢 <b>Pengumuman</b>
 1e622cf6b	<code>/broadcast -users "pesan"</code> — orang yang memakai bot secara pribadi
 25a35b0aa	<code>/broadcast -users -channels "pesan"</code> — orang + saluran (bisa digabung)
 0b87fef23	<code>/broadcast all "pesan"</code> — semuanya
-bc83a4f15	Opsi: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (7 hari terakhir; <code>-active 30</code>) · <code>-test</code> (hanya kamu) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Opsi: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (7 hari terakhir; <code>-aktif 30</code>) · <code>-test</code> (hanya untukmu) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (teruskan pesan yang dibalas; emoji premium tetap)
 1aca894ba	🎯 Di pratinjau kamu bisa memilih grup/saluran tertentu.
 9fa263da2	🗳 Polling: <code>/broadcast -poll -users "Pertanyaan?
 735ec279d	Opsi 1
 98805337f	Opsi 2"</code> — semua suara dikumpulkan dalam satu polling
 aaa59ea0d	💾 Templat: <code>/broadcast -save nama "pesan"</code> → <code>/broadcast -users #nama</code> · /templates
-a3caa1df0	💡 Jika kamu membalas sebuah pesan (gambar, video, dengan tombol atau emoji premium) dengan <code>/broadcast -users</code>, pesan itu dikirim apa adanya. Kamu juga bisa menulis baris tombol di teks: <code>Saluran - https://t.me/channel</code> (klik dihitung)
+737b04133	💡 Jika kamu membalas sebuah pesan (foto, video, dengan tombol) dan mengetik <code>/duyuru -kisiler</code>, pesan itu dikirim apa adanya. Kamu juga bisa menulis baris tombol di teks: <code>Kanal - https://t.me/channel</code> (klik dihitung)
 fb071e726	/broadcasts — riwayat, klik, hasil polling · /stopbroadcast — hentikan pengiriman
-344eb221b	⚠️ Emoji premium diubah Telegram menjadi emoji biasa (bot tidak bisa mengirim emoji premium dengan mengetik). Solusi: tulis pesannya sendiri, lalu balas dengan /broadcast — pesan yang disalin tetap mempertahankannya.
+ae346b50b	⚠️ Emoji premium berubah menjadi emoji biasa: pada pesan yang dikirim bot (termasuk salinan) Telegram hanya menampilkan emoji premium jika bot punya username tambahan yang dibeli di Fragment. Agar tetap, balas pesan itu dan ketik /duyuru -ilet (pesan diteruskan dan bertanda "Diteruskan").
 f87763b78	👆 <b>Pratinjau pengumuman #⟨0⟩</b>
 3790c85e6	🎯 Target: ⟨0⟩
 d46292455	🔥 Hanya yang aktif dalam ⟨0⟩ hari terakhir
@@ -37074,6 +37131,7 @@ aaca2bf64	⏰ Dikirim pada: ⟨0⟩
 4046d6be5	📌 Akan disematkan di grup dan saluran
 c3eded236	🔕 Senyap
 cffb2a880	👆 Klik tombol akan dihitung
+716ef3839	↪️ Pesan akan diteruskan (bertanda "Diteruskan", emoji premium tetap)
 251fac5c6	🗳 Polling akan diteruskan; suara dikumpulkan di polling ini
 ba70fe09b	⏰ Jadwalkan
 8241e1495	✅ Kirim
@@ -37097,6 +37155,7 @@ c3b81b13d	Tulis polling seperti ini:
 27ced0bf8	Opsi 2"
 9de509dc5	Gagal membuat polling: ⟨0⟩
 e8c8a3987	🧪 Polling uji dikirim hanya kepadamu.
+f25d31e66	Untuk -ilet, balas pesan yang akan diteruskan dan ketik: /duyuru -ilet -kisiler
 f6c39b561	Gagal mengirim uji: ⟨0⟩
 3ccbd9c93	🧪 Pengumuman uji dikirim hanya kepadamu.
 305ee0f9a	(pribadi)
@@ -37115,6 +37174,7 @@ e15ad036b	Dibatalkan
 a96302489	Sedang tidak dikirim.
 7afa989da	📢 Belum ada pengumuman.
 b0b0b34ae	📢 <b>Pengumuman terbaru</b>
+b6eaec96e	↪️ pesan diteruskan
 a2148c2a7	🗳 polling
 771c7f3fb	👆 ⟨0⟩ klik⟨1⟩
 8139aea8f	(⟨0⟩ orang)
@@ -37803,7 +37863,7 @@ dd3608634	Warna: di akhir baris <code>#green</code> <code>#red</code> <code>#blu
 ff0fe91d4	Aturan
 86eca05aa	✏️ <b>Pesan ⟨0⟩</b>
 0d20c41d6	Penggunaan: <code>/⟨0⟩ teks</code> atau balas pesan/media: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Emoji premium dipertahankan: pesan disalin persis. Jangan hapus pesan sumbernya (jika dihapus, dikirim dengan emoji biasa).
+f72f38f85	💎 Pesan disalin persis, jangan hapus pesan sumbernya. Emoji premium hanya tampil jika bot punya username tambahan dari Fragment; jika tidak, Telegram mengubahnya menjadi emoji biasa.
 d54d1a799	✅ Pesan ⟨0⟩ disimpan (⟨1⟩).⟨2⟩
 32bc1141c	Pratinjau:
 a4fd88326	✏️ Pesan ⟨0⟩ diperbarui | ⟨1⟩
@@ -38379,6 +38439,8 @@ d3fb29907	🗑 Hapus klon
 a51f7d30f	Permintaan ini sudah ditangani.
 c862658b2	Permintaan dari versi lama; pengguna harus mengirim token dengan /clone.
 a102e834e	🤖 Sistem klon telah diperbarui: ketik /clone dan kirim token botmu; botmu mulai setelah pemilik bot menyetujui.
+69fa64270	⏳ Memulai…
+48395174c	Kesalahan tak terduga
 982a0150c	Gagal menjalankan: ⟨0⟩
 447501409	⚠️ Gagal menjalankan: ⟨0⟩
 64fbe849e	⚠️ Bot klonmu tidak bisa dijalankan: ⟨0⟩
@@ -39169,15 +39231,15 @@ be085c333	📢 <b>Annuncio</b>
 1e622cf6b	<code>/broadcast -users "messaggio"</code> — persone che usano il bot in privato
 25a35b0aa	<code>/broadcast -users -channels "messaggio"</code> — persone + canali (combinabili)
 0b87fef23	<code>/broadcast all "messaggio"</code> — tutti
-bc83a4f15	Opzioni: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (ultimi 7 giorni; <code>-active 30</code>) · <code>-test</code> (solo tu) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Opzioni: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (ultimi 7 giorni; <code>-aktif 30</code>) · <code>-test</code> (solo a te) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (inoltra il messaggio a cui rispondi; emoji premium mantenute)
 1aca894ba	🎯 Nell’anteprima puoi scegliere gruppi/canali specifici.
 9fa263da2	🗳 Sondaggio: <code>/broadcast -poll -users "Domanda?
 735ec279d	Opzione 1
 98805337f	Opzione 2"</code> — tutti i voti vengono raccolti in un unico sondaggio
 aaa59ea0d	💾 Modello: <code>/broadcast -save nome "messaggio"</code> → <code>/broadcast -users #nome</code> · /templates
-a3caa1df0	💡 Se rispondi a un messaggio (immagine, video, con pulsanti o emoji premium) con <code>/broadcast -users</code>, quel messaggio viene inviato così com’è. Puoi anche scrivere righe di pulsanti nel testo: <code>Canale - https://t.me/channel</code> (i clic vengono contati)
+737b04133	💡 Se rispondi a un messaggio (foto, video, con pulsanti) e scrivi <code>/duyuru -kisiler</code>, quel messaggio viene inviato così com’è. Nel testo puoi anche scrivere righe di pulsanti: <code>Canale - https://t.me/channel</code> (i clic vengono contati)
 fb071e726	/broadcasts — cronologia, clic, risultati dei sondaggi · /stopbroadcast — interrompi l’invio
-344eb221b	⚠️ Telegram ha convertito le emoji premium in emoji normali (i bot non possono inviare emoji premium digitandole). Soluzione: scrivi tu il messaggio e rispondigli con /broadcast — il messaggio copiato le mantiene.
+ae346b50b	⚠️ Le emoji premium diventano emoji normali: nei messaggi inviati da un bot (copie comprese) Telegram mostra le emoji premium solo se il bot ha un username aggiuntivo acquistato su Fragment. Per mantenerle, rispondi al messaggio e scrivi /duyuru -ilet (il messaggio viene inoltrato e mostra "Inoltrato").
 f87763b78	👆 <b>Anteprima dell’annuncio #⟨0⟩</b>
 3790c85e6	🎯 Destinatari: ⟨0⟩
 d46292455	🔥 Solo chi è stato attivo negli ultimi ⟨0⟩ giorni
@@ -39188,6 +39250,7 @@ aaca2bf64	⏰ Invio alle: ⟨0⟩
 4046d6be5	📌 Verrà fissato in gruppi e canali
 c3eded236	🔕 Silenzioso
 cffb2a880	👆 I clic sui pulsanti verranno contati
+716ef3839	↪️ Il messaggio verrà inoltrato (mostra "Inoltrato", emoji premium mantenute)
 251fac5c6	🗳 Il sondaggio verrà inoltrato; i voti vengono raccolti in questo sondaggio
 ba70fe09b	⏰ Programma
 8241e1495	✅ Invia
@@ -39211,6 +39274,7 @@ c3b81b13d	Scrivi un sondaggio così:
 27ced0bf8	Opzione 2"
 9de509dc5	Impossibile creare il sondaggio: ⟨0⟩
 e8c8a3987	🧪 Il sondaggio di prova è stato inviato solo a te.
+f25d31e66	Per -ilet rispondi al messaggio da inoltrare e scrivi: /duyuru -ilet -kisiler
 f6c39b561	Impossibile inviare la prova: ⟨0⟩
 3ccbd9c93	🧪 L’annuncio di prova è stato inviato solo a te.
 305ee0f9a	(in privato)
@@ -39229,6 +39293,7 @@ e15ad036b	Annullato
 a96302489	Al momento non c’è nessun invio.
 7afa989da	📢 Ancora nessun annuncio.
 b0b0b34ae	📢 <b>Annunci recenti</b>
+b6eaec96e	↪️ messaggio inoltrato
 a2148c2a7	🗳 sondaggio
 771c7f3fb	👆 ⟨0⟩ clic⟨1⟩
 8139aea8f	(⟨0⟩ persone)
@@ -39918,7 +39983,7 @@ dd3608634	Colore: a fine riga <code>#green</code> <code>#red</code> <code>#blue<
 ff0fe91d4	Regole
 86eca05aa	✏️ <b>Messaggio: ⟨0⟩</b>
 0d20c41d6	Uso: <code>/⟨0⟩ testo</code> oppure rispondi a un messaggio/media: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Le emoji premium vengono mantenute: il messaggio viene copiato esattamente. Non eliminare il messaggio originale (se viene eliminato, viene inviato con emoji normali).
+f72f38f85	💎 Il messaggio viene copiato esattamente, non eliminare il messaggio originale. Le emoji premium si vedono solo se il bot ha un username aggiuntivo di Fragment; altrimenti Telegram le trasforma in emoji normali.
 d54d1a799	✅ Messaggio "⟨0⟩" salvato (⟨1⟩).⟨2⟩
 32bc1141c	Anteprima:
 a4fd88326	✏️ Messaggio "⟨0⟩" aggiornato | ⟨1⟩
@@ -40496,6 +40561,8 @@ d3fb29907	🗑 Elimina clone
 a51f7d30f	Questa richiesta è già stata gestita.
 c862658b2	Una richiesta di una vecchia versione; l’utente deve inviare un token con /clone.
 a102e834e	🤖 Il sistema dei cloni è stato rinnovato: scrivi /clone e invia il token del tuo bot; il bot parte quando il proprietario del bot approva.
+69fa64270	⏳ Avvio in corso…
+48395174c	Errore imprevisto
 982a0150c	Impossibile avviare: ⟨0⟩
 447501409	⚠️ Impossibile avviare: ⟨0⟩
 64fbe849e	⚠️ Non è stato possibile avviare il tuo bot clone: ⟨0⟩
@@ -41291,15 +41358,15 @@ be085c333	📢 <b>Хабарландыру</b>
 1e622cf6b	<code>/broadcast -users "хабар"</code> — ботты жеке пайдаланатын адамдар
 25a35b0aa	<code>/broadcast -users -channels "хабар"</code> — адамдар + арналар (біріктіруге болады)
 0b87fef23	<code>/broadcast all "хабар"</code> — барлығына
-bc83a4f15	Параметрлер: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (соңғы 7 күн; <code>-active 30</code>) · <code>-test</code> (тек сізге) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Параметрлер: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (соңғы 7 күн; <code>-aktif 30</code>) · <code>-test</code> (тек саған) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (жауап берген хабарды қайта жіберу; премиум эмодзи сақталады)
 1aca894ba	🎯 Алдын ала қарауда нақты топтар/арналарды таңдай аласыз.
 9fa263da2	🗳 Сауалнама: <code>/broadcast -poll -users "Сұрақ?
 735ec279d	1-нұсқа
 98805337f	2-нұсқа"</code> — барлық дауыс бір сауалнамаға жиналады
 aaa59ea0d	💾 Үлгі: <code>/broadcast -save атауы "хабар"</code> → <code>/broadcast -users #атауы</code> · /templates
-a3caa1df0	💡 Хабарға (сурет, видео, түймелі немесе премиум эмодзи бар) <code>/broadcast -users</code> деп жауап берсеңіз, сол хабар өзгеріссіз жіберіледі. Мәтінге түйме жолдарын да жазуға болады: <code>Арна - https://t.me/channel</code> (басулар саналады)
+737b04133	💡 Бір хабарға (сурет, видео, түймелі) жауап беріп <code>/duyuru -kisiler</code> жазсаң, ол хабар сол күйінде жіберіледі. Мәтінге түйме жолын да жазуға болады: <code>Арна - https://t.me/channel</code> (басулар саналады)
 fb071e726	/broadcasts — тарих, басулар, сауалнама нәтижелері · /stopbroadcast — жіберуді тоқтату
-344eb221b	⚠️ Telegram премиум эмодзилерді қарапайым эмодзиге айналдырды (боттар премиум эмодзиді жазып жібере алмайды). Шешімі: хабарды өзіңіз жазып, оған /broadcast деп жауап беріңіз — көшірілген хабарда олар сақталады.
+ae346b50b	⚠️ Премиум эмодзилер қарапайым эмодзиге айналады: бот жіберген хабарда (көшірме де) Telegram премиум эмодзиді тек ботта Fragment-тен алынған қосымша username болса көрсетеді. Сақтау үшін хабарға жауап беріп /duyuru -ilet жаз (хабар қайта жіберіледі, үстінде «Қайта жіберілді» жазылады).
 f87763b78	👆 <b>#⟨0⟩ хабарландыруды алдын ала қарау</b>
 3790c85e6	🎯 Алушылар: ⟨0⟩
 d46292455	🔥 Тек соңғы ⟨0⟩ күнде белсенді болғандар
@@ -41310,6 +41377,7 @@ aaca2bf64	⏰ Жіберу уақыты: ⟨0⟩
 4046d6be5	📌 Топтар мен арналарда бекітіледі
 c3eded236	🔕 Дыбыссыз
 cffb2a880	👆 Түйме басулары саналады
+716ef3839	↪️ Хабар қайта жіберіледі (үстінде «Қайта жіберілді» жазылады, премиум эмодзилер сақталады)
 251fac5c6	🗳 Сауалнама қайта жіберіледі; дауыстар осы сауалнамаға жиналады
 ba70fe09b	⏰ Жоспарлау
 8241e1495	✅ Жіберу
@@ -41333,6 +41401,7 @@ c3b81b13d	Сауалнаманы былай жазыңыз:
 27ced0bf8	2-нұсқа"
 9de509dc5	Сауалнама жасалмады: ⟨0⟩
 e8c8a3987	🧪 Сынақ сауалнамасы тек сізге жіберілді.
+f25d31e66	-ilet үшін қайта жіберілетін хабарға жауап беріп жаз: /duyuru -ilet -kisiler
 f6c39b561	Сынақты жіберу мүмкін болмады: ⟨0⟩
 3ccbd9c93	🧪 Сынақ хабарландыруы тек сізге жіберілді.
 305ee0f9a	(жеке)
@@ -41351,6 +41420,7 @@ e15ad036b	Бас тартылды
 a96302489	Қазір ештеңе жіберілмейді.
 7afa989da	📢 Әзірге хабарландыру жоқ.
 b0b0b34ae	📢 <b>Соңғы хабарландырулар</b>
+b6eaec96e	↪️ қайта жіберілген хабар
 a2148c2a7	🗳 сауалнама
 771c7f3fb	👆 ⟨0⟩ басу⟨1⟩
 8139aea8f	(⟨0⟩ адам)
@@ -42044,7 +42114,7 @@ dd3608634	Түс: жолдың соңында <code>#green</code> <code>#red</co
 ff0fe91d4	Ережелер
 86eca05aa	✏️ <b>Хабар: ⟨0⟩</b>
 0d20c41d6	Қолданылуы: <code>/⟨0⟩ мәтін</code> немесе хабарға/медиаға жауап беріңіз: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Премиум эмодзилер сақталады: хабар дәл көшіріледі. Бастапқы хабарды жоймаңыз (жойылса, қарапайым эмодзилермен жіберіледі).
+f72f38f85	💎 Хабар дәл көшіріледі, бастапқы хабарды жойма. Премиум эмодзилер тек ботта Fragment-тен алынған қосымша username болса көрінеді; әйтпесе Telegram оларды қарапайым эмодзиге айналдырады.
 d54d1a799	✅ «⟨0⟩» хабары сақталды (⟨1⟩).⟨2⟩
 32bc1141c	Алдын ала қарау:
 a4fd88326	✏️ «⟨0⟩» хабары жаңартылды | ⟨1⟩
@@ -42624,6 +42694,8 @@ d3fb29907	🗑 Клонды жою
 a51f7d30f	Бұл өтінім бұрын қаралған.
 c862658b2	Ескі нұсқадағы өтінім; пайдаланушы /clone арқылы токен жіберуі керек.
 a102e834e	🤖 Клон жүйесі жаңартылды: /clone жазып, бот токеніңізді жіберіңіз; бот иесі мақұлдағанда ботыңыз іске қосылады.
+69fa64270	⏳ Іске қосылуда…
+48395174c	Күтпеген қате
 982a0150c	Іске қосу мүмкін болмады: ⟨0⟩
 447501409	⚠️ Іске қосу мүмкін болмады: ⟨0⟩
 64fbe849e	⚠️ Клон ботыңызды іске қосу мүмкін болмады: ⟨0⟩
@@ -43415,15 +43487,15 @@ be085c333	📢 <b>Anúncio</b>
 1e622cf6b	<code>/broadcast -users "mensagem"</code> — quem usa o bot no privado
 25a35b0aa	<code>/broadcast -users -channels "mensagem"</code> — pessoas + canais (podem ser combinados)
 0b87fef23	<code>/broadcast all "mensagem"</code> — todos
-bc83a4f15	Opções: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (últimos 7 dias; <code>-active 30</code>) · <code>-test</code> (só para você) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Opções: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (últimos 7 dias; <code>-aktif 30</code>) · <code>-test</code> (só para você) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (encaminhar a mensagem respondida; emojis premium mantidos)
 1aca894ba	🎯 Na prévia você pode escolher grupos/canais específicos.
 9fa263da2	🗳 Enquete: <code>/broadcast -poll -users "Pergunta?
 735ec279d	Opção 1
 98805337f	Opção 2"</code> — todos os votos ficam em uma única enquete
 aaa59ea0d	💾 Modelo: <code>/broadcast -save nome "mensagem"</code> → <code>/broadcast -users #nome</code> · /templates
-a3caa1df0	💡 Se você responder a uma mensagem (imagem, vídeo, com botões ou emoji premium) com <code>/broadcast -users</code>, ela é enviada como está. Também dá para escrever linhas de botões no texto: <code>Canal - https://t.me/channel</code> (os cliques são contados)
+737b04133	💡 Se você responder a uma mensagem (foto, vídeo, com botões) e digitar <code>/duyuru -kisiler</code>, essa mensagem é enviada como está. Você também pode escrever linhas de botões no texto: <code>Canal - https://t.me/channel</code> (os cliques são contados)
 fb071e726	/broadcasts — histórico, cliques, resultados de enquetes · /stopbroadcast — parar o envio
-344eb221b	⚠️ O Telegram converteu os emojis premium em emojis normais (bots não conseguem enviar emojis premium digitando). Solução: escreva a mensagem você mesmo e responda a ela com /broadcast — a cópia os mantém.
+ae346b50b	⚠️ Os emojis premium viram emojis normais: em mensagens enviadas por um bot (inclusive cópias) o Telegram só mostra emoji premium se o bot tiver um nome de usuário adicional comprado no Fragment. Para mantê-los, responda à mensagem e digite /duyuru -ilet (a mensagem é encaminhada e mostra "Encaminhada").
 f87763b78	👆 <b>Prévia do anúncio #⟨0⟩</b>
 3790c85e6	🎯 Destinatários: ⟨0⟩
 d46292455	🔥 Só os ativos nos últimos ⟨0⟩ dias
@@ -43434,6 +43506,7 @@ aaca2bf64	⏰ Envio às: ⟨0⟩
 4046d6be5	📌 Será fixado em grupos e canais
 c3eded236	🔕 Silencioso
 cffb2a880	👆 Os cliques nos botões serão contados
+716ef3839	↪️ A mensagem será encaminhada (mostra "Encaminhada", emojis premium mantidos)
 251fac5c6	🗳 A enquete será encaminhada; os votos ficam nesta enquete
 ba70fe09b	⏰ Agendar
 8241e1495	✅ Enviar
@@ -43457,6 +43530,7 @@ c3b81b13d	Escreva a enquete assim:
 27ced0bf8	Opção 2"
 9de509dc5	Não foi possível criar a enquete: ⟨0⟩
 e8c8a3987	🧪 A enquete de teste foi enviada só para você.
+f25d31e66	Para -ilet, responda à mensagem a encaminhar e digite: /duyuru -ilet -kisiler
 f6c39b561	Não foi possível enviar o teste: ⟨0⟩
 3ccbd9c93	🧪 O anúncio de teste foi enviado só para você.
 305ee0f9a	(no privado)
@@ -43475,6 +43549,7 @@ e15ad036b	Cancelado
 a96302489	Não está sendo enviado agora.
 7afa989da	📢 Ainda não há anúncios.
 b0b0b34ae	📢 <b>Anúncios recentes</b>
+b6eaec96e	↪️ mensagem encaminhada
 a2148c2a7	🗳 enquete
 771c7f3fb	👆 ⟨0⟩ cliques⟨1⟩
 8139aea8f	(⟨0⟩ pessoas)
@@ -44166,7 +44241,7 @@ dd3608634	Cor: no fim da linha <code>#green</code> <code>#red</code> <code>#blue
 ff0fe91d4	Regras
 86eca05aa	✏️ <b>Mensagem de ⟨0⟩</b>
 0d20c41d6	Uso: <code>/⟨0⟩ texto</code> ou responda a uma mensagem/mídia: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Os emojis premium são mantidos: a mensagem é copiada exatamente. Não apague a mensagem original (se for apagada, é enviada com emojis normais).
+f72f38f85	💎 A mensagem é copiada exatamente, não apague a mensagem original. Emojis premium só aparecem se o bot tiver um nome de usuário adicional do Fragment; caso contrário, o Telegram os transforma em emojis normais.
 d54d1a799	✅ Mensagem de ⟨0⟩ salva (⟨1⟩).⟨2⟩
 32bc1141c	Prévia:
 a4fd88326	✏️ Mensagem de ⟨0⟩ atualizada | ⟨1⟩
@@ -44743,6 +44818,8 @@ d3fb29907	🗑 Apagar clone
 a51f7d30f	Este pedido já foi tratado.
 c862658b2	Pedido de uma versão antiga; o usuário precisa enviar um token com /clone.
 a102e834e	🤖 O sistema de clones foi renovado: digite /clone e envie o token do seu bot; ele começa quando o dono do bot aprovar.
+69fa64270	⏳ Iniciando…
+48395174c	Erro inesperado
 982a0150c	Não foi possível iniciar: ⟨0⟩
 447501409	⚠️ Não foi possível iniciar: ⟨0⟩
 64fbe849e	⚠️ Não foi possível iniciar seu bot clone: ⟨0⟩
@@ -45169,7 +45246,6 @@ cc103ac23	Группа не заблокирована.
 bce49f901	Не удалось получить профиль!
 9131de73e	Пользователь не найден!
 45e118d05	Обычный
-0aaf03287	Забанен
 bf84ddcb3	Мут (осталось ⟨0⟩ ч ⟨1⟩ мин)
 08c52b8c6	Мут (осталось ⟨0⟩ мин)
 c5a6c0399	👤 <b>Профиль пользователя</b>
@@ -45177,7 +45253,6 @@ c5a6c0399	👤 <b>Профиль пользователя</b>
 0fd8daf31	ID: <code>⟨0⟩</code>
 16d1a3d6f	Статус: ⟨0⟩
 c90e09fec	Предупреждения: ⟨0⟩/⟨1⟩
-c6a441715	(Последнее: ⟨0⟩)
 f7b55484b	Последние действия:
 245846708	система
 1ebb0f458	Нет действий модерации.
@@ -45538,15 +45613,15 @@ be085c333	📢 <b>Рассылка</b>
 1e622cf6b	<code>/broadcast -users "сообщение"</code> — те, кто пользуется ботом в личке
 25a35b0aa	<code>/broadcast -users -channels "сообщение"</code> — люди + каналы (можно сочетать)
 0b87fef23	<code>/broadcast all "сообщение"</code> — все
-bc83a4f15	Опции: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (последние 7 дней; <code>-active 30</code>) · <code>-test</code> (только вам) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Опции: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (последние 7 дней; <code>-aktif 30</code>) · <code>-test</code> (только тебе) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (переслать сообщение, на которое ответил; премиум-эмодзи сохраняются)
 1aca894ba	🎯 В предпросмотре можно выбрать конкретные группы/каналы.
 9fa263da2	🗳 Опрос: <code>/broadcast -poll -users "Вопрос?
 735ec279d	Вариант 1
 98805337f	Вариант 2"</code> — все голоса собираются в одном опросе
 aaa59ea0d	💾 Шаблон: <code>/broadcast -save название "сообщение"</code> → <code>/broadcast -users #название</code> · /templates
-a3caa1df0	💡 Если ответить на сообщение (картинка, видео, с кнопками или премиум-эмодзи) командой <code>/broadcast -users</code>, оно будет отправлено как есть. В тексте можно писать и строки кнопок: <code>Канал - https://t.me/channel</code> (клики считаются)
+737b04133	💡 Если ответить на сообщение (фото, видео, с кнопками) и написать <code>/duyuru -kisiler</code>, оно будет отправлено как есть. В тексте можно писать строки кнопок: <code>Канал - https://t.me/channel</code> (клики считаются)
 fb071e726	/broadcasts — история, клики, результаты опросов · /stopbroadcast — остановить отправку
-344eb221b	⚠️ Telegram превратил премиум-эмодзи в обычные (боты не могут отправлять премиум-эмодзи текстом). Решение: напишите сообщение сами и ответьте на него /broadcast — в копии они сохранятся.
+ae346b50b	⚠️ Премиум-эмодзи станут обычными: в сообщениях от бота (включая копии) Telegram показывает премиум-эмодзи, только если у бота есть дополнительный юзернейм, купленный на Fragment. Чтобы сохранить их, ответь на сообщение и напиши /duyuru -ilet (сообщение будет переслано с пометкой «Переслано»).
 f87763b78	👆 <b>Предпросмотр рассылки #⟨0⟩</b>
 3790c85e6	🎯 Получатели: ⟨0⟩
 d46292455	🔥 Только активные за последние ⟨0⟩ дн.
@@ -45557,6 +45632,7 @@ aaca2bf64	⏰ Время отправки: ⟨0⟩
 4046d6be5	📌 Будет закреплено в группах и каналах
 c3eded236	🔕 Без звука
 cffb2a880	👆 Клики по кнопкам будут считаться
+716ef3839	↪️ Сообщение будет переслано (с пометкой «Переслано», премиум-эмодзи сохраняются)
 251fac5c6	🗳 Опрос будет переслан; голоса собираются в этом опросе
 ba70fe09b	⏰ Запланировать
 8241e1495	✅ Отправить
@@ -45580,6 +45656,7 @@ c3b81b13d	Напишите опрос так:
 27ced0bf8	Вариант 2"
 9de509dc5	Не удалось создать опрос: ⟨0⟩
 e8c8a3987	🧪 Тестовый опрос отправлен только вам.
+f25d31e66	Для -ilet ответь на сообщение, которое нужно переслать, и напиши: /duyuru -ilet -kisiler
 f6c39b561	Не удалось отправить тест: ⟨0⟩
 3ccbd9c93	🧪 Тестовая рассылка отправлена только вам.
 305ee0f9a	(в личке)
@@ -45598,6 +45675,7 @@ e15ad036b	Отменено
 a96302489	Сейчас не отправляется.
 7afa989da	📢 Рассылок пока нет.
 b0b0b34ae	📢 <b>Последние рассылки</b>
+b6eaec96e	↪️ пересланное сообщение
 a2148c2a7	🗳 опрос
 771c7f3fb	👆 Кликов: ⟨0⟩⟨1⟩
 8139aea8f	(⟨0⟩ человек)
@@ -45773,10 +45851,8 @@ ae2b984ac	💬 Количество сообщений:
 3e08d6dfd	┌📆 За день: ⟨0⟩
 037b7c646	├📆 За неделю: ⟨0⟩
 9f577c2b5	├📆 За месяц: ⟨0⟩
-cf3b5cf8f	└Всего: ⟨0⟩
 e1ed2556f	📊 Подробности активности:
 0327b318b	┌🃏 Стикеры: ⟨0⟩
-5ca7902a2	├🀄️ GIF: ⟨0⟩
 b667cf812	├🙃 Эмодзи: ⟨0⟩
 68fa09ce3	├📷 Фото: ⟨0⟩
 886e342ec	├🎥 Видео: ⟨0⟩
@@ -45966,7 +46042,6 @@ a37fbde9a	/get <название> — Получить заметку
 5ff3c9cb2	🎰 Развлечения
 b0d9549b8	/coin — Подбросить монету
 3ab74dacf	/dice — Бросить кубик
-304dfe62b	ℹ️ Прочее
 b4031dc89	/help — Это меню
 6467c9dbe	/id — Показать ID
 0af5bde71	/appeal <пояснение> — Апелляция на бан (боту в личку)
@@ -46291,7 +46366,7 @@ dd3608634	Цвет: в конце строки <code>#green</code> <code>#red</c
 ff0fe91d4	Правила
 86eca05aa	✏️ <b>Сообщение: ⟨0⟩</b>
 0d20c41d6	Использование: <code>/⟨0⟩ текст</code> или ответ на сообщение/медиа: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Премиум-эмодзи сохраняются: сообщение копируется точно. Не удаляйте исходное сообщение (если оно удалено, отправится с обычными эмодзи).
+f72f38f85	💎 Сообщение копируется в точности, не удаляй исходное. Премиум-эмодзи видны, только если у бота есть дополнительный юзернейм с Fragment; иначе Telegram заменяет их обычными.
 d54d1a799	✅ Сообщение «⟨0⟩» сохранено (⟨1⟩).⟨2⟩
 32bc1141c	Предпросмотр:
 a4fd88326	✏️ Сообщение «⟨0⟩» обновлено | ⟨1⟩
@@ -46403,10 +46478,7 @@ e5b1aac1e	Статус: <b>⟨0⟩</b>
 c9606c43c	🏷 <b>Настройки упоминаний</b> — ⟨0⟩
 203ce8b22	<code>/tag сообщение</code> упоминает участников порциями. <code>/stoptag</code> останавливает, участники могут выйти из списка командой <code>/notag</code>.
 b86bf2507	В сообщении: <b>⟨0⟩ человек</b> · Стиль: <b>⟨1⟩</b> · Кого: <b>⟨2⟩</b>
-5090a9e78	Эмодзи
-d2abd1ed8	Имя
 1da63df5e	активных за последние 7 дней
-4b30ca4e3	все
 4e45e032a	Человек
 4dd25e398	⟨0⟩По имени
 c39394400	⟨0⟩Эмодзи
@@ -46424,7 +46496,6 @@ a2c2bec19	📋 <b>Досье</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
 0786218b9	🏷 Старые имена: ⟨0⟩
 14c5bccb9	🚩 Общий чёрный список: ⟨0⟩
 38fd7e621	<b>забанен в ⟨0⟩ группах</b>
-15ab6d34d	чисто
 04a2454bb	🌐 CAS: ⟨0⟩
 66b71c0f8	⚠️ в списке
 5a25bd323	📊 За последние ⟨0⟩ дн.: ⚠️ ⟨1⟩ предупреждений · 🔇 ⟨2⟩ мутов · 👢 ⟨3⟩ киков · 🚫 ⟨4⟩ банов
@@ -46702,7 +46773,6 @@ c5de3cdae	⚠️ участник (не админ)
 c86df7e48	📅 Зарегистрирована: ⟨0⟩⟨1⟩
 079fe4cc3	💬 Последнее сообщение: ⟨0⟩ · ⟨1⟩ сообщений за 7 дней
 33a131ec1	🛡 Активные защиты: ⟨0⟩
-c215ada82	· Добавил: ⟨0⟩
 cac2ce338	никогда
 d4f5955f6	🚪 Удалить бота
 84297554a	🗑 Удалить запись
@@ -46871,6 +46941,8 @@ d3fb29907	🗑 Удалить клон
 a51f7d30f	Эта заявка уже обработана.
 c862658b2	Заявка из старой версии; пользователь должен отправить токен через /clone.
 a102e834e	🤖 Система клонов обновлена: напишите /clone и отправьте токен своего бота; бот запустится после одобрения владельцем.
+69fa64270	⏳ Запуск…
+48395174c	Непредвиденная ошибка
 982a0150c	Не удалось запустить: ⟨0⟩
 447501409	⚠️ Не удалось запустить: ⟨0⟩
 64fbe849e	⚠️ Ваш клон бота не удалось запустить: ⟨0⟩
@@ -47666,15 +47738,15 @@ be085c333	📢 <b>Розсилка</b>
 1e622cf6b	<code>/broadcast -users "повідомлення"</code> — люди, які користуються ботом в особистих
 25a35b0aa	<code>/broadcast -users -channels "повідомлення"</code> — люди + канали (можна поєднувати)
 0b87fef23	<code>/broadcast all "повідомлення"</code> — усім
-bc83a4f15	Параметри: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (останні 7 днів; <code>-active 30</code>) · <code>-test</code> (лише вам) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Опції: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (останні 7 днів; <code>-aktif 30</code>) · <code>-test</code> (лише тобі) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (переслати повідомлення, на яке відповів; преміум-емодзі зберігаються)
 1aca894ba	🎯 У попередньому перегляді можна вибрати конкретні групи/канали.
 9fa263da2	🗳 Опитування: <code>/broadcast -poll -users "Питання?
 735ec279d	Варіант 1
 98805337f	Варіант 2"</code> — усі голоси збираються в одному опитуванні
 aaa59ea0d	💾 Шаблон: <code>/broadcast -save назва "повідомлення"</code> → <code>/broadcast -users #назва</code> · /templates
-a3caa1df0	💡 Якщо відповісти на повідомлення (зображення, відео, з кнопками або преміум-емодзі) командою <code>/broadcast -users</code>, воно надсилається як є. У тексті також можна писати рядки кнопок: <code>Канал - https://t.me/channel</code> (натискання рахуються)
+737b04133	💡 Якщо відповісти на повідомлення (фото, відео, з кнопками) і написати <code>/duyuru -kisiler</code>, воно буде надіслане як є. У тексті можна писати рядки кнопок: <code>Канал - https://t.me/channel</code> (кліки рахуються)
 fb071e726	/broadcasts — історія, натискання, результати опитувань · /stopbroadcast — зупинити надсилання
-344eb221b	⚠️ Telegram перетворив преміум-емодзі на звичайні (боти не можуть надсилати преміум-емодзі, просто написавши їх). Рішення: напишіть повідомлення самі та дайте на нього відповідь /broadcast — у скопійованому повідомленні вони збережуться.
+ae346b50b	⚠️ Преміум-емодзі стануть звичайними: у повідомленнях від бота (зокрема копіях) Telegram показує преміум-емодзі, лише якщо бот має додатковий юзернейм, куплений на Fragment. Щоб зберегти їх, відповідай на повідомлення і напиши /duyuru -ilet (повідомлення буде переслано з позначкою «Переслано»).
 f87763b78	👆 <b>Попередній перегляд розсилки #⟨0⟩</b>
 3790c85e6	🎯 Отримувачі: ⟨0⟩
 d46292455	🔥 Лише активні за останні ⟨0⟩ днів
@@ -47685,6 +47757,7 @@ aaca2bf64	⏰ Час надсилання: ⟨0⟩
 4046d6be5	📌 Буде закріплено в групах і каналах
 c3eded236	🔕 Без звуку
 cffb2a880	👆 Натискання кнопок рахуватимуться
+716ef3839	↪️ Повідомлення буде переслано (з позначкою «Переслано», преміум-емодзі зберігаються)
 251fac5c6	🗳 Опитування буде переслано; голоси збираються в цьому опитуванні
 ba70fe09b	⏰ Запланувати
 8241e1495	✅ Надіслати
@@ -47708,6 +47781,7 @@ c3b81b13d	Напишіть опитування так:
 27ced0bf8	Варіант 2"
 9de509dc5	Не вдалося створити опитування: ⟨0⟩
 e8c8a3987	🧪 Тестове опитування надіслано лише вам.
+f25d31e66	Для -ilet відповідай на повідомлення, яке треба переслати, і напиши: /duyuru -ilet -kisiler
 f6c39b561	Не вдалося надіслати тест: ⟨0⟩
 3ccbd9c93	🧪 Тестову розсилку надіслано лише вам.
 305ee0f9a	(в особисті)
@@ -47726,6 +47800,7 @@ e15ad036b	Скасовано
 a96302489	Зараз нічого не надсилається.
 7afa989da	📢 Розсилок поки немає.
 b0b0b34ae	📢 <b>Останні розсилки</b>
+b6eaec96e	↪️ переслане повідомлення
 a2148c2a7	🗳 опитування
 771c7f3fb	👆 Натискань: ⟨0⟩⟨1⟩
 8139aea8f	(людей: ⟨0⟩)
@@ -48419,7 +48494,7 @@ dd3608634	Колір: у кінці рядка <code>#green</code> <code>#red</c
 ff0fe91d4	Правила
 86eca05aa	✏️ <b>Повідомлення: ⟨0⟩</b>
 0d20c41d6	Використання: <code>/⟨0⟩ текст</code> або відповідь на повідомлення/медіа: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Преміум-емодзі зберігаються: повідомлення копіюється точно. Не видаляйте вихідне повідомлення (якщо його видалити, буде надіслано зі звичайними емодзі).
+f72f38f85	💎 Повідомлення копіюється точно, не видаляй вихідне. Преміум-емодзі видно, лише якщо бот має додатковий юзернейм із Fragment; інакше Telegram замінює їх звичайними.
 d54d1a799	✅ Повідомлення «⟨0⟩» збережено (⟨1⟩).⟨2⟩
 32bc1141c	Попередній перегляд:
 a4fd88326	✏️ Повідомлення «⟨0⟩» оновлено | ⟨1⟩
@@ -48999,6 +49074,8 @@ d3fb29907	🗑 Видалити клон
 a51f7d30f	Цю заявку вже оброблено.
 c862658b2	Заявка зі старої версії; користувач має надіслати токен через /clone.
 a102e834e	🤖 Систему клонів оновлено: напишіть /clone і надішліть токен свого бота; бот запуститься після схвалення власника бота.
+69fa64270	⏳ Запуск…
+48395174c	Неочікувана помилка
 982a0150c	Не вдалося запустити: ⟨0⟩
 447501409	⚠️ Не вдалося запустити: ⟨0⟩
 64fbe849e	⚠️ Не вдалося запустити вашого бота-клона: ⟨0⟩
@@ -49788,15 +49865,15 @@ be085c333	📢 <b>E’lon</b>
 1e622cf6b	<code>/broadcast -users "xabar"</code> — botdan shaxsiy foydalanadiganlar
 25a35b0aa	<code>/broadcast -users -channels "xabar"</code> — odamlar + kanallar (birlashtirish mumkin)
 0b87fef23	<code>/broadcast all "xabar"</code> — hammaga
-bc83a4f15	Parametrlar: <code>-groups</code> <code>-channels</code> <code>-users</code> · <code>-active</code> (oxirgi 7 kun; <code>-active 30</code>) · <code>-test</code> (faqat sizga) · <code>-pin</code> · <code>-silent</code> · <code>-time 20:00</code>
+3de9e4464	Parametrlar: <code>-gruplar</code> <code>-kanallar</code> <code>-kisiler</code> · <code>-aktif</code> (oxirgi 7 kun; <code>-aktif 30</code>) · <code>-test</code> (faqat senga) · <code>-sabitle</code> · <code>-sessiz</code> · <code>-saat 20:00</code> · <code>-ilet</code> (javob bergan xabarni uzatish; premium emoji saqlanadi)
 1aca894ba	🎯 Oldindan ko‘rishda aniq guruh/kanallarni tanlashingiz mumkin.
 9fa263da2	🗳 So‘rovnoma: <code>/broadcast -poll -users "Savol?
 735ec279d	Variant 1
 98805337f	Variant 2"</code> — barcha ovozlar bitta so‘rovnomada yig‘iladi
 aaa59ea0d	💾 Shablon: <code>/broadcast -save nom "xabar"</code> → <code>/broadcast -users #nom</code> · /templates
-a3caa1df0	💡 Agar xabarga (rasm, video, tugmali yoki premium emojili) <code>/broadcast -users</code> bilan javob bersangiz, o‘sha xabar o‘zgarishsiz yuboriladi. Matnda tugma qatorlarini ham yozish mumkin: <code>Kanal - https://t.me/channel</code> (bosishlar sanaladi)
+737b04133	💡 Biror xabarga (rasm, video, tugmali) javob berib <code>/duyuru -kisiler</code> yozsang, o xabar boricha yuboriladi. Matnda tugma qatorini ham yozishing mumkin: <code>Kanal - https://t.me/channel</code> (bosishlar sanaladi)
 fb071e726	/broadcasts — tarix, bosishlar, so‘rovnoma natijalari · /stopbroadcast — yuborishni to‘xtatish
-344eb221b	⚠️ Telegram premium emojilarni oddiy emojiga aylantirdi (botlar premium emojini yozib yubora olmaydi). Yechim: xabarni o‘zingiz yozing va unga /broadcast bilan javob bering — nusxalangan xabarda saqlanadi.
+ae346b50b	⚠️ Premium emojilar oddiy emojiga aylanadi: bot yuborgan xabarda (nusxa ham) Telegram premium emojini faqat botda Fragment’dan olingan qo‘shimcha username bo‘lsa ko‘rsatadi. Saqlash uchun xabarga javob berib /duyuru -ilet yoz (xabar uzatiladi, ustida "Uzatildi" yoziladi).
 f87763b78	👆 <b>E’lon #⟨0⟩ oldindan ko‘rish</b>
 3790c85e6	🎯 Qabul qiluvchilar: ⟨0⟩
 d46292455	🔥 Faqat oxirgi ⟨0⟩ kunda faol bo‘lganlar
@@ -49807,6 +49884,7 @@ aaca2bf64	⏰ Yuborish vaqti: ⟨0⟩
 4046d6be5	📌 Guruh va kanallarda qadaladi
 c3eded236	🔕 Ovozsiz
 cffb2a880	👆 Tugma bosishlari sanaladi
+716ef3839	↪️ Xabar uzatiladi (ustida "Uzatildi" yoziladi, premium emojilar saqlanadi)
 251fac5c6	🗳 So‘rovnoma forward qilinadi; ovozlar shu so‘rovnomada yig‘iladi
 ba70fe09b	⏰ Rejalashtirish
 8241e1495	✅ Yuborish
@@ -49830,6 +49908,7 @@ c3b81b13d	So‘rovnomani shunday yozing:
 27ced0bf8	Variant 2"
 9de509dc5	So‘rovnoma yaratib bo‘lmadi: ⟨0⟩
 e8c8a3987	🧪 Sinov so‘rovnomasi faqat sizga yuborildi.
+f25d31e66	-ilet uchun uzatiladigan xabarga javob berib yoz: /duyuru -ilet -kisiler
 f6c39b561	Sinovni yuborib bo‘lmadi: ⟨0⟩
 3ccbd9c93	🧪 Sinov e’loni faqat sizga yuborildi.
 305ee0f9a	(shaxsiy)
@@ -49848,6 +49927,7 @@ e15ad036b	Bekor qilindi
 a96302489	Hozir yuborilmayapti.
 7afa989da	📢 Hali e’lonlar yo‘q.
 b0b0b34ae	📢 <b>So‘nggi e’lonlar</b>
+b6eaec96e	↪️ uzatilgan xabar
 a2148c2a7	🗳 so‘rovnoma
 771c7f3fb	👆 ⟨0⟩ bosish⟨1⟩
 8139aea8f	(⟨0⟩ kishi)
@@ -50533,7 +50613,7 @@ dd3608634	Rang: qator oxirida <code>#green</code> <code>#red</code> <code>#blue<
 ff0fe91d4	Qoidalar
 86eca05aa	✏️ <b>⟨0⟩ xabari</b>
 0d20c41d6	Foydalanish: <code>/⟨0⟩ matn</code> yoki xabar/mediaga javob bering: <code>/⟨1⟩</code>
-ee9b02bb7	💎 Premium emojilar saqlanadi: xabar aynan nusxalanadi. Manba xabarni o‘chirmang (o‘chirilsa, oddiy emojilar bilan yuboriladi).
+f72f38f85	💎 Xabar aynan nusxalanadi, manba xabarni o‘chirma. Premium emojilar faqat botda Fragment’dan olingan qo‘shimcha username bo‘lsa ko‘rinadi; aks holda Telegram ularni oddiy emojiga aylantiradi.
 d54d1a799	✅ ⟨0⟩ xabari saqlandi (⟨1⟩).⟨2⟩
 32bc1141c	Oldindan ko‘rish:
 a4fd88326	✏️ ⟨0⟩ xabari yangilandi | ⟨1⟩
@@ -51106,6 +51186,8 @@ d3fb29907	🗑 Klonni o‘chirish
 a51f7d30f	Bu so‘rov allaqachon ko‘rib chiqilgan.
 c862658b2	Eski versiyadagi so‘rov; foydalanuvchi /clone bilan token yuborishi kerak.
 a102e834e	🤖 Klon tizimi yangilandi: /clone yozing va bot tokeningizni yuboring; bot egasi tasdiqlagach botingiz ishga tushadi.
+69fa64270	⏳ Ishga tushirilmoqda…
+48395174c	Kutilmagan xato
 982a0150c	Ishga tushirib bo‘lmadi: ⟨0⟩
 447501409	⚠️ Ishga tushirib bo‘lmadi: ⟨0⟩
 64fbe849e	⚠️ Klon botingizni ishga tushirib bo‘lmadi: ⟨0⟩
