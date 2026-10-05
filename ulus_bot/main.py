@@ -4264,6 +4264,26 @@ async def kick(update: Update, context):
     except Exception as e:
         await update.message.reply_text(friendly_error(e))
 
+_MUTE_DUR_RE = re.compile(r'(\d{1,5})\s*(m|dk|h|sa|d|g)?', re.I)
+
+def _split_mute_args(args: list, has_reply: bool) -> tuple:
+    """/mute argümanları: süre kişiden önce ya da sonra yazılabilir (/mute 2h @kisi · /mute @kisi 2h).
+    Düz sayı saattir (24 → 24 saat). Dönüş: (saniye | None, kalan argümanlar)."""
+    def is_ref(a):  # açıkça kişi: @kullanıcıadı ya da uzun sayı (ID)
+        a = a.strip()
+        return a.startswith('@') or (a.isdigit() and len(a) > 5)
+    secs, rest = None, []
+    for i, a in enumerate(args):
+        m = _MUTE_DUR_RE.fullmatch(a.strip())
+        if secs is None and m:
+            # birimli süre (2h, 30m, 7d) her zaman süredir; düz sayı ancak yanıt ya da başka bir kişi varsa süredir
+            if m.group(2) or has_reply or any(is_ref(b) for j, b in enumerate(args) if j != i):
+                unit = (m.group(2) or 'h').lower()
+                secs = int(m.group(1)) * {'m': 60, 'dk': 60, 'h': 3600, 'sa': 3600, 'd': 86400, 'g': 86400}[unit]
+                continue
+        rest.append(a)
+    return (secs or None), rest
+
 async def mute(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
     if not chat_id or not get_channel_settings(chat_id):
@@ -4271,11 +4291,9 @@ async def mute(update: Update, context):
         return
     if not await require(update, chat_id, 'can_mute'):
         return
-    user_id, member = await resolve_user(
-        chat_id,
-        context.args[0] if context.args else None,
-        update.message.reply_to_message.from_user if update.message.reply_to_message else None
-    )
+    reply = update.message.reply_to_message
+    secs, rest = _split_mute_args(list(context.args or []), has_reply=reply is not None)
+    user_id, member = await resolve_user(chat_id, rest[0] if rest else None, reply.from_user if reply else None)
     if not member:
         await update.message.reply_text("Kullanıcı bulunamadı!")
         return
@@ -4283,42 +4301,17 @@ async def mute(update: Update, context):
         await update.message.reply_text(why)
         return
 
-    duration_str = None
-    hours = 24
-    duration_arg = None
-    if update.message.reply_to_message:
-        duration_arg = context.args[0] if context.args else None
-    else:
-        duration_arg = context.args[1] if len(context.args) > 1 else None
-
-    if duration_arg:
-        if duration_arg[:-1].isdigit() and duration_arg[-1] in ['m', 'h', 'd']:
-            val = int(duration_arg[:-1])
-            unit = duration_arg[-1]
-            if unit == 'm':
-                hours = val / 60
-                duration_str = f"{val} dakika"
-            elif unit == 'h':
-                hours = val
-                duration_str = f"{val} saat"
-            elif unit == 'd':
-                hours = val * 24
-                duration_str = f"{val} gün"
-        elif duration_arg.isdigit():
-            hours = int(duration_arg)
-            duration_str = f"{hours} saat"
-
-    if not duration_str:
-        duration_str = f"{hours} saat"
-    if hours * 3600 > ADMIN_MAX_MUTE and not has_permission(chat_id, update.effective_user.id, LVL_UST):
-        hours, duration_str = ADMIN_MAX_MUTE // 3600, "24 saat (Admin sınırı)"
+    # süre yazılmadıysa süresiz; Admin rütbesi en fazla 24 saat susturabilir
+    duration_str = human_duration(secs) if secs else "süresiz"
+    if (not secs or secs > ADMIN_MAX_MUTE) and not has_permission(chat_id, update.effective_user.id, LVL_UST):
+        secs, duration_str = ADMIN_MAX_MUTE, "24 saat (Admin sınırı)"
 
     try:
-        until_date = int(time.time() + hours * 3600)
+        until_date = int(time.time() + secs) if secs else 0
         await bot.restrict_chat_member(
             chat_id=chat_id, user_id=user_id,
             permissions=ChatPermissions(can_send_messages=False),
-            until_date=until_date
+            until_date=until_date or None
         )
         username = member.user.username or member.user.first_name
 
@@ -4648,7 +4641,9 @@ async def mutelist(update: Update, context):
     msg = "🔇 <b>Mute Listesi</b> (son 20):\n<blockquote expandable>"
     for row in rows:
         who = mention_html(row['user_id'], row['username'] or str(row['user_id']))
-        if row['until_date'] and row['until_date'] > now:
+        if not row['until_date']:
+            time_str = "süresiz"
+        elif row['until_date'] > now:
             remaining = int((row['until_date'] - now) / 60)
             time_str = f"{remaining} dk kaldı"
         else:
@@ -5031,6 +5026,8 @@ async def profil(update: Update, context):
     durum = "Normal"
     if ban_row:
         durum = "Banlandı"
+    elif mute_row and not mute_row['until_date']:
+        durum = "Susturuldu (süresiz)"
     elif mute_row and mute_row['until_date'] and mute_row['until_date'] > time.time():
         kalan = int((mute_row['until_date'] - time.time()) / 60)
         durum = f"Susturuldu ({kalan//60}s {kalan%60}dk kaldi)" if kalan >= 60 else f"Susturuldu ({kalan} dk kaldi)"
@@ -17489,6 +17486,7 @@ bad97a937	✅ ⟨0⟩ unban edildi!
 b83344e83	✅ ⟨0⟩ ban kaldırıldı | ⟨1⟩
 dee699309	👢 ⟨0⟩ kicklendi!
 16d07ca95	👢 ⟨0⟩ kicklendi | ⟨1⟩
+0c02aefaa	süresiz
 299422191	24 saat (Admin sınırı)
 b2fbfc457	🔇 ⟨0⟩ ⟨1⟩ mute edildi!
 9247b48e0	🔇 ⟨0⟩ ⟨1⟩ mute | ⟨2⟩
@@ -17571,6 +17569,7 @@ bce49f901	Profil alinamadi!
 9131de73e	Kullanici bulunamadi!
 45e118d05	Normal
 0aaf03287	Banlandı
+bdd3e9eb0	Susturuldu (süresiz)
 bf84ddcb3	Susturuldu (⟨0⟩s ⟨1⟩dk kaldi)
 08c52b8c6	Susturuldu (⟨0⟩ dk kaldi)
 c5a6c0399	👤 <b>Kullanici Profili</b>
@@ -19696,6 +19695,7 @@ bad97a937	✅ أُلغي حظر ⟨0⟩!
 b83344e83	✅ أُلغي حظر ⟨0⟩ | ⟨1⟩
 dee699309	👢 طُرد ⟨0⟩!
 16d07ca95	👢 طُرد ⟨0⟩ | ⟨1⟩
+0c02aefaa	بلا مدة
 299422191	24 ساعة (حد المشرف)
 b2fbfc457	🔇 كُتم ⟨0⟩ لمدة ⟨1⟩!
 9247b48e0	🔇 كُتم ⟨0⟩ لمدة ⟨1⟩ | ⟨2⟩
@@ -19774,6 +19774,7 @@ bce49f901	تعذر جلب الملف الشخصي!
 9131de73e	المستخدم غير موجود!
 45e118d05	عادي
 0aaf03287	محظور
+bdd3e9eb0	مكتوم (بلا مدة)
 bf84ddcb3	مكتوم (متبقٍ ⟨0⟩ س ⟨1⟩ د)
 08c52b8c6	مكتوم (متبقٍ ⟨0⟩ دقيقة)
 c5a6c0399	👤 <b>الملف الشخصي</b>
@@ -21822,6 +21823,7 @@ bad97a937	✅ ⟨0⟩ banı açıldı!
 b83344e83	✅ ⟨0⟩ banı açıldı | ⟨1⟩
 dee699309	👢 ⟨0⟩ qrupdan çıxarıldı!
 16d07ca95	👢 ⟨0⟩ qrupdan çıxarıldı | ⟨1⟩
+0c02aefaa	müddətsiz
 299422191	24 saat (admin limiti)
 b2fbfc457	🔇 ⟨0⟩ ⟨1⟩ susduruldu!
 9247b48e0	🔇 ⟨0⟩ ⟨1⟩ susduruldu | ⟨2⟩
@@ -21897,6 +21899,7 @@ cc103ac23	Qrup kilidli deyil.
 4918e916d	Xəta: kilid açılmadı (botun icazələrini yoxla).
 bce49f901	Profil alınmadı!
 9131de73e	İstifadəçi tapılmadı!
+bdd3e9eb0	Susdurulub (müddətsiz)
 bf84ddcb3	Susdurulub (⟨0⟩ s ⟨1⟩ dəq qalıb)
 08c52b8c6	Susdurulub (⟨0⟩ dəq qalıb)
 c5a6c0399	👤 <b>İstifadəçi profili</b>
@@ -23909,6 +23912,7 @@ bad97a937	✅ ⟨0⟩ entbannt!
 b83344e83	✅ ⟨0⟩ entbannt | ⟨1⟩
 dee699309	👢 ⟨0⟩ rausgeworfen!
 16d07ca95	👢 ⟨0⟩ rausgeworfen | ⟨1⟩
+0c02aefaa	unbefristet
 299422191	24 Stunden (Admin-Limit)
 b2fbfc457	🔇 ⟨0⟩ für ⟨1⟩ stummgeschaltet!
 9247b48e0	🔇 ⟨0⟩ für ⟨1⟩ stummgeschaltet | ⟨2⟩
@@ -23986,6 +23990,7 @@ cc103ac23	Die Gruppe ist nicht gesperrt.
 bce49f901	Profil konnte nicht abgerufen werden!
 9131de73e	Nutzer nicht gefunden!
 0aaf03287	Gebannt
+bdd3e9eb0	Stummgeschaltet (unbefristet)
 bf84ddcb3	Stumm (noch ⟨0⟩ Std. ⟨1⟩ Min.)
 08c52b8c6	Stumm (noch ⟨0⟩ Min.)
 c5a6c0399	👤 <b>Nutzerprofil</b>
@@ -26018,6 +26023,7 @@ bad97a937	✅ ⟨0⟩ unbanned!
 b83344e83	✅ ⟨0⟩ unbanned | ⟨1⟩
 dee699309	👢 ⟨0⟩ kicked!
 16d07ca95	👢 ⟨0⟩ kicked | ⟨1⟩
+0c02aefaa	indefinitely
 299422191	24 hours (admin limit)
 b2fbfc457	🔇 ⟨0⟩ muted for ⟨1⟩!
 9247b48e0	🔇 ⟨0⟩ muted for ⟨1⟩ | ⟨2⟩
@@ -26095,6 +26101,7 @@ cc103ac23	The group isn't locked.
 bce49f901	Couldn't get the profile!
 9131de73e	User not found!
 0aaf03287	Banned
+bdd3e9eb0	Muted (indefinitely)
 bf84ddcb3	Muted (⟨0⟩h ⟨1⟩min left)
 08c52b8c6	Muted (⟨0⟩ min left)
 c5a6c0399	👤 <b>User Profile</b>
@@ -28164,6 +28171,7 @@ bad97a937	✅ ¡⟨0⟩ desbaneado!
 b83344e83	✅ ⟨0⟩ desbaneado | ⟨1⟩
 dee699309	👢 ¡⟨0⟩ expulsado!
 16d07ca95	👢 ⟨0⟩ expulsado | ⟨1⟩
+0c02aefaa	indefinidamente
 299422191	24 horas (límite de admin)
 b2fbfc457	🔇 ¡⟨0⟩ silenciado por ⟨1⟩!
 9247b48e0	🔇 ⟨0⟩ silenciado por ⟨1⟩ | ⟨2⟩
@@ -28241,6 +28249,7 @@ cc103ac23	El grupo no está bloqueado.
 bce49f901	¡No se pudo obtener el perfil!
 9131de73e	¡Usuario no encontrado!
 0aaf03287	Baneado
+bdd3e9eb0	Silenciado (indefinidamente)
 bf84ddcb3	Silenciado (quedan ⟨0⟩ h ⟨1⟩ min)
 08c52b8c6	Silenciado (quedan ⟨0⟩ min)
 c5a6c0399	👤 <b>Perfil de usuario</b>
@@ -30286,6 +30295,7 @@ bad97a937	✅ بن ⟨0⟩ برداشته شد!
 b83344e83	✅ بن ⟨0⟩ برداشته شد | ⟨1⟩
 dee699309	👢 ⟨0⟩ اخراج شد!
 16d07ca95	👢 ⟨0⟩ اخراج شد | ⟨1⟩
+0c02aefaa	نامحدود
 299422191	۲۴ ساعت (محدودیت ادمین)
 b2fbfc457	🔇 ⟨0⟩ به مدت ⟨1⟩ ساکت شد!
 9247b48e0	🔇 ⟨0⟩ به مدت ⟨1⟩ ساکت شد | ⟨2⟩
@@ -30364,6 +30374,7 @@ bce49f901	پروفایل دریافت نشد!
 9131de73e	کاربر پیدا نشد!
 45e118d05	عادی
 0aaf03287	بن‌شده
+bdd3e9eb0	بی‌صدا (نامحدود)
 bf84ddcb3	ساکت (⟨0⟩ ساعت ⟨1⟩ دقیقه مانده)
 08c52b8c6	ساکت (⟨0⟩ دقیقه مانده)
 c5a6c0399	👤 <b>پروفایل کاربر</b>
@@ -32418,6 +32429,7 @@ bad97a937	✅ ⟨0⟩ débanni !
 b83344e83	✅ ⟨0⟩ débanni | ⟨1⟩
 dee699309	👢 ⟨0⟩ expulsé !
 16d07ca95	👢 ⟨0⟩ expulsé | ⟨1⟩
+0c02aefaa	sans limite
 299422191	24 heures (limite des admins)
 b2fbfc457	🔇 ⟨0⟩ rendu muet pendant ⟨1⟩ !
 9247b48e0	🔇 ⟨0⟩ rendu muet pendant ⟨1⟩ | ⟨2⟩
@@ -32495,6 +32507,7 @@ cc103ac23	Le groupe n’est pas verrouillé.
 bce49f901	Impossible d’obtenir le profil !
 9131de73e	Utilisateur introuvable !
 0aaf03287	Bannis
+bdd3e9eb0	Muet (sans limite)
 bf84ddcb3	Muet (encore ⟨0⟩ h ⟨1⟩ min)
 08c52b8c6	Muet (encore ⟨0⟩ min)
 c5a6c0399	👤 <b>Profil de l’utilisateur</b>
@@ -34542,6 +34555,7 @@ bad97a937	✅ ⟨0⟩ का बैन हटाया गया!
 b83344e83	✅ ⟨0⟩ का बैन हटाया गया | ⟨1⟩
 dee699309	👢 ⟨0⟩ को निकाला गया!
 16d07ca95	👢 ⟨0⟩ को निकाला गया | ⟨1⟩
+0c02aefaa	अनिश्चित काल के लिए
 299422191	24 घंटे (एडमिन सीमा)
 b2fbfc457	🔇 ⟨0⟩ को ⟨1⟩ के लिए म्यूट किया गया!
 9247b48e0	🔇 ⟨0⟩ को ⟨1⟩ के लिए म्यूट किया गया | ⟨2⟩
@@ -34620,6 +34634,7 @@ bce49f901	प्रोफ़ाइल नहीं मिल सकी!
 9131de73e	उपयोगकर्ता नहीं मिला!
 45e118d05	सामान्य
 0aaf03287	बैन किए गए
+bdd3e9eb0	म्यूट (अनिश्चित काल के लिए)
 bf84ddcb3	म्यूट (⟨0⟩ घंटे ⟨1⟩ मिनट बाकी)
 08c52b8c6	म्यूट (⟨0⟩ मिनट बाकी)
 c5a6c0399	👤 <b>उपयोगकर्ता प्रोफ़ाइल</b>
@@ -36674,6 +36689,7 @@ bad97a937	✅ Ban ⟨0⟩ dibuka!
 b83344e83	✅ Ban ⟨0⟩ dibuka | ⟨1⟩
 dee699309	👢 ⟨0⟩ dikeluarkan!
 16d07ca95	👢 ⟨0⟩ dikeluarkan | ⟨1⟩
+0c02aefaa	tanpa batas waktu
 299422191	24 jam (batas admin)
 b2fbfc457	🔇 ⟨0⟩ dibisukan selama ⟨1⟩!
 9247b48e0	🔇 ⟨0⟩ dibisukan selama ⟨1⟩ | ⟨2⟩
@@ -36751,6 +36767,7 @@ cc103ac23	Grup tidak terkunci.
 bce49f901	Gagal mengambil profil!
 9131de73e	Pengguna tidak ditemukan!
 0aaf03287	Diban
+bdd3e9eb0	Dibisukan (tanpa batas waktu)
 bf84ddcb3	Dibisukan (sisa ⟨0⟩ j ⟨1⟩ mnt)
 08c52b8c6	Dibisukan (sisa ⟨0⟩ mnt)
 c5a6c0399	👤 <b>Profil Pengguna</b>
@@ -38789,6 +38806,7 @@ bad97a937	✅ ⟨0⟩ sbannato!
 b83344e83	✅ ⟨0⟩ sbannato | ⟨1⟩
 dee699309	👢 ⟨0⟩ espulso!
 16d07ca95	👢 ⟨0⟩ espulso | ⟨1⟩
+0c02aefaa	a tempo indeterminato
 299422191	24 ore (limite admin)
 b2fbfc457	🔇 ⟨0⟩ silenziato per ⟨1⟩!
 9247b48e0	🔇 ⟨0⟩ silenziato per ⟨1⟩ | ⟨2⟩
@@ -38867,6 +38885,7 @@ bce49f901	Impossibile ottenere il profilo!
 9131de73e	Utente non trovato!
 45e118d05	Normale
 0aaf03287	Bannati
+bdd3e9eb0	Silenziato (a tempo indeterminato)
 bf84ddcb3	Silenziato (mancano ⟨0⟩ h ⟨1⟩ min)
 08c52b8c6	Silenziato (mancano ⟨0⟩ min)
 c5a6c0399	👤 <b>Profilo utente</b>
@@ -40912,6 +40931,7 @@ bad97a937	✅ ⟨0⟩ банынан шығарылды!
 b83344e83	✅ ⟨0⟩ банынан шығарылды | ⟨1⟩
 dee699309	👢 ⟨0⟩ топтан шығарылды!
 16d07ca95	👢 ⟨0⟩ топтан шығарылды | ⟨1⟩
+0c02aefaa	мерзімсіз
 299422191	24 сағат (админ шегі)
 b2fbfc457	🔇 ⟨0⟩ ⟨1⟩ бойы дыбысы өшірілді!
 9247b48e0	🔇 ⟨0⟩ ⟨1⟩ бойы дыбысы өшірілді | ⟨2⟩
@@ -40990,6 +41010,7 @@ bce49f901	Профильді алу мүмкін болмады!
 9131de73e	Пайдаланушы табылмады!
 45e118d05	Қалыпты
 0aaf03287	Бан алғандар
+bdd3e9eb0	Мут берілген (мерзімсіз)
 bf84ddcb3	Дыбысы өшірулі (⟨0⟩ сағ ⟨1⟩ мин қалды)
 08c52b8c6	Дыбысы өшірулі (⟨0⟩ мин қалды)
 c5a6c0399	👤 <b>Пайдаланушы профилі</b>
@@ -43044,6 +43065,7 @@ bad97a937	✅ ⟨0⟩ desbanido!
 b83344e83	✅ ⟨0⟩ desbanido | ⟨1⟩
 dee699309	👢 ⟨0⟩ expulso!
 16d07ca95	👢 ⟨0⟩ expulso | ⟨1⟩
+0c02aefaa	por tempo indeterminado
 299422191	24 horas (limite de admin)
 b2fbfc457	🔇 ⟨0⟩ silenciado por ⟨1⟩!
 9247b48e0	🔇 ⟨0⟩ silenciado por ⟨1⟩ | ⟨2⟩
@@ -43121,6 +43143,7 @@ cc103ac23	O grupo não está bloqueado.
 bce49f901	Não foi possível obter o perfil!
 9131de73e	Usuário não encontrado!
 0aaf03287	Banido
+bdd3e9eb0	Silenciado (por tempo indeterminado)
 bf84ddcb3	Silenciado (faltam ⟨0⟩ h ⟨1⟩ min)
 08c52b8c6	Silenciado (faltam ⟨0⟩ min)
 c5a6c0399	👤 <b>Perfil do usuário</b>
@@ -45169,6 +45192,7 @@ bad97a937	✅ ⟨0⟩ разбанен!
 b83344e83	✅ ⟨0⟩ разбанен | ⟨1⟩
 dee699309	👢 ⟨0⟩ исключён!
 16d07ca95	👢 ⟨0⟩ исключён | ⟨1⟩
+0c02aefaa	бессрочно
 299422191	24 часа (лимит админа)
 b2fbfc457	🔇 ⟨0⟩ получил мут на ⟨1⟩!
 9247b48e0	🔇 ⟨0⟩ получил мут на ⟨1⟩ | ⟨2⟩
@@ -45246,6 +45270,8 @@ cc103ac23	Группа не заблокирована.
 bce49f901	Не удалось получить профиль!
 9131de73e	Пользователь не найден!
 45e118d05	Обычный
+0aaf03287	Забанен
+bdd3e9eb0	Без права писать (бессрочно)
 bf84ddcb3	Мут (осталось ⟨0⟩ ч ⟨1⟩ мин)
 08c52b8c6	Мут (осталось ⟨0⟩ мин)
 c5a6c0399	👤 <b>Профиль пользователя</b>
@@ -45253,6 +45279,7 @@ c5a6c0399	👤 <b>Профиль пользователя</b>
 0fd8daf31	ID: <code>⟨0⟩</code>
 16d1a3d6f	Статус: ⟨0⟩
 c90e09fec	Предупреждения: ⟨0⟩/⟨1⟩
+c6a441715	(Последний: ⟨0⟩)
 f7b55484b	Последние действия:
 245846708	система
 1ebb0f458	Нет действий модерации.
@@ -45851,8 +45878,10 @@ ae2b984ac	💬 Количество сообщений:
 3e08d6dfd	┌📆 За день: ⟨0⟩
 037b7c646	├📆 За неделю: ⟨0⟩
 9f577c2b5	├📆 За месяц: ⟨0⟩
+cf3b5cf8f	└Всего: ⟨0⟩
 e1ed2556f	📊 Подробности активности:
 0327b318b	┌🃏 Стикеры: ⟨0⟩
+5ca7902a2	├🀄️ GIF: ⟨0⟩
 b667cf812	├🙃 Эмодзи: ⟨0⟩
 68fa09ce3	├📷 Фото: ⟨0⟩
 886e342ec	├🎥 Видео: ⟨0⟩
@@ -46042,6 +46071,7 @@ a37fbde9a	/get <название> — Получить заметку
 5ff3c9cb2	🎰 Развлечения
 b0d9549b8	/coin — Подбросить монету
 3ab74dacf	/dice — Бросить кубик
+304dfe62b	ℹ️ Другое
 b4031dc89	/help — Это меню
 6467c9dbe	/id — Показать ID
 0af5bde71	/appeal <пояснение> — Апелляция на бан (боту в личку)
@@ -46478,7 +46508,10 @@ e5b1aac1e	Статус: <b>⟨0⟩</b>
 c9606c43c	🏷 <b>Настройки упоминаний</b> — ⟨0⟩
 203ce8b22	<code>/tag сообщение</code> упоминает участников порциями. <code>/stoptag</code> останавливает, участники могут выйти из списка командой <code>/notag</code>.
 b86bf2507	В сообщении: <b>⟨0⟩ человек</b> · Стиль: <b>⟨1⟩</b> · Кого: <b>⟨2⟩</b>
+5090a9e78	Эмодзи
+d2abd1ed8	Имя
 1da63df5e	активных за последние 7 дней
+4b30ca4e3	все
 4e45e032a	Человек
 4dd25e398	⟨0⟩По имени
 c39394400	⟨0⟩Эмодзи
@@ -46496,6 +46529,7 @@ a2c2bec19	📋 <b>Досье</b> — ⟨0⟩ · ID <code>⟨1⟩</code>
 0786218b9	🏷 Старые имена: ⟨0⟩
 14c5bccb9	🚩 Общий чёрный список: ⟨0⟩
 38fd7e621	<b>забанен в ⟨0⟩ группах</b>
+15ab6d34d	чисто
 04a2454bb	🌐 CAS: ⟨0⟩
 66b71c0f8	⚠️ в списке
 5a25bd323	📊 За последние ⟨0⟩ дн.: ⚠️ ⟨1⟩ предупреждений · 🔇 ⟨2⟩ мутов · 👢 ⟨3⟩ киков · 🚫 ⟨4⟩ банов
@@ -46773,6 +46807,7 @@ c5de3cdae	⚠️ участник (не админ)
 c86df7e48	📅 Зарегистрирована: ⟨0⟩⟨1⟩
 079fe4cc3	💬 Последнее сообщение: ⟨0⟩ · ⟨1⟩ сообщений за 7 дней
 33a131ec1	🛡 Активные защиты: ⟨0⟩
+c215ada82	· Добавил(а): ⟨0⟩
 cac2ce338	никогда
 d4f5955f6	🚪 Удалить бота
 84297554a	🗑 Удалить запись
@@ -47292,6 +47327,7 @@ bad97a937	✅ ⟨0⟩ розбанено!
 b83344e83	✅ ⟨0⟩ розбанено | ⟨1⟩
 dee699309	👢 ⟨0⟩ вилучено!
 16d07ca95	👢 ⟨0⟩ вилучено | ⟨1⟩
+0c02aefaa	безстроково
 299422191	24 години (ліміт адміна)
 b2fbfc457	🔇 ⟨0⟩ отримав мут на ⟨1⟩!
 9247b48e0	🔇 ⟨0⟩ отримав мут на ⟨1⟩ | ⟨2⟩
@@ -47370,6 +47406,7 @@ bce49f901	Не вдалося отримати профіль!
 9131de73e	Користувача не знайдено!
 45e118d05	Звичайний
 0aaf03287	Забанено
+bdd3e9eb0	Без права писати (безстроково)
 bf84ddcb3	Мут (лишилося ⟨0⟩ год ⟨1⟩ хв)
 08c52b8c6	Мут (лишилося ⟨0⟩ хв)
 c5a6c0399	👤 <b>Профіль користувача</b>
@@ -49423,6 +49460,7 @@ bad97a937	✅ ⟨0⟩ bandan chiqarildi!
 b83344e83	✅ ⟨0⟩ bandan chiqarildi | ⟨1⟩
 dee699309	👢 ⟨0⟩ chiqarib yuborildi!
 16d07ca95	👢 ⟨0⟩ chiqarib yuborildi | ⟨1⟩
+0c02aefaa	muddatsiz
 299422191	24 soat (admin limiti)
 b2fbfc457	🔇 ⟨0⟩ ⟨1⟩ ga ovozsiz qilindi!
 9247b48e0	🔇 ⟨0⟩ ⟨1⟩ ga ovozsiz qilindi | ⟨2⟩
@@ -49501,6 +49539,7 @@ bce49f901	Profilni olib bo‘lmadi!
 9131de73e	Foydalanuvchi topilmadi!
 45e118d05	Oddiy
 0aaf03287	Banlangan
+bdd3e9eb0	Ovozi o‘chirilgan (muddatsiz)
 bf84ddcb3	Ovozsiz (⟨0⟩ s ⟨1⟩ daq qoldi)
 08c52b8c6	Ovozsiz (⟨0⟩ daq qoldi)
 c5a6c0399	👤 <b>Foydalanuvchi profili</b>
