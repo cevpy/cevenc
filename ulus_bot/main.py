@@ -14741,8 +14741,9 @@ def perf_wrap(fn):
 def queue_user(chat_id: str, user):
     """upsert_user'ın toplu yazılan hâli (her grup mesajında çağrılır)."""
     now = time.time()
-    _users_buf[(user.id, chat_id)] = (user.id, chat_id, user.username or '', user.first_name or '',
-                                      getattr(user, 'last_name', '') or '', int(user.is_bot), now, now)
+    _users_buf[(user.id, chat_id)] = (user.id, chat_id, getattr(user, 'username', '') or '',
+                                      getattr(user, 'first_name', '') or '', getattr(user, 'last_name', '') or '',
+                                      int(bool(getattr(user, 'is_bot', False))), now, now)
     if len(_users_buf) >= WRITE_FLUSH_MAX:
         flush_writes()
 
