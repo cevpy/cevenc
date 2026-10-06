@@ -16480,7 +16480,7 @@ async def chat_member_cache_handler(update: Update, context):
     invalidate_admin_cache(chat_id)
     new = cm.new_chat_member
     if (new.status in ('member', 'restricted', 'administrator', 'creator') and not new.user.is_bot
-            and cm.chat.type != 'channel' and get_channel_settings(chat_id)):
+            and getattr(cm.chat, 'type', None) != 'channel' and get_channel_settings(chat_id)):
         # katılma mesajı gizli olsa da (ya da davet linki/onaylı istekle girse de) kişi tanınsın: /admin @kisi çalışır
         queue_user(chat_id, new.user)
     if (new.status == 'administrator' and cm.old_chat_member.status != 'administrator' and not new.user.is_bot
