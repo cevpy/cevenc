@@ -193,6 +193,28 @@ def _beta_ref(x, y):
     return s
 
 
+def test_handler_body_variants():
+    # (A) Handler gövdeleri build'ler arası anlamca eşdeğer ama byte-byte farklı
+    # olmalı (gövde-deseni eşleştirmesini kırar), üstelik hep doğru çalışmalı.
+    mod = _load_module()
+    forms = set()
+    probes = ['_s += [_k', '_s[len(_s):] = [_k', '_s.append(_k[_g2])',
+              '0-_s.pop()', 'False if _s.pop()', 'return _s.pop(-1)', '_ip=_g2+0']
+    for _ in range(40):
+        vm = mod.NinjaVMHardened()
+        rs = vm.runtime_source()
+        for p in probes:
+            if p in rs:
+                forms.add(p)
+        out, moved = vm.transform_source(CALC_SRC, selected_names={"calc"})
+        assert moved == 1
+        ns = {}
+        exec(out, ns)
+        for a, b in [(3, 4), (7, 7), (0, 9), (11, 2)]:
+            assert ns["calc"](a, b) == _calc_ref(a, b), (a, b)
+    assert len(forms) >= 3, f"handler gövde varyantları yetersiz ({forms})"
+
+
 def test_per_function_isa():
     # (#3) Aynı build içinde her VM'li fonksiyon KENDİ op/arg anahtarlarıyla
     # kodlanır → bir fonksiyonun ISA'sını çözmek diğerini çözmez.

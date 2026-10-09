@@ -3617,6 +3617,11 @@ class NinjaVM:
             (cls.WITH_EXC_START, '\n            _ev=_s[-1]\n            _exit=_s[-4] if len(_s)>=4 else _s[-2]\n            _s.append(_exit(type(_ev), _ev, getattr(_ev,"__traceback__",None)))'),
             (cls.NOP, 'pass'),
         ]
+        # (v0.9.5 A) Tek-satır handler gövdelerini anlamca eşdeğer bir varyantla
+        # değiştir (yalnızca çok-satırlı olmayanlar; çok-satırlı reindent mantığı
+        # korunur). Temelde kimlik; NinjaVMHardened build başına rastgele seçer.
+        _handlers = [(_hop, (_hb if _hb.startswith('\n') else self._variant_body(_hb)))
+                     for (_hop, _hb) in _handlers]
         random.shuffle(_handlers)
         _dispatch_lines = []
         for _idx, (_op, _body) in enumerate(_handlers):
@@ -3640,14 +3645,14 @@ class NinjaVM:
             (cls.B_SUBSCR, '_a[_b]'),
         ]
         random.shuffle(_bin_ops)
-        _bin_lines = '\n'.join(f'    if _o=={_op}: return {_expr}' for _op, _expr in _bin_ops)
+        _bin_lines = '\n'.join(f'    if _o=={_op}: return {self._variant_expr(_expr)}' for _op, _expr in _bin_ops)
 
         _cmp_ops = [
             (cls.C_LT, '_a<_b'), (cls.C_LE, '_a<=_b'), (cls.C_EQ, '_a==_b'),
             (cls.C_NE, '_a!=_b'), (cls.C_GT, '_a>_b'), (cls.C_GE, '_a>=_b'),
         ]
         random.shuffle(_cmp_ops)
-        _cmp_lines = '\n'.join(f'    if _o=={_op}: return {_expr}' for _op, _expr in _cmp_ops)
+        _cmp_lines = '\n'.join(f'    if _o=={_op}: return {self._variant_expr(_expr)}' for _op, _expr in _cmp_ops)
 
         return f'''
 def _nv_exec(_p, _a, _g):
@@ -3725,6 +3730,16 @@ def _nv_cmp(_o,_a,_b):
         satırı (ör. per-fonksiyon decode anahtarlarını _p'den okuma).
         Varsayılan: hiçbir şey. 8 boşluk girinti ile tek satır döndürülmeli."""
         return ''
+
+    def _variant_body(self, body: str) -> str:
+        """Tek-satır bir handler gövdesi için anlamca EŞDEĞER bir yazım döndürür.
+        Varsayılan: değişiklik yok. NinjaVMHardened build başına rastgele varyant
+        seçer → handler gövdeleri build'ler arası byte-byte farklı olur."""
+        return body
+
+    def _variant_expr(self, expr: str) -> str:
+        """_nv_bin/_nv_cmp ifadeleri için eşdeğer yazım (varsayılan: aynen)."""
+        return expr
 
     def _stub_decode(self, gvar: str, indent: str) -> str:
         """Stub içinde blob'u program sözlüğüne (_pp) çözen satır(lar)."""
@@ -4219,6 +4234,37 @@ class NinjaVMHardened(NinjaVM):
 
     def _arg_read(self) -> str:
         return '((_c[_ip][1] - _ab) // _aa)'
+
+    # ── seam override (A): handler gövdesi semantik varyantları ──
+    # Her değer, SOLDAKİ varsayılanla anlamca EŞDEĞER yazımlardır (stack
+    # semantiği birebir korunur). Build başına rastgele biri seçilir → handler
+    # gövdeleri build'ler arası byte-byte farklı; gövde-deseni eşleştiren
+    # devirtualizer her hedefte farklı kod görür.
+    _BODY_VARIANTS = {
+        '_s.append(_k[_g2])':   ('_s.append(_k[_g2])', '_s += [_k[_g2]]', '_s[len(_s):] = [_k[_g2]]'),
+        '_s.append(_L[_g2])':   ('_s.append(_L[_g2])', '_s += [_L[_g2]]', '_s[len(_s):] = [_L[_g2]]'),
+        '_L[_g2]=_s.pop()':     ('_L[_g2]=_s.pop()', '_L[_g2]=_s.pop(-1)', '_L[_g2]=_s[-1]; del _s[-1]'),
+        '_ip=_g2':              ('_ip=_g2', '_ip=_g2+0', '_ip=(_g2)|0'),
+        '_s.append(_s[-1])':    ('_s.append(_s[-1])', '_s.append(_s[len(_s)-1])', '_s += [_s[-1]]'),
+        '_s.append(-_s.pop())': ('_s.append(-_s.pop())', '_s.append(0-_s.pop())'),
+        '_s.append(not _s.pop())': ('_s.append(not _s.pop())', '_s.append(False if _s.pop() else True)'),
+        '_s.append(bool(_s.pop()))': ('_s.append(bool(_s.pop()))', '_s.append(True if _s.pop() else False)'),
+        'return _s.pop()':      ('return _s.pop()', 'return _s.pop(-1)'),
+    }
+    _EXPR_VARIANTS = {
+        '_a+_b':  ('_a+_b', '(_a)+(_b)'),
+        '_a-_b':  ('_a-_b', '(_a)-(_b)'),
+        '_a*_b':  ('_a*_b', '(_a)*(_b)'),
+        '_a<_b':  ('_a<_b', '(_a)<(_b)'),
+        '_a>_b':  ('_a>_b', '(_a)>(_b)'),
+        '_a==_b': ('_a==_b', '(_a)==(_b)'),
+    }
+
+    def _variant_body(self, body: str) -> str:
+        return random.choice(self._BODY_VARIANTS.get(body, (body,)))
+
+    def _variant_expr(self, expr: str) -> str:
+        return random.choice(self._EXPR_VARIANTS.get(expr, (expr,)))
 
     # ── seam override: lazy+cache çözme stub satırı ──
     def _stub_decode(self, gvar: str, indent: str) -> str:
