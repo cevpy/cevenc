@@ -3984,7 +3984,9 @@ def _nv_cmp(_o,_a,_b):
 
             rt = self.runtime_source()
             rt_ns = {}
-            exec(rt, rt_ns)
+            # prelude de exec edilmeli: _nv_exec, master-key modunda _nv_h/_nv_dp
+            # gibi prelude yardımcılarını kullanır (base'de prelude boş → değişmez).
+            exec(rt + self._runtime_prelude(), rt_ns)
             nv_exec = rt_ns['_nv_exec']
 
             _runtime_prog = self._prog_unseal(self._prog_literal(prog))
@@ -4105,7 +4107,8 @@ def _nv_cmp(_o,_a,_b):
                 orig_fn = ns[fname]
                 rt = self.runtime_source()
                 rt_ns = {}
-                exec(rt, rt_ns)
+                # prelude de exec edilmeli (master-key _nv_h/_nv_dp için).
+                exec(rt + self._runtime_prelude(), rt_ns)
                 nv_exec = rt_ns['_nv_exec']
                 _runtime_prog = self._prog_unseal(self._prog_literal(prog))
                 n = len(argnames)
@@ -4165,75 +4168,106 @@ def _nv_cmp(_o,_a,_b):
 # ══════════════════════════════════════════════════════════════════════════════
 class NinjaVMHardened(NinjaVM):
 
-    # Build'e özgü seçilen LCG çarpanı havuzu (hepsi tam-periyot dostu klasikler).
+    # Build'e özgü seçilen LCG çarpanı havuzu (dış blob keystream'i için).
     # encode-zamanı (_keystream) ve runtime (_nv_ks) AYNI formülü kullanır.
     _LCG_MULS = (1103515245, 1664525, 22695477, 214013, 1597334677)
 
-    # operand çarpanı için tek sayı havuzu (tam tersinir tamsayı bölmesi için)
-    _ODDS = tuple(range(3, 252, 2))
+    # ── (v0.9.6 "EN ZOR") MASTER-KEY mimarisi ────────────────────────────────
+    # Avalanche hash sabitleri — encode (_h) ve runtime (_nv_h) BİREBİR aynı.
+    _H_ADD1 = 0x9E3779B1
+    _H_ADD2 = 0x85EBCA77
+    _H_MUL1 = 0x2C1B3C6D
+    _H_MUL2 = 0x297A2D39
 
     def __init__(self):
         super().__init__()
-        # Blob şifrelemesi build genelinde ortak (static-dump savunması).
+        # Dış blob şifrelemesi build genelinde ortak (static-dump savunması).
         self._blobSeed = random.randint(1, (1 << 31) - 1)
         self._lcgA = random.choice(self._LCG_MULS)
         self._lcgC = random.randint(1, (1 << 31) - 1) | 1  # tek sayı
-        # (v0.9.5 #3) op/arg ISA anahtarları artık PER-FONKSİYON: her VM'li
-        # fonksiyon kendi (ok, aa, ab) üçlüsüyle kodlanır ve bu anahtarlar
-        # (şifreli) blob içinde taşınır; dispatch döngüsü _p'den okur. Böylece
-        # bir fonksiyonun ISA'sını çözen analist, diğer her fonksiyon için işi
-        # sıfırdan tekrarlamak zorunda kalır (build başına değil, fonksiyon başına).
+        # MASTER anahtar: tüm fonksiyon anahtarlarının türediği build-sırrı.
+        # Sadece interpreter (_nv_exec) içinde gömülü → çıktı Cython/Nuitka ile
+        # NATIVE derlendiği için makine kodunda kalır; şifreli/çözülmüş _pp'de
+        # ASLA bulunmaz. Dolayısıyla _nv_open'ı hook edip _pp'yi dump eden biri
+        # bile anahtarları, operand akışını ve string havuzlarını okuyamaz —
+        # çözmek için ya native interpreter'ı tersine mühendislemeli ya da her
+        # komutu çalışma anında tek tek dump etmeli.
+        self._M = random.randint(1, (1 << 31) - 1)
 
-    # ── keystream (encode-zamanı) — runtime'daki _nv_ks ile BİREBİR aynı ──
+    # ── dış blob keystream (encode) — runtime _nv_ks ile birebir ──
     def _keystream(self, seed: int, n: int) -> bytes:
         x = seed & 0xFFFFFFFF
         a, c = self._lcgA, self._lcgC
         out = bytearray()
         for _ in range(n):
             x = (a * x + c) & 0xFFFFFFFF
-            out.append((x >> 16) & 0xFF)   # yüksek bayt → daha iyi dağılım
+            out.append((x >> 16) & 0xFF)
         return bytes(out)
 
     def _seed_for(self, n: int) -> int:
-        # keystream reuse'u azaltmak için seed'e uzunluğu karıştır (runtime eşi
-        # _nv_open içinde birebir).
         return (self._blobSeed + n * 0x9E3779B1) & 0xFFFFFFFF
 
-    # ── seam override: PER-FONKSİYON operand dönüşümü + şifreli blob üret ──
+    # ── avalanche hash (encode) — runtime _nv_h ile BİREBİR ──
+    def _h(self, s: int, i: int, d: int) -> int:
+        x = (s + i * self._H_ADD1 + d * self._H_ADD2) & 0xFFFFFFFF
+        x ^= x >> 15; x = (x * self._H_MUL1) & 0xFFFFFFFF
+        x ^= x >> 12; x = (x * self._H_MUL2) & 0xFFFFFFFF
+        x ^= x >> 15
+        return x
+
+    def _ksb(self, s: int, d: int, n: int) -> bytes:
+        return bytes(self._h(s, i, d) & 0xFF for i in range(n))
+
+    # ── seam override: MASTER-KEY ile kodla (anahtar _pp'de YOK) ──
     def _prog_literal(self, prog) -> str:
         import marshal as _m, base64 as _b64
-        # Bu fonksiyona özgü ISA anahtarları (her çağrıda yeniden üretilir →
-        # her VM'li fonksiyon farklı). Anahtarlar şifreli blob içinde taşınır.
-        K = random.randint(1, 0xFF)          # op XOR
-        A = random.choice(self._ODDS)        # operand çarpanı (tek → tersinir)
-        B = random.randint(1, 1 << 20)       # operand ofseti
-        code2 = [[op ^ K, arg * A + B] for (op, arg) in prog['code']]
-        raw = _m.dumps({'c': code2, 'k': prog['consts'], 'n': prog['names'],
+        # Per-fonksiyon TUZ (gizli değil) — tüm per-fonksiyon anahtarları
+        # seed = _h(M, salt) üzerinden türetilir. Dumped _pp yalnızca tuzu +
+        # şifreli veriyi içerir; M olmadan hiçbiri çözülemez.
+        S = random.randint(1, (1 << 31) - 1)
+        seed = self._h(self._M, S, 0)
+        # Operandlar POZİSYONA göre şifreli: her komut kendi anahtar baytı/deltasıyla.
+        # (op ^ key_i) ve (arg + delta_i) — ikisi de tersinir (arg negatif/dev olsa da).
+        code2 = [[op ^ (self._h(seed, i, 1) & 0xFF), arg + self._h(seed, i, 2)]
+                 for i, (op, arg) in enumerate(prog['code'])]
+        # Sabit ve isim havuzları (STRING'ler burada) ayrıca şifreli → çözülmüş
+        # _pp dump edilse bile string/API isimleri düz görünmez.
+        kraw = _m.dumps(tuple(prog['consts']))
+        nraw = _m.dumps(tuple(prog['names']))
+        kpool = bytes(b ^ x for b, x in zip(kraw, self._ksb(seed, 3, len(kraw))))
+        npool = bytes(b ^ x for b, x in zip(nraw, self._ksb(seed, 4, len(nraw))))
+        raw = _m.dumps({'c': code2, 'k': kpool, 'n': npool,
                         'l': prog['nlocals'], 'e': prog.get('exc_table', []),
-                        'ok': K, 'aa': A, 'ab': B})
+                        's': S})
         ks = self._keystream(self._seed_for(len(raw)), len(raw))
         enc = bytes(b ^ k for b, k in zip(raw, ks))
         return _b64.b64encode(enc).decode()
 
-    # ── seam override: şifre çöz → program sözlüğü (operand DÖNÜŞÜK kalır) ──
+    # ── seam override: DIŞ katmanı çöz (iç master-key katmanı runtime'da çözülür) ──
     def _prog_unseal(self, blob):
         import marshal as _m, base64 as _b64
         enc = _b64.b64decode(blob)
         ks = self._keystream(self._seed_for(len(enc)), len(enc))
         raw = bytes(b ^ k for b, k in zip(enc, ks))
-        return _m.loads(raw)   # runtime dispatch döngüsü op^K / arg*A+B'yi çözer
+        return _m.loads(raw)   # c=pozisyon-şifreli, k/n=şifreli havuz; _nv_exec çözer
 
-    # ── seam override: per-fonksiyon decode (anahtarlar _p'den, _nv_exec başında) ──
+    # ── seam override: _nv_exec başında master-key kurulumu (M gömülü) ──
     def _decode_setup(self) -> str:
-        # _nv_exec başında bir kez: bu fonksiyonun ISA anahtarlarını _p'den oku.
-        # Varsayılanlar (0/1/0) dönüşümü kimliğe indirger → eski bloblar da güvenli.
-        return '_ok=_p.get("ok",0); _aa=_p.get("aa",1); _ab=_p.get("ab",0)'
+        # salt'ı oku → seed türet → sabit/isim havuzlarını çöz (base'in düz
+        # _k=_p["k"]/_nm=_p["n"] atamasını EZER). Operandlar dispatch'te pozisyona
+        # göre inline çözülür (_op_read/_arg_read). M burada literal gömülü.
+        return ('_S=_p.get("s",0)\n'
+                '    if "s" in _p:\n'
+                f'        _seed=_nv_h({self._M},_S,0)\n'
+                '        _k=_nv_dp(_p["k"],_seed,3); _nm=_nv_dp(_p["n"],_seed,4)\n'
+                '    else:\n'
+                '        _seed=0')
 
     def _op_read(self) -> str:
-        return '(_c[_ip][0] ^ _ok)'
+        return '(_c[_ip][0] ^ (_nv_h(_seed,_ip,1)&0xFF))'
 
     def _arg_read(self) -> str:
-        return '((_c[_ip][1] - _ab) // _aa)'
+        return '(_c[_ip][1] - _nv_h(_seed,_ip,2))'
 
     # ── seam override (A): handler gövdesi semantik varyantları ──
     # Her değer, SOLDAKİ varsayılanla anlamca EŞDEĞER yazımlardır (stack
@@ -4277,8 +4311,20 @@ class NinjaVMHardened(NinjaVM):
     # ── seam override: runtime yardımcıları (keystream + lazy çözücü + cache) ──
     # _nv_ks, yukarıdaki _keystream ile BİREBİR; _nv_open, _prog_unseal ile BİREBİR.
     def _runtime_prelude(self) -> str:
+        # _nv_h/_nv_dp = encode'daki _h/_ksb/_prog_literal pool-şifre ile BİREBİR.
+        # _nv_ks/_nv_open = dış blob keystream + lazy çözücü (öncekiyle aynı).
         return (
             "_NV_CACHE = {}\n"
+            "def _nv_h(_s, _i, _d):\n"
+            "    _x = (_s + _i*%d + _d*%d) & 0xFFFFFFFF\n"
+            "    _x ^= _x >> 15; _x = (_x*%d) & 0xFFFFFFFF\n"
+            "    _x ^= _x >> 12; _x = (_x*%d) & 0xFFFFFFFF\n"
+            "    _x ^= _x >> 15\n"
+            "    return _x\n"
+            "def _nv_dp(_enc, _s, _d):\n"
+            "    import marshal as _m2\n"
+            "    _ks = bytes(_nv_h(_s, _i, _d) & 0xFF for _i in range(len(_enc)))\n"
+            "    return _m2.loads(bytes(_b ^ _k for _b, _k in zip(_enc, _ks)))\n"
             "def _nv_ks(_seed, _n, _a=%d, _c=%d):\n"
             "    _x = _seed & 0xFFFFFFFF; _ob = bytearray()\n"
             "    for _ in range(_n):\n"
@@ -4295,7 +4341,8 @@ class NinjaVMHardened(NinjaVM):
             "    _raw = bytes(_bb ^ _kk for _bb, _kk in zip(_enc, _ks))\n"
             "    _pp = _m.loads(_raw); _NV_CACHE[_k] = _pp\n"
             "    return _pp\n\n"
-        ) % (self._lcgA, self._lcgC, self._blobSeed)
+        ) % (self._H_ADD1, self._H_ADD2, self._H_MUL1, self._H_MUL2,
+             self._lcgA, self._lcgC, self._blobSeed)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

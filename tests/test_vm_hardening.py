@@ -245,9 +245,10 @@ def test_no_subtraction_masquerading_as_negation():
                 f"UNARY_NEG varyanti ikili cikarma iceriyor: {variants}"
 
 
-def test_per_function_isa():
-    # (#3) Aynı build içinde her VM'li fonksiyon KENDİ op/arg anahtarlarıyla
-    # kodlanır → bir fonksiyonun ISA'sını çözmek diğerini çözmez.
+def test_per_function_salt_and_no_keys_in_pp():
+    # (master-key) Her VM'li fonksiyon kendi TUZU ile kodlanir; cozulmus _pp
+    # icinde HICBIR ISA anahtari (ok/aa/ab) bulunmaz (hepsi master M'den turer,
+    # M yalnizca native-derlenen interpreter'da). Havuzlar (k/n) sifreli bytes.
     mod = _load_module()
     vm = mod.NinjaVMHardened()
     out, moved = vm.transform_source(MULTI_SRC, selected_names={"alpha", "beta"})
@@ -259,11 +260,41 @@ def test_per_function_isa():
     for x, y in [(3, 4), (5, 1), (1, 9), (6, 2)]:
         assert ns["beta"](x, y) == _beta_ref(x, y), (x, y)
 
-    def _isa(fn):
-        blob = _blob_of(out, fn)
-        d = vm._prog_unseal(blob)
-        return (d["ok"], d["aa"], d["ab"])
-    assert _isa("alpha") != _isa("beta"), "iki fonksiyon aynı ISA anahtarlarını paylaşıyor"
+    da = vm._prog_unseal(_blob_of(out, "alpha"))
+    db = vm._prog_unseal(_blob_of(out, "beta"))
+    # tuzlar farkli (per-fonksiyon)
+    assert da["s"] != db["s"], "iki fonksiyon ayni tuzu paylasiyor"
+    # _pp'de hicbir decode anahtari YOK
+    for d in (da, db):
+        assert "ok" not in d and "aa" not in d and "ab" not in d, "ISA anahtari _pp'de sizmis"
+        # havuzlar sifreli bytes (duz liste/str degil)
+        assert isinstance(d["k"], (bytes, bytearray)) and isinstance(d["n"], (bytes, bytearray))
+
+
+def test_strings_hidden_in_const_pool():
+    # Asil amac: KAYNAGI GIZLEME. Ayirt edici bir string sabiti, cozulmus _pp'nin
+    # const havuzunda DUZ gorunmemeli (sifreli); yalnizca master-key ile cozulunce
+    # ortaya cikmali. Yani _nv_open'i hook edip _pp dump eden biri string'i goremez.
+    import marshal
+    mod = _load_module()
+    SECRET = "SUPER_SECRET_API_ENDPOINT_/v9/pay"
+    src = (f"def route(n):\n    tag = {SECRET!r}\n    return tag * (n % 2) + str(n)\n")
+    vm = mod.NinjaVMHardened()
+    out, moved = vm.transform_source(src, selected_names={"route"})
+    assert moved == 1
+    ns = {}
+    exec(out, ns)
+    # calisirlik
+    assert ns["route"](3) == (SECRET * 1 + "3")
+    assert ns["route"](4) == (SECRET * 0 + "4")
+    # cozulmus _pp'nin const havuzu ciphertext; string DUZ gecmemeli
+    d = vm._prog_unseal(_blob_of(out, "route"))
+    assert SECRET.encode() not in bytes(d["k"]), "string const havuzda DUZ gorunuyor!"
+    # ... ama master-key ile cozulunce ortaya cikar (encode mantiginin aynasi)
+    seed = vm._h(vm._M, d["s"], 0)
+    ksb = vm._ksb(seed, 3, len(d["k"]))
+    consts = marshal.loads(bytes(b ^ x for b, x in zip(d["k"], ksb)))
+    assert SECRET in consts, "master-key ile cozulunce string geri gelmeli"
 
 
 def test_base_ninjavm_unchanged():
