@@ -404,8 +404,11 @@ setup(
             if so_files:
                 so_path = str(so_files[0])
                 if not is_windows:
+                    # (v0.9.5 BOYUT) --strip-unneeded: yükleme için gerekmeyen TÜM
+                    # sembolleri atar (dinamik/exported PyInit korunur → .so çalışır),
+                    # --strip-debug'tan daha küçük çıktı verir.
                     os.system(
-                        f"strip --strip-debug "
+                        f"strip --strip-unneeded "
                         f"--remove-section=.comment "
                         f"--remove-section=.note "
                         f"--remove-section=.note.ABI-tag "
@@ -637,15 +640,18 @@ class NuitkaCompiler:
 
         with open(cython_so, 'rb') as f:
             so_bytes = f.read()
-        so_b64 = base64.b64encode(so_bytes).decode('ascii')
+        # (v0.9.5 BOYUT) .so'yu gömmeden önce zlib ile sıkıştır. Aksi halde ham
+        # base64 (~1.33x) Nuitka .so'su içinde taşınır ve dış ZIP deflate'i bunu
+        # ancak kısmen geri kazanır. Sıkıştırılmış gömme ~%40-60 daha küçük.
+        so_b64 = base64.b64encode(zlib.compress(so_bytes, 9)).decode('ascii')
         cython_mod = Path(cython_so).name.split('.')[0]
 
-        embed_src = f'''import base64 as _b64, tempfile as _tf, ctypes as _ct, os as _os, sys as _sys
+        embed_src = f'''import base64 as _b64, tempfile as _tf, ctypes as _ct, os as _os, sys as _sys, zlib as _zl
 
 _SO_DATA = b"{so_b64}"
 
 def _load_embedded():
-    _raw = _b64.b64decode(_SO_DATA)
+    _raw = _zl.decompress(_b64.b64decode(_SO_DATA))
     _tmp = _tf.NamedTemporaryFile(suffix='.so', delete=False, prefix='_nj_')
     try:
         _tmp.write(_raw)
@@ -1304,7 +1310,7 @@ class MetamorphicStager:
         stage_map = {
             'str_table': lambda s: encoder.str_table.encrypt_to_table(s),
             'str_enc':   lambda s: encoder.string_enc.encrypt_all_strings_in_code(s),
-            'dead_code': lambda s: encoder.dead_code.inject_into_source(s, count=8),
+            'dead_code': lambda s: encoder.dead_code.inject_into_source(s, count=4),
             'opaque':    lambda s: encoder.opaque.wrap_with_opaques(s),
             'cf_obf':    lambda s: encoder.cf_obf.inject_fake_branches(s),
             'mba':       lambda s: encoder.mba.transform_source(s),
@@ -6213,9 +6219,9 @@ class ClassCamouflage:
         ])
 
     @staticmethod
-    def wrap_source(source):
+    def wrap_source(source, count=4):
         hyp   = HyperionObfuscator()
-        fakes = ''.join(ClassCamouflage._fake(hyp._randvar()) for _ in range(10))
+        fakes = ''.join(ClassCamouflage._fake(hyp._randvar()) for _ in range(count))
         return fakes + source
 
 
@@ -7525,8 +7531,21 @@ class NinjaEncoder:
             logger.info('Ultimate Adım 5: String table şifreleme')
             obf_source = self.str_table.encrypt_to_table(obf_source)
 
+            # ── (v0.9.5 BOYUT) Junk ayar sabitleri ───────────────────────────
+            # Bu sahte bloklar yalnızca kaynağı değil, NATIVE .so'yu da şişirir:
+            # Cython/Nuitka her sahte try/except, class ve fonksiyonu makine
+            # koduna derler. Aşağıdaki sayılar çıktı boyutunu doğrudan belirler.
+            # Değerleri yükseltmek obfuscation'ı artırır ama .so'yu büyütür;
+            # düşürmek tersi. (Eski değerler: 8 / 10 / 300 / 56 / 50 / 15.)
+            _JUNK_DEAD_CODE   = 4     # dead code bloğu
+            _JUNK_FAKE_CLASS  = 4     # ClassCamouflage sahte class
+            _JUNK_FAKE_EXC    = 60    # FakeException sahte try/except bloğu
+            _JUNK_FAKE_IMPORT = 16    # FakeImportTree sahte import
+            _JUNK_FAKE_PYC    = 12    # FakePycFlood sahte .pyc (ZIP decoy)
+            _JUNK_FAKE_SO     = 6     # FakeSoGenerator sahte .so (ZIP decoy)
+
             logger.info('Ultimate Adım 6: Dead code injection')
-            obf_source = self.dead_code.inject_into_source(obf_source, count=8)
+            obf_source = self.dead_code.inject_into_source(obf_source, count=_JUNK_DEAD_CODE)
 
             logger.info('Ultimate Adım 7: Control flow sahte dal enjeksiyonu')
             obf_source = self.cf_obf.inject_fake_branches(obf_source)
@@ -7540,12 +7559,12 @@ class NinjaEncoder:
             try: obf_source = FakeRecursion.inject(obf_source)
             except Exception as _e: logger.warning(f'FakeRecursion atlandı: {_e}')
 
-            logger.info('Ultimate v5 Adım 8c: ClassCamouflage (10 sahte class)')
-            try: obf_source = ClassCamouflage.wrap_source(obf_source)
+            logger.info(f'Ultimate v5 Adım 8c: ClassCamouflage ({_JUNK_FAKE_CLASS} sahte class)')
+            try: obf_source = ClassCamouflage.wrap_source(obf_source, count=_JUNK_FAKE_CLASS)
             except Exception as _e: logger.warning(f'ClassCamouflage atlandı: {_e}')
 
-            logger.info('Ultimate v5 Adım 8d: FakeExceptionInjector (300 blok)')
-            try: obf_source = FakeExceptionInjector.inject_into_source(obf_source, count=300)
+            logger.info(f'Ultimate v5 Adım 8d: FakeExceptionInjector ({_JUNK_FAKE_EXC} blok)')
+            try: obf_source = FakeExceptionInjector.inject_into_source(obf_source, count=_JUNK_FAKE_EXC)
             except Exception as _e: logger.warning(f'FakeException atlandı: {_e}')
 
             logger.info('Ultimate v9 Adım 8d2: Canlı decoy (sahte bloklara gerçek anti-debug)')
@@ -7558,9 +7577,9 @@ class NinjaEncoder:
             try: obf_source = StringSplitter.transform_source(obf_source)
             except Exception as _e: logger.warning(f'StringSplitter atlandı: {_e}')
 
-            logger.info('Ultimate v5 Adım 8f: FakeImportTree (56 sahte import)')
+            logger.info(f'Ultimate v5 Adım 8f: FakeImportTree ({_JUNK_FAKE_IMPORT} sahte import)')
             try:
-                fake_imports = FakeImportTree.generate(56)
+                fake_imports = FakeImportTree.generate(_JUNK_FAKE_IMPORT)
                 obf_source   = fake_imports + '\n' + obf_source
             except Exception as _e: logger.warning(f'FakeImportTree atlandı: {_e}')
 
@@ -7992,8 +8011,8 @@ import shutil
                         logger.warning(f'  strip atlandı: {_se}')
                     zf.write(stripped_native, Path(native_file).name)
                     logger.info(f'  Native binary: {Path(native_file).name} ({os.path.getsize(stripped_native):,} byte)')
-                FakeSoGenerator.add_to_zip(zf, count=15)
-                FakePycFlood.add_to_zip(zf, count=50)
+                FakeSoGenerator.add_to_zip(zf, count=_JUNK_FAKE_SO)
+                FakePycFlood.add_to_zip(zf, count=_JUNK_FAKE_PYC)
                 logger.info('  50 sahte .pyc + 15 sahte .so tuzağı eklendi')
                 fake_pyc = bytes([0x0d, 0x0a, 0x00, 0x00]) + os.urandom(random.randint(512, 2048))
                 zf.writestr('_cache.pyc', fake_pyc)
