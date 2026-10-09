@@ -3653,6 +3653,7 @@ class NinjaVM:
 def _nv_exec(_p, _a, _g):
     _c=_p["c"]; _k=_p["k"]; _nm=_p["n"]; _L=[None]*_p["l"]
     _e=_p.get("e", [])
+    {self._decode_setup()}
     _i=0
     for _x in _a: _L[_i]=_x; _i+=1
     _s=[]; _ip=0; _N=len(_c); _cur_exc=None
@@ -3718,6 +3719,12 @@ def _nv_cmp(_o,_a,_b):
     def _arg_read(self) -> str:
         """Dispatch döngüsünde operand okuma ifadesi (varsayılan: ham)."""
         return '_c[_ip][1]'
+
+    def _decode_setup(self) -> str:
+        """_nv_exec başında, dispatch döngüsünden ÖNCE çalışacak ek kurulum
+        satırı (ör. per-fonksiyon decode anahtarlarını _p'den okuma).
+        Varsayılan: hiçbir şey. 8 boşluk girinti ile tek satır döndürülmeli."""
+        return ''
 
     def _stub_decode(self, gvar: str, indent: str) -> str:
         """Stub içinde blob'u program sözlüğüne (_pp) çözen satır(lar)."""
@@ -4147,15 +4154,20 @@ class NinjaVMHardened(NinjaVM):
     # encode-zamanı (_keystream) ve runtime (_nv_ks) AYNI formülü kullanır.
     _LCG_MULS = (1103515245, 1664525, 22695477, 214013, 1597334677)
 
+    # operand çarpanı için tek sayı havuzu (tam tersinir tamsayı bölmesi için)
+    _ODDS = tuple(range(3, 252, 2))
+
     def __init__(self):
         super().__init__()
-        _odds = [x for x in range(3, 252, 2)]        # tek sayılar → tam tersinir
-        self._opK  = random.randint(1, 0xFF)          # op XOR anahtarı
-        self._argA = random.choice(_odds)             # operand çarpanı (tek)
-        self._argB = random.randint(1, 1 << 20)       # operand ofseti
+        # Blob şifrelemesi build genelinde ortak (static-dump savunması).
         self._blobSeed = random.randint(1, (1 << 31) - 1)
         self._lcgA = random.choice(self._LCG_MULS)
         self._lcgC = random.randint(1, (1 << 31) - 1) | 1  # tek sayı
+        # (v0.9.5 #3) op/arg ISA anahtarları artık PER-FONKSİYON: her VM'li
+        # fonksiyon kendi (ok, aa, ab) üçlüsüyle kodlanır ve bu anahtarlar
+        # (şifreli) blob içinde taşınır; dispatch döngüsü _p'den okur. Böylece
+        # bir fonksiyonun ISA'sını çözen analist, diğer her fonksiyon için işi
+        # sıfırdan tekrarlamak zorunda kalır (build başına değil, fonksiyon başına).
 
     # ── keystream (encode-zamanı) — runtime'daki _nv_ks ile BİREBİR aynı ──
     def _keystream(self, seed: int, n: int) -> bytes:
@@ -4172,13 +4184,18 @@ class NinjaVMHardened(NinjaVM):
         # _nv_open içinde birebir).
         return (self._blobSeed + n * 0x9E3779B1) & 0xFFFFFFFF
 
-    # ── seam override: operand dönüşümü + şifreli blob üret ──
+    # ── seam override: PER-FONKSİYON operand dönüşümü + şifreli blob üret ──
     def _prog_literal(self, prog) -> str:
         import marshal as _m, base64 as _b64
-        A, B, K = self._argA, self._argB, self._opK
+        # Bu fonksiyona özgü ISA anahtarları (her çağrıda yeniden üretilir →
+        # her VM'li fonksiyon farklı). Anahtarlar şifreli blob içinde taşınır.
+        K = random.randint(1, 0xFF)          # op XOR
+        A = random.choice(self._ODDS)        # operand çarpanı (tek → tersinir)
+        B = random.randint(1, 1 << 20)       # operand ofseti
         code2 = [[op ^ K, arg * A + B] for (op, arg) in prog['code']]
         raw = _m.dumps({'c': code2, 'k': prog['consts'], 'n': prog['names'],
-                        'l': prog['nlocals'], 'e': prog.get('exc_table', [])})
+                        'l': prog['nlocals'], 'e': prog.get('exc_table', []),
+                        'ok': K, 'aa': A, 'ab': B})
         ks = self._keystream(self._seed_for(len(raw)), len(raw))
         enc = bytes(b ^ k for b, k in zip(raw, ks))
         return _b64.b64encode(enc).decode()
@@ -4191,12 +4208,17 @@ class NinjaVMHardened(NinjaVM):
         raw = bytes(b ^ k for b, k in zip(enc, ks))
         return _m.loads(raw)   # runtime dispatch döngüsü op^K / arg*A+B'yi çözer
 
-    # ── seam override: runtime inline decode ifadeleri ──
+    # ── seam override: per-fonksiyon decode (anahtarlar _p'den, _nv_exec başında) ──
+    def _decode_setup(self) -> str:
+        # _nv_exec başında bir kez: bu fonksiyonun ISA anahtarlarını _p'den oku.
+        # Varsayılanlar (0/1/0) dönüşümü kimliğe indirger → eski bloblar da güvenli.
+        return '_ok=_p.get("ok",0); _aa=_p.get("aa",1); _ab=_p.get("ab",0)'
+
     def _op_read(self) -> str:
-        return f'(_c[_ip][0] ^ {self._opK})'
+        return '(_c[_ip][0] ^ _ok)'
 
     def _arg_read(self) -> str:
-        return f'((_c[_ip][1] - {self._argB}) // {self._argA})'
+        return '((_c[_ip][1] - _ab) // _aa)'
 
     # ── seam override: lazy+cache çözme stub satırı ──
     def _stub_decode(self, gvar: str, indent: str) -> str:

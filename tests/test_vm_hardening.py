@@ -156,13 +156,62 @@ def test_polymorphic_across_builds():
     vm1, out1, ns1 = _build(mod, CALC_SRC, "calc")
     vm2, out2, ns2 = _build(mod, CALC_SRC, "calc")
     assert _blob_of(out1, "calc") != _blob_of(out2, "calc"), "blob'lar build'ler arası aynı"
-    keys1 = (vm1._opK, vm1._argA, vm1._argB, vm1._blobSeed, vm1._lcgA, vm1._lcgC)
-    keys2 = (vm2._opK, vm2._argA, vm2._argB, vm2._blobSeed, vm2._lcgA, vm2._lcgC)
-    assert keys1 != keys2, "anahtarlar build'ler arası aynı"
+    keys1 = (vm1._blobSeed, vm1._lcgA, vm1._lcgC)
+    keys2 = (vm2._blobSeed, vm2._lcgA, vm2._lcgC)
+    assert keys1 != keys2, "blob anahtarları build'ler arası aynı"
     # her iki build de doğru çalışmalı
     for a, b in [(3, 4), (7, 7), (0, 9)]:
         assert ns1["calc"](a, b) == _calc_ref(a, b)
         assert ns2["calc"](a, b) == _calc_ref(a, b)
+
+
+MULTI_SRC = (
+    "def alpha(a, b):\n"
+    "    t = 0\n"
+    "    for i in range(a):\n"
+    "        t += i * b\n"
+    "    return t - b if t > b else t + b\n"
+    "def beta(x, y):\n"
+    "    s = 1\n"
+    "    for i in range(1, x + 1):\n"
+    "        s = s * i + y\n"
+    "    return s\n"
+)
+
+
+def _alpha_ref(a, b):
+    t = 0
+    for i in range(a):
+        t += i * b
+    return t - b if t > b else t + b
+
+
+def _beta_ref(x, y):
+    s = 1
+    for i in range(1, x + 1):
+        s = s * i + y
+    return s
+
+
+def test_per_function_isa():
+    # (#3) Aynı build içinde her VM'li fonksiyon KENDİ op/arg anahtarlarıyla
+    # kodlanır → bir fonksiyonun ISA'sını çözmek diğerini çözmez.
+    mod = _load_module()
+    vm = mod.NinjaVMHardened()
+    out, moved = vm.transform_source(MULTI_SRC, selected_names={"alpha", "beta"})
+    assert moved == 2
+    ns = {}
+    exec(out, ns)
+    for a, b in [(3, 4), (7, 2), (0, 5), (9, 9)]:
+        assert ns["alpha"](a, b) == _alpha_ref(a, b), (a, b)
+    for x, y in [(3, 4), (5, 1), (1, 9), (6, 2)]:
+        assert ns["beta"](x, y) == _beta_ref(x, y), (x, y)
+
+    def _isa(fn):
+        blob = _blob_of(out, fn)
+        d = vm._prog_unseal(blob)
+        return (d["ok"], d["aa"], d["ab"])
+    assert _isa("alpha") != _isa("beta"), "iki fonksiyon aynı ISA anahtarlarını paylaşıyor"
 
 
 def test_base_ninjavm_unchanged():
