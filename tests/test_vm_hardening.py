@@ -215,6 +215,36 @@ def test_handler_body_variants():
     assert len(forms) >= 3, f"handler gövde varyantları yetersiz ({forms})"
 
 
+NEG_SRC = "def neg(x):\n    return -x\n"
+
+
+def test_unary_neg_preserves_negative_zero():
+    # Regresyon: UNARY_NEG handler'i tekli eksi (-x) olmali, ikili cikarma (0-x)
+    # DEGIL. Fark yalnizca float/complex -0.0 ve ozel __neg__ tiplerinde gorunur
+    # (tamsayida gizli kalir). random.choice varyanti yuzunden build'e bagli
+    # olabilecegi icin cok sayida build denenir.
+    import math
+    mod = _load_module()
+    for _ in range(30):
+        vm = mod.NinjaVMHardened()
+        out, moved = vm.transform_source(NEG_SRC, selected_names={"neg"})
+        assert moved == 1
+        ns = {}
+        exec(out, ns)
+        r = ns["neg"](0.0)
+        assert math.copysign(1.0, r) == -1.0, "VM -0.0 isaretini kaybetti (0-x varyanti?)"
+        assert ns["neg"](5) == -5 and ns["neg"](-3) == 3
+
+
+def test_no_subtraction_masquerading_as_negation():
+    # Savunma: hicbir handler varyanti tekli eksiyi ikili cikarmayla degistirmesin.
+    mod = _load_module()
+    for default, variants in mod.NinjaVMHardened._BODY_VARIANTS.items():
+        if '-_s.pop()' in default:  # UNARY_NEG girisi
+            assert all('0-_s.pop()' not in v for v in variants), \
+                f"UNARY_NEG varyanti ikili cikarma iceriyor: {variants}"
+
+
 def test_per_function_isa():
     # (#3) Aynı build içinde her VM'li fonksiyon KENDİ op/arg anahtarlarıyla
     # kodlanır → bir fonksiyonun ISA'sını çözmek diğerini çözmez.

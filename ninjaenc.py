@@ -4246,7 +4246,11 @@ class NinjaVMHardened(NinjaVM):
         '_L[_g2]=_s.pop()':     ('_L[_g2]=_s.pop()', '_L[_g2]=_s.pop(-1)', '_L[_g2]=_s[-1]; del _s[-1]'),
         '_ip=_g2':              ('_ip=_g2', '_ip=_g2+0', '_ip=(_g2)|0'),
         '_s.append(_s[-1])':    ('_s.append(_s[-1])', '_s.append(_s[len(_s)-1])', '_s += [_s[-1]]'),
-        '_s.append(-_s.pop())': ('_s.append(-_s.pop())', '_s.append(0-_s.pop())'),
+        # NOT: '0-_s.pop()' BIR VARYANT DEGIL — tekli eksi (x.__neg__) ile ikili
+        # cikarma (0-x) esdeger DEGIL: (1) IEEE -0.0: -(0.0)=-0.0 ama 0-0.0=0.0
+        # (isaret biti), (2) __neg__ var __rsub__ yok tipte -obj calisir, 0-obj
+        # TypeError. O yuzden UNARY_NEG hep gercek tekli eksiyi kullanir.
+        '_s.append(-_s.pop())': ('_s.append(-_s.pop())',),
         '_s.append(not _s.pop())': ('_s.append(not _s.pop())', '_s.append(False if _s.pop() else True)'),
         '_s.append(bool(_s.pop()))': ('_s.append(bool(_s.pop()))', '_s.append(True if _s.pop() else False)'),
         'return _s.pop()':      ('return _s.pop()', 'return _s.pop(-1)'),
