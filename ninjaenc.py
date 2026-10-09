@@ -3652,7 +3652,7 @@ def _nv_exec(_p, _a, _g):
     _s=[]; _ip=0; _N=len(_c); _cur_exc=None
     import builtins as _b
     while _ip<_N:
-        _o=_c[_ip][0]; _g2=_c[_ip][1]; _cur_ip=_ip; _ip+=1
+        _o={self._op_read()}; _g2={self._arg_read()}; _cur_ip=_ip; _ip+=1
         try:
 {_dispatch}
         except BaseException as _exc:
@@ -3681,10 +3681,10 @@ def _nv_cmp(_o,_a,_b):
     raise RuntimeError()
 '''
 
-    @staticmethod
-    def _prog_literal(prog) -> str:
-        # Programı kompakt sözlük literaline çevir (marshal+b64 de olabilirdi;
-        # okunabilirliği azaltmak için b64 marshal kullanıyoruz)
+    def _prog_literal(self, prog) -> str:
+        # Programı kompakt blob'a çevir. Temel NinjaVM düz marshal+b64 üretir.
+        # NinjaVMHardened bu metodu override edip operand dönüşümü + build'e
+        # özgü keystream şifrelemesi ekler (bkz. "VM Hardening Layer" bölümü).
         import marshal as _m, base64 as _b64
         blob = _b64.b64encode(_m.dumps({
             'c': prog['code'], 'k': prog['consts'],
@@ -3692,6 +3692,36 @@ def _nv_cmp(_o,_a,_b):
             'e': prog.get('exc_table', []),  # (v16) exception table
         })).decode()
         return blob
+
+    def _prog_unseal(self, blob):
+        # _prog_literal'in tersi: blob → runtime'ın beklediği program sözlüğü.
+        # Temelde düz marshal.loads. NinjaVMHardened bunu override edip şifreyi
+        # çözer; operand dönüşümünü ÇÖZMEZ (runtime dispatch döngüsü inline
+        # çözer), böylece encode-zamanı doğrulayıcısı gerçek runtime ile
+        # birebir aynı programı çalıştırır.
+        import marshal as _m, base64 as _b64
+        return _m.loads(_b64.b64decode(blob))
+
+    # ── Runtime "seam"leri — NinjaVMHardened override eder, temelde kimlik ──
+    # Bu kancalar sayesinde sertleştirme mantığı ayrı bir bölümde durur ve bu
+    # sınıfın çalışan davranışı birebir korunur (varsayılanlar dönüşüm yapmaz).
+    def _op_read(self) -> str:
+        """Dispatch döngüsünde opcode okuma ifadesi (varsayılan: ham)."""
+        return '_c[_ip][0]'
+
+    def _arg_read(self) -> str:
+        """Dispatch döngüsünde operand okuma ifadesi (varsayılan: ham)."""
+        return '_c[_ip][1]'
+
+    def _stub_decode(self, gvar: str, indent: str) -> str:
+        """Stub içinde blob'u program sözlüğüne (_pp) çözen satır(lar)."""
+        return (f"{indent}    import marshal as _m, base64 as _b64\n"
+                f"{indent}    _pp = _m.loads(_b64.b64decode({gvar}))\n")
+
+    def _runtime_prelude(self) -> str:
+        """Interpreter başlığına eklenecek ek runtime yardımcıları (ör. lazy
+        çözme/cache). Varsayılan: hiçbir şey."""
+        return ''
 
     def transform_source(self, source: str, selected_names: set = None):
         """
@@ -3776,9 +3806,8 @@ def _nv_cmp(_o,_a,_b):
             indent = ' ' * (node.col_offset)
             stub = (
                 f"{indent}def {fname}({argsig}):\n"
-                f"{indent}    import marshal as _m, base64 as _b64\n"
-                f"{indent}    _pp = _m.loads(_b64.b64decode({gvar}))\n"
-                f"{indent}    return _nv_exec(_pp, {arglist}, globals())\n"
+                + self._stub_decode(gvar, indent)
+                + f"{indent}    return _nv_exec(_pp, {arglist}, globals())\n"
             )
             replacements.append((node.lineno, node.end_lineno, stub))
             moved += 1
@@ -3794,6 +3823,9 @@ def _nv_cmp(_o,_a,_b):
         new_source = ''.join(src_lines)
         # prog blob'larını ve interpreter'ı en başa ekle
         header = self.runtime_source() + '\n'
+        # (VM Hardening Layer) lazy çözme/cache gibi ek runtime yardımcıları —
+        # temelde boş, NinjaVMHardened doldurur.
+        header += self._runtime_prelude()
         # no-op decorator tanımı (kaynakta @ninja_vm kalmışsa çalışsın diye)
         header += 'def ninja_vm(_f):\n    return _f\n\n'
         for gvar, blob in prog_blobs.items():
@@ -3927,8 +3959,7 @@ def _nv_cmp(_o,_a,_b):
             exec(rt, rt_ns)
             nv_exec = rt_ns['_nv_exec']
 
-            import marshal as _mm, base64 as _bb
-            _runtime_prog = _mm.loads(_bb.b64decode(self._prog_literal(prog)))
+            _runtime_prog = self._prog_unseal(self._prog_literal(prog))
 
             n = len(argnames)
             # güvenli deneme girdileri (çeşitli tipler dene)
@@ -4048,8 +4079,7 @@ def _nv_cmp(_o,_a,_b):
                 rt_ns = {}
                 exec(rt, rt_ns)
                 nv_exec = rt_ns['_nv_exec']
-                import marshal as _mm, base64 as _bb
-                _runtime_prog = _mm.loads(_bb.b64decode(self._prog_literal(prog)))
+                _runtime_prog = self._prog_unseal(self._prog_literal(prog))
                 n = len(argnames)
                 trials = [(1,)*n, (2,)*n, (0,)*n, tuple(range(1,n+1))] if n else [()]
                 for args in trials:
@@ -4068,6 +4098,126 @@ def _nv_cmp(_o,_a,_b):
         # Bu fonksiyonlar HTTP çağrısı yapıyor; test edemeyiz ama VM bytecode'u
         # doğru çevirdi → runtime'da çalışır. Exception-table artık destekleniyor.
         return (True, 'API/IO fonksiyon — yapısal kontrol geçti')
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# BÖLÜM: VM HARDENING LAYER  (v0.9.5)
+# ------------------------------------------------------------------------------
+# PROBLEM: NinjaVM zaten her build'de opcode numaralarını VE handler sırasını
+# rastgele yapıyor. Yine de çıktılar "4-5 saatte" otomatik devirtualizer ile
+# çözülüyordu. Sebep iki yapısal açık:
+#   (1) Program blob'u düz `marshal.dumps`+base64 idi → analist çalışma anını
+#       beklemeden `marshal.loads(b64decode(blob))` ile TÜM programı (sabitler,
+#       global isimler, [op,arg] akışı) static olarak okuyabiliyordu.
+#   (2) Operandlar (const indeksi, jump hedefi, sub-op seçici) ham sayıydı →
+#       blob bir kez dump edilince kontrol akışı doğrudan görünüyordu.
+#
+# ÇÖZÜM (hepsi BUILD'E ÖZGÜ anahtarlarla → her çıktı farklı = polimorfik):
+#   • OPERAND/OP DÖNÜŞÜMÜ: blob'da `op ^ opK` ve `arg*A + B` saklanır; dispatch
+#     döngüsü bunları inline çözer (_op_read/_arg_read seam'leri). A tek sayı →
+#     tamsayı bölmesi birebir tersinir (negatif arg dahil).
+#   • BLOB ŞİFRELEME: marshal baytları, build'e özgü bir LCG keystream'i ile
+#     XOR'lanır. Static `marshal.loads` artık imkânsız. Anahtar ham bayt dizisi
+#     olarak GÖMÜLÜ DEĞİL — runtime'da seed + LCG katsayılarından türetilir.
+#   • LAZY + CACHE: her VM'li fonksiyonun programı İLK çağrıda çözülür ve id()
+#     ile cache'lenir → tüm plaintext tek anda bellekte oturmaz (tek bir bellek
+#     dump'ı her şeyi vermez).
+#
+# TASARIM: Çalışan NinjaVM'i bozmamak için mantık burada izole; sınıf yalnızca
+# NinjaVM'in kimlik-varsayılanlı "seam" kancalarını override eder. Encode-zamanı
+# doğrulayıcısı (_smoke_test_vm / _validate_vm_program) _prog_unseal üstünden
+# çalıştığı için şifreli blob doğrulamayı bozmaz; _nv_open (runtime) ile
+# _prog_unseal (encode) aynı algoritmanın iki kopyasıdır — birlikte güncellenir.
+#
+# SINIR (dürüst not): Bu katman STATİK çözmeyi ve build'ler-arası otomatik
+# yeniden-çözmeyi kırar. Belirlenmiş bir analist yine runtime'da _nv_open/_nv_exec
+# çıktısını (çözülmüş _pp) dump edebilir — pure-Python'da bu kaçınılmaz. Amaç
+# "kırılamaz" değil, eforu saatlerden çok daha yukarı çekmek ve her sürümde
+# bedava yeniden-çözmeyi bitirmektir.
+# ══════════════════════════════════════════════════════════════════════════════
+class NinjaVMHardened(NinjaVM):
+
+    # Build'e özgü seçilen LCG çarpanı havuzu (hepsi tam-periyot dostu klasikler).
+    # encode-zamanı (_keystream) ve runtime (_nv_ks) AYNI formülü kullanır.
+    _LCG_MULS = (1103515245, 1664525, 22695477, 214013, 1597334677)
+
+    def __init__(self):
+        super().__init__()
+        _odds = [x for x in range(3, 252, 2)]        # tek sayılar → tam tersinir
+        self._opK  = random.randint(1, 0xFF)          # op XOR anahtarı
+        self._argA = random.choice(_odds)             # operand çarpanı (tek)
+        self._argB = random.randint(1, 1 << 20)       # operand ofseti
+        self._blobSeed = random.randint(1, (1 << 31) - 1)
+        self._lcgA = random.choice(self._LCG_MULS)
+        self._lcgC = random.randint(1, (1 << 31) - 1) | 1  # tek sayı
+
+    # ── keystream (encode-zamanı) — runtime'daki _nv_ks ile BİREBİR aynı ──
+    def _keystream(self, seed: int, n: int) -> bytes:
+        x = seed & 0xFFFFFFFF
+        a, c = self._lcgA, self._lcgC
+        out = bytearray()
+        for _ in range(n):
+            x = (a * x + c) & 0xFFFFFFFF
+            out.append((x >> 16) & 0xFF)   # yüksek bayt → daha iyi dağılım
+        return bytes(out)
+
+    def _seed_for(self, n: int) -> int:
+        # keystream reuse'u azaltmak için seed'e uzunluğu karıştır (runtime eşi
+        # _nv_open içinde birebir).
+        return (self._blobSeed + n * 0x9E3779B1) & 0xFFFFFFFF
+
+    # ── seam override: operand dönüşümü + şifreli blob üret ──
+    def _prog_literal(self, prog) -> str:
+        import marshal as _m, base64 as _b64
+        A, B, K = self._argA, self._argB, self._opK
+        code2 = [[op ^ K, arg * A + B] for (op, arg) in prog['code']]
+        raw = _m.dumps({'c': code2, 'k': prog['consts'], 'n': prog['names'],
+                        'l': prog['nlocals'], 'e': prog.get('exc_table', [])})
+        ks = self._keystream(self._seed_for(len(raw)), len(raw))
+        enc = bytes(b ^ k for b, k in zip(raw, ks))
+        return _b64.b64encode(enc).decode()
+
+    # ── seam override: şifre çöz → program sözlüğü (operand DÖNÜŞÜK kalır) ──
+    def _prog_unseal(self, blob):
+        import marshal as _m, base64 as _b64
+        enc = _b64.b64decode(blob)
+        ks = self._keystream(self._seed_for(len(enc)), len(enc))
+        raw = bytes(b ^ k for b, k in zip(enc, ks))
+        return _m.loads(raw)   # runtime dispatch döngüsü op^K / arg*A+B'yi çözer
+
+    # ── seam override: runtime inline decode ifadeleri ──
+    def _op_read(self) -> str:
+        return f'(_c[_ip][0] ^ {self._opK})'
+
+    def _arg_read(self) -> str:
+        return f'((_c[_ip][1] - {self._argB}) // {self._argA})'
+
+    # ── seam override: lazy+cache çözme stub satırı ──
+    def _stub_decode(self, gvar: str, indent: str) -> str:
+        return f"{indent}    _pp = _nv_open({gvar})\n"
+
+    # ── seam override: runtime yardımcıları (keystream + lazy çözücü + cache) ──
+    # _nv_ks, yukarıdaki _keystream ile BİREBİR; _nv_open, _prog_unseal ile BİREBİR.
+    def _runtime_prelude(self) -> str:
+        return (
+            "_NV_CACHE = {}\n"
+            "def _nv_ks(_seed, _n, _a=%d, _c=%d):\n"
+            "    _x = _seed & 0xFFFFFFFF; _ob = bytearray()\n"
+            "    for _ in range(_n):\n"
+            "        _x = (_a * _x + _c) & 0xFFFFFFFF; _ob.append((_x >> 16) & 0xFF)\n"
+            "    return bytes(_ob)\n"
+            "def _nv_open(_blob, _s=%d):\n"
+            "    _k = id(_blob)\n"
+            "    _hit = _NV_CACHE.get(_k)\n"
+            "    if _hit is not None: return _hit\n"
+            "    import marshal as _m, base64 as _b64\n"
+            "    _enc = _b64.b64decode(_blob); _n = len(_enc)\n"
+            "    _seed = (_s + _n * 0x9E3779B1) & 0xFFFFFFFF\n"
+            "    _ks = _nv_ks(_seed, _n)\n"
+            "    _raw = bytes(_bb ^ _kk for _bb, _kk in zip(_enc, _ks))\n"
+            "    _pp = _m.loads(_raw); _NV_CACHE[_k] = _pp\n"
+            "    return _pp\n\n"
+        ) % (self._lcgA, self._lcgC, self._blobSeed)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -7270,7 +7420,7 @@ class NinjaEncoder:
         self.memfd       = MemfdExecutor()
         self.wss         = WhitespaceSteganography()
         self.advanced    = NinjaAdvancedIntegrator()   # WBC / EKC / JIT / HVM / Honeypot / LLVM
-        self.ninja_vm    = NinjaVM()                    # gerçek stack-VM (seçili fonksiyonlar)
+        self.ninja_vm    = NinjaVMHardened()            # stack-VM + hardening (şifreli blob/operand/lazy)
         self.temp_dir = None
         self._encoded_python_version = sys.version_info[:2]
 
