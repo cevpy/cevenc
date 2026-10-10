@@ -7357,6 +7357,134 @@ def _hvm_clear():
 # Gerçek mantık şifreli mikro-rutinlerde sessizce çalışır
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# BÖLÜM: FRUSTRATION LAYER — cracker'ı oyalama/yıldırma (pure-client, sunucusuz)
+# ------------------------------------------------------------------------------
+# Felsefe: kodu "çözülemez" yapamayız (kimse yapamaz) ama çözmeye çalışanı
+# ÇILDIRTABİLİRİZ. Opportunist cracker en kolay hedefe gider; seninkini cehenneme
+# çevirince vazgeçer. Üretilen kod obf_source'a enjekte edilir → tüm obfuscation
+# + native derlemeden geçer → gerçek korumadan ayırt edilemez.
+#
+# 4 taktik (hepsi normal çalıştırmada TETİKLENMEZ — yanlış-pozitif ~0):
+#   1. bait_and_keys : sahte "kırılabilir" lisans/premium/decrypt fonksiyonları +
+#      cazip yem anahtarlar (JWT/sk_live/AES/"backdoor" yorumu). Opak-yanlış dal
+#      altında "canlı" görünür ama asla çalışmaz → analist saatlerce yem kovalar.
+#   2. (1 ile birlikte) yem sabitler — çıkarır, dener, çalışmaz, delirir.
+#   3. integrity_poison : kaynak PATCH'lenirse (marker silinirse) çökmez → sessizce
+#      güvenilmez olur (flaky). Çöken kopya "düzelt" der; sessiz bozulan delirtir.
+#      DAR TETİK: yalnız dosya düzenlenmişse → gerçek kullanıcıda ~0 yanlış-pozitif.
+#   4. debugger_traps : tek-adım/zamanlama tespiti → normalde anında no-op; ama
+#      debugger altında pahalı oyalama döngüsüne girer ("az kaldı" hissi, bitmez).
+# ══════════════════════════════════════════════════════════════════════════════
+class FrustrationLayer:
+    _FAKE_KEYS = [
+        ('LICENSE_KEY',      'NJA7-XK92-PQ4M-{0:04X}-R7T2'),
+        ('API_SIGNING_KEY',  'sk_live_{0:012x}aF3hB6jD0iU5tO'),
+        ('_MASTER_SECRET',   'bytes.fromhex("4e4a{0:08x}a7f3b6c1d0e5")'),
+        ('JWT_SECRET',       'eyJhbGciOiJIUzI1NiJ9.{0:08x}.s3cr3t'),
+        ('ADMIN_BYPASS',     'DEBUG_UNLOCK_{0:06X}'),
+    ]
+
+    @staticmethod
+    def _rv(n=None):
+        import random as _r, string as _s
+        return '_' + ''.join(_r.choice(_s.ascii_lowercase) for _ in range(n or _r.randint(6, 11)))
+
+    @classmethod
+    def bait_and_keys(cls) -> str:
+        """Taktik 1+2: sahte kırılabilir lisans/anahtar yemi (asla çalışmaz)."""
+        vf = [cls._rv() for _ in range(5)]
+        n = random.randint(0, 0xFFFFFFFF)
+        keys = '\n'.join(f'{k} = "{v.format(n)}"' if 'fromhex' not in v
+                         else f'{k} = {v.format(n)}' for k, v in cls._FAKE_KEYS)
+        # Opak-yanlış koşul: runtime'da hep False, sabit-katlanamaz (sys referanslı).
+        opq = "len(hex(len(str(__import__('sys').maxsize)))) > 9999"
+        return (
+            "# --- license / activation core (do not edit) ---\n"
+            "# TODO(sec): remove dev backdoor ADMIN_BYPASS before release!\n"
+            f"{keys}\n"
+            f"def {vf[0]}(key):\n"
+            "    import hashlib as _h\n"
+            f"    return _h.sha256((str(key)+'njsalt').encode()).hexdigest().startswith('00')\n"
+            f"def {vf[1]}(token):\n"
+            "    import base64 as _b\n"
+            "    try:\n"
+            "        raw = _b.b64decode(str(token)+'==')\n"
+            "        return bytes((c ^ 0x5A) for c in raw)[:16]\n"
+            "    except Exception:\n"
+            "        return None\n"
+            f"def {vf[2]}(data, key):\n"
+            "    import hashlib as _h\n"
+            "    k = _h.sha256(bytes(key) if isinstance(key,(bytes,bytearray)) else str(key).encode()).digest()\n"
+            "    return bytes((b ^ k[i % len(k)]) for i, b in enumerate(bytes(data)))\n"
+            f"def {vf[3]}():\n"
+            f"    return {vf[0]}(LICENSE_KEY) and {vf[1]}(API_SIGNING_KEY) is not None\n"
+            # 'canlı' görünen ama asla çalışmayan kullanım → dead-code elenmez, analist okur
+            f"if {opq}:\n"
+            f"    if {vf[3]}() and {vf[0]}(ADMIN_BYPASS):\n"
+            f"        _x = {vf[2]}(bytes.fromhex('4e4a5f7061796c6f6164'), _MASTER_SECRET)\n"
+            f"        print(JWT_SECRET, _x)\n"
+        )
+
+    @classmethod
+    def debugger_traps(cls) -> str:
+        """Taktik 4: tek-adım/zamanlama tuzağı. Normalde anında döner; debugger
+        altında (2000-döngü > 0.8s) pahalı ama SONLU oyalamaya girer."""
+        tf = cls._rv()
+        waste = random.randint(60_000_000, 120_000_000)
+        return (
+            f"def {tf}():\n"
+            "    import time as _t\n"
+            "    _s = _t.perf_counter(); _a = 0\n"
+            "    for _i in range(2000): _a += _i * _i\n"
+            "    if _t.perf_counter() - _s > 0.8:\n"   # 2000-döngü 0.8s+ = kesin single-step
+            f"        _b = 0\n"
+            f"        for _j in range({waste}):\n"
+            "            _b = (_b * 1103515245 + 12345) & 0xFFFFFFFF\n"
+            "        return _b\n"
+            "    return _a & 1\n"
+            f"try:\n    {tf}()\nexcept Exception:\n    pass\n"   # normalde anında no-op
+        )
+
+    @classmethod
+    def integrity_poison(cls) -> str:
+        """Taktik 3: SESSİZ SABOTAJ — yalnız bir debugger/tracer takılıyken (normal
+        kullanıcıda ASLA olmaz → ~0 yanlış-pozitif) çökmeden randomness'i bozar →
+        tool sessizce güvenilmez olur. Mevcut çökme-anti-debug'ı tamamlar: cracker
+        onu kaldırsa bile bu gizli zehir, hâlâ debug ediyorsa devreye girer. Çökme
+        'bir yeri boz' der; sessiz bozulma delirtir (neyi bozduğunu bulamaz)."""
+        pf = cls._rv()
+        return (
+            f"def {pf}():\n"
+            "    try:\n"
+            "        import sys as _s\n"
+            "        _tr = False\n"
+            "        try:\n"
+            "            if _s.gettrace() is not None: _tr = True\n"
+            "        except Exception: pass\n"
+            "        try:\n"
+            "            with open('/proc/self/status') as _f:\n"
+            "                for _l in _f:\n"
+            "                    if _l.startswith('TracerPid:') and int(_l.split(':')[1]) != 0:\n"
+            "                        _tr = True; break\n"
+            "        except Exception: pass\n"
+            "        if _tr:\n"
+            "            import random as _r\n"
+            "            _r.random = lambda: 0.42\n"          # randomness ölür → güvenilmez
+            "            _r.randint = lambda a, b=None: a\n"  # seçimler hep ilk değere düşer
+            "            _r.choice = lambda s: (s[0] if s else None)\n"
+            "    except Exception:\n"
+            "        pass\n"
+            f"try:\n    {pf}()\nexcept Exception:\n    pass\n"
+        )
+
+    @classmethod
+    def generate(cls) -> str:
+        """Üç parçayı birleştir → obf_source'a enjekte edilecek tek blok."""
+        return (cls.bait_and_keys() + "\n" + cls.integrity_poison() + "\n" +
+                cls.debugger_traps() + "\n")
+
+
 class HoneypotGenerator:
     """
     Deceptive Execution mimarisi.
@@ -7785,6 +7913,18 @@ class NinjaEncoder:
             # çalışma anında adları bulamaz.
             obf_source = self.ast_obf.obfuscate(
                 source_code, extra_protected=getattr(self.ninja_vm, 'protected_names', None))
+
+            # (FrustrationLayer) cracker'ı oyalayan aldatma bloğu: sahte lisans/anahtar
+            # yemi + debugger tuzağı + sessiz sabotaj. obf_source'a enjekte → sonraki
+            # tüm katmanlar + native derleme işler → gerçek koddan ayırt edilemez.
+            # Normal çalıştırmada hiçbiri tetiklenmez (yem opak-yanlış, trap/zehir
+            # yalnız debugger altında). Kaynağın EN BAŞINA konur ki importlar üstte kalsın.
+            try:
+                _frust = FrustrationLayer.generate()
+                obf_source = _frust + '\n' + obf_source
+                logger.info('Ultimate Adım 1b: FrustrationLayer (yem + debugger tuzağı + sessiz sabotaj) enjekte edildi')
+            except Exception as _fe:
+                logger.warning(f'  FrustrationLayer atlandı: {_fe}')
 
             nuitka_source = obf_source
 
