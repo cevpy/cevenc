@@ -5102,6 +5102,135 @@ del {v[0]}
 if {v[3]} is not None and hasattr({v[3]}, 'run'): {v[3]}.run()
 """
 
+# ══════════════════════════════════════════════════════════════════════════════
+# BÖLÜM: WATERMARK — per-müşteri gizli iz (sunucu GEREKTİRMEZ)
+# ------------------------------------------------------------------------------
+# AMAÇ: "kodum çalınıp satılıyor" sorununu takip ile çözer. Her müşteri için
+# benzersiz bir etiket (ör. kullanıcı adı/lisans no) çıktıya GİZLİCE gömülür.
+# Sızan/satılan bir kopya ele geçince sahibi (sen) izi çıkarıp KİMİN sızdırdığını
+# bulur → o müşteriyi kesersin. Çözülemezlik sağlamaz; hesap verebilirlik sağlar.
+#
+# GİZLİLİK: Etiket düz metin DEĞİL — yalnızca SENİN bildiğin OWNER_SECRET ile
+# çözülebilen bir token olarak gömülür. Kopyayı alan, kendi etiketini okuyamaz/
+# değiştiremez (secret'i bilmeden). İz birden çok kanala gömülür (ZIP içi gizli
+# girdi + whitespace stego) → birini silmek diğerini bırakır.
+#
+# DÜRÜST SINIR: Kararlı biri tüm kanalları bulup silebilir (her filigran gibi).
+# Asıl değer, kopyayı OLDUĞU GİBİ yeniden satan yaygın durumda izin kalmasıdır.
+# ══════════════════════════════════════════════════════════════════════════════
+class Watermark:
+    # !!! BUNU BİR KEZ KENDİ GİZLİ DEĞERİNLE DEĞİŞTİR VE SAKLA !!!
+    # Bu secret SENDE kalır (encoder'da). İzleri yalnızca bununla çözebilirsin;
+    # değiştirirsen eski build'lerin izlerini çözemezsin. Başkasına verme.
+    OWNER_SECRET = b'CHANGE-ME-ninja-owner-secret-please-edit'
+
+    # ZIP içinde izin saklandığı masum görünen giriş adları (çoklu = dayanıklı)
+    _ZIP_NAMES = ('.njmeta', '__pycache__/.cache.bin')
+    _MARK = b'NJWM1:'   # token ön eki (owner tarama imzası)
+
+    @staticmethod
+    def make_token(tag: str, secret: bytes = None) -> bytes:
+        """tag → OWNER_SECRET ile şifreli, CRC'li token (yalnızca sahip çözer)."""
+        secret = secret if secret is not None else Watermark.OWNER_SECRET
+        salt = os.urandom(8)
+        key = hashlib.sha256(secret + salt).digest()
+        data = tag.encode('utf-8')
+        # düz-metin bütünlük etiketi → yanlış secret ile çözülürse eşleşmez (reddedilir)
+        plain = hashlib.sha256(data).digest()[:4] + data
+        ks = (key * ((len(plain) // 32) + 2))[:len(plain)]
+        ct = bytes(d ^ k for d, k in zip(plain, ks))
+        blob = salt + len(ct).to_bytes(2, 'big') + ct
+        crc = zlib.crc32(blob).to_bytes(4, 'big')   # transport bütünlüğü
+        return Watermark._MARK + base64.b64encode(blob + crc)
+
+    @staticmethod
+    def _decode_token(tok_b64: bytes, secret: bytes) -> str:
+        try:
+            raw = base64.b64decode(tok_b64)
+            blob, crc = raw[:-4], raw[-4:]
+            if zlib.crc32(blob).to_bytes(4, 'big') != crc:
+                return None
+            salt = blob[:8]
+            n = int.from_bytes(blob[8:10], 'big')
+            ct = blob[10:10 + n]
+            key = hashlib.sha256(secret + salt).digest()
+            ks = (key * ((n // 32) + 2))[:n]
+            plain = bytes(c ^ k for c, k in zip(ct, ks))
+            check, data = plain[:4], plain[4:]
+            if hashlib.sha256(data).digest()[:4] != check:
+                return None   # yanlış secret veya bozuk → eşleşme yok
+            return data.decode('utf-8', 'replace')
+        except Exception:
+            return None
+
+    @staticmethod
+    def fingerprint(tag: str, secret: bytes = None) -> str:
+        """Kısa, greplenebilir parmak izi (sahip müşteri listesiyle eşler)."""
+        secret = secret if secret is not None else Watermark.OWNER_SECRET
+        return hashlib.sha256(secret + b'|fp|' + tag.encode('utf-8')).hexdigest()[:16]
+
+    @staticmethod
+    def embed_in_zip(zf, tag: str) -> None:
+        """Token'ı ZIP içine birkaç masum giriş olarak yaz (çoklu kanal)."""
+        tok = Watermark.make_token(tag)
+        for nm in Watermark._ZIP_NAMES:
+            try:
+                # SIKIŞTIRMASIZ sakla → 'NJWM1:' imzası decode edilmiş ZIP
+                # baytlarında DÜZ görünür; ZIP tam açılamasa bile ham tarama bulur.
+                zf.writestr(nm, tok, compress_type=zipfile.ZIP_STORED)
+            except Exception:
+                pass
+
+    @staticmethod
+    def extract(data, secret: bytes = None) -> list:
+        """Çıktı dosyası baytlarından/metninden gömülü etiket(ler)i çöz.
+        data: bytes veya str (çıktı .py içeriği) ya da dosya yolu."""
+        secret = secret if secret is not None else Watermark.OWNER_SECRET
+        if isinstance(data, str) and os.path.isfile(data):
+            with open(data, 'rb') as f:
+                data = f.read()
+        if isinstance(data, str):
+            data = data.encode('utf-8', 'replace')
+        found = []
+
+        def _scan(buf: bytes):
+            i = 0
+            while True:
+                j = buf.find(Watermark._MARK, i)
+                if j < 0:
+                    break
+                k = j + len(Watermark._MARK)
+                m = k
+                _ok = set(b'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=')
+                while m < len(buf) and buf[m] in _ok:
+                    m += 1
+                tag = Watermark._decode_token(buf[k:m], secret)
+                if tag and tag not in found:
+                    found.append(tag)
+                i = m + 1
+
+        _scan(data)
+        # çıktı base64 bir ZIP sarmalıyor olabilir → en büyük b64 bloğu açıp tara
+        try:
+            import re as _re
+            for mobj in _re.finditer(rb'[A-Za-z0-9+/]{200,}={0,2}', data):
+                try:
+                    raw = base64.b64decode(mobj.group(0))
+                except Exception:
+                    continue
+                _scan(raw)
+                try:
+                    import io as _io, zipfile as _zf
+                    with _zf.ZipFile(_io.BytesIO(raw)) as _z:
+                        for _n in _z.namelist():
+                            _scan(_z.read(_n))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        return found
+
+
 class WhitespaceSteganography:
     """
     Wrapper kodunun satır sonlarına binary veri kodlar.
@@ -7579,7 +7708,7 @@ class NinjaEncoder:
             shutil.rmtree(self.temp_dir)
 
     def encode_ultimate(self, input_file, output_file=None, use_cython=True, use_nuitka=True,
-                        seed=None, assume_yes=False):
+                        seed=None, assume_yes=False, watermark=None):
         if output_file is None:
             base = os.path.splitext(input_file)[0]
             output_file = f'{base}_enc.py'
@@ -8167,6 +8296,11 @@ import shutil
                 FakeSoGenerator.add_to_zip(zf, count=_JUNK_FAKE_SO)
                 FakePycFlood.add_to_zip(zf, count=_JUNK_FAKE_PYC)
                 logger.info(f'  {_JUNK_FAKE_PYC} sahte .pyc + {_JUNK_FAKE_SO} sahte .so tuzağı eklendi')
+                # (filigran) per-müşteri gizli iz → sızan kopyada kimin olduğunu bul
+                if watermark:
+                    Watermark.embed_in_zip(zf, watermark)
+                    logger.info(f'  Watermark gömüldü (fp={Watermark.fingerprint(watermark)}) — '
+                                f'--extract-watermark ile çıkarılır')
                 fake_pyc = bytes([0x0d, 0x0a, 0x00, 0x00]) + os.urandom(random.randint(512, 2048))
                 zf.writestr('_cache.pyc', fake_pyc)
                 zf.writestr('__script__.bin', os.urandom(random.randint(256, 512)))
@@ -8399,7 +8533,22 @@ def main():
                         help='Obfuscation seed — aynı seed → aynı çıktı (varsayılan: rastgele)')
     parser.add_argument('--yes', '-y', action='store_true',
                         help='Eksik derleme aracını (Nuitka) sormadan otomatik kur')
+    parser.add_argument('--watermark', '--wm', default=None, metavar='ETIKET',
+                        help='Per-müşteri gizli iz (ör. müşteri adı/lisans no) — sızan kopyada iz kalır')
+    parser.add_argument('--extract-watermark', default=None, metavar='DOSYA',
+                        help='Şifreli bir çıktıdan gömülü filigranı çıkar (OWNER_SECRET gerekir)')
     args = parser.parse_args()
+
+    # ── Filigran çıkarma modu (encode yapmaz, sadece okur) ──
+    if getattr(args, 'extract_watermark', None):
+        tags = Watermark.extract(args.extract_watermark)
+        if tags:
+            print(S + '[+] Gömülü filigran(lar):')
+            for _t in tags:
+                print(S + f'    → {B}{_t}')
+        else:
+            print('\x1b[31m[!] Filigran bulunamadı — yanlış OWNER_SECRET ya da izsiz çıktı.\x1b[0m')
+        return
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -8479,13 +8628,22 @@ def main():
             break
 
         args.input = input_file
+        # Filigran sor (opsiyonel) — CLI'da --watermark verilmediyse
+        if not args.watermark:
+            try:
+                _wm = input(f"{Y2}[?] Müşteri/lisans etiketi (filigran — sızan kopyada iz kalır, boş=atla): {X2}").strip()
+                if _wm:
+                    args.watermark = _wm
+            except (EOFError, KeyboardInterrupt):
+                pass
         # ────────────────────────────────────────────────────────────────
     encoder = NinjaEncoder()
     if args.decode:
         output = encoder.decode_file(args.input, args.output)
         print(S + f'[+] Decoded: {B}{output}')
     else:
-        output = encoder.encode_ultimate(args.input, args.output, seed=args.seed, assume_yes=args.yes)
+        output = encoder.encode_ultimate(args.input, args.output, seed=args.seed,
+                                         assume_yes=args.yes, watermark=args.watermark)
         print(S + f'[+] Encoded: {B}{output}')
         input_size = os.path.getsize(args.input)
         output_size = os.path.getsize(output)

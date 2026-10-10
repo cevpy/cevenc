@@ -311,6 +311,30 @@ def test_base_ninjavm_unchanged():
         assert ns["calc"](a, b) == _calc_ref(a, b)
 
 
+def test_watermark_roundtrip_and_wrong_secret():
+    # Filigran: doğru secret ile çıkar, yanlış secret ile reddet, çoklu müşteri ayrışır.
+    import io, zipfile, base64
+    mod = _load_module()
+    W = mod.Watermark
+    tag = "musteri#A7F3 ahmet"
+
+    def _build_output(t):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr('__main__.py', 'x=1\n' * 40)
+            W.embed_in_zip(zf, t)
+        return (f'_d="{base64.b64encode(buf.getvalue()).decode()}"\n').encode()
+
+    out = _build_output(tag)
+    assert tag in W.extract(out), "doğru secret ile iz çıkmadı"
+    assert W.extract(out, secret=b'yanlis-secret') == [], "yanlış secret kabul edildi"
+    # çoklu müşteri: her biri kendi etiketini verir
+    assert W.extract(_build_output("aliCo")) == ["aliCo"]
+    assert W.extract(_build_output("veliCo")) == ["veliCo"]
+    # fingerprint stabil + ayırt edici
+    assert W.fingerprint("aliCo") == W.fingerprint("aliCo") != W.fingerprint("veliCo")
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
