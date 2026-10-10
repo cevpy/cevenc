@@ -8407,14 +8407,20 @@ import shutil
             zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr('__main__.py', ult_main_v8)
-                # NOT: GERÇEK payload parçaları yazılır. "Native modda decoy" optimizasyonu
-                # geri alındı: native modül runtime'da başarısız olup fallback'e düştüğünde
-                # (şu an öyle oluyor) decoy çöp → "incorrect header check". Fallback'in
-                # çalışır kalması için gerçek parçalar şart. Native düzeldikten sonra
-                # decoy yeniden eklenebilir.
-                for _ci, _chunk in enumerate(lazy_chunks):
-                    zf.writestr(f'__s{_ci}__.bin', _chunk)
-                    logger.info(f'  __s{_ci}__.bin: {len(_chunk)} byte')
+                # (BOYUT) Native çalıştığına göre: native modül __main__'de çağrılıp
+                # RETURN eder → 5-parça Python payload'a HİÇ ulaşılmaz (yalnız native-yok
+                # fallback'i içindi). Native varsa gerçek ~333KB payload yerine küçük
+                # DECOY yaz → çıktı ~330KB küçülür, davranış değişmez, sahte Python yolunu
+                # çözmeye çalışan analist çöp bulur. Native YOKSA (teorik) gerçek parçalar.
+                _native_present = bool(native_file and os.path.exists(native_file))
+                if _native_present:
+                    for _ci in range(len(lazy_chunks)):
+                        zf.writestr(f'__s{_ci}__.bin', os.urandom(random.randint(900, 4096)))
+                    logger.info(f'  LazyChunk: native modda {len(lazy_chunks)} DECOY parça (gerçek payload native .so içinde) — boyut tasarrufu')
+                else:
+                    for _ci, _chunk in enumerate(lazy_chunks):
+                        zf.writestr(f'__s{_ci}__.bin', _chunk)
+                        logger.info(f'  __s{_ci}__.bin: {len(_chunk)} byte')
                 if native_file and os.path.exists(native_file):
                     # strip ile debug sembollerini sil — boyutu %40-60 küçültür
                     stripped_native = native_file
@@ -8479,7 +8485,7 @@ import shutil
                 _rep.append(('Homomorphic VM guard', bool(hvm_live_block),
                              'gömüldü' if hvm_live_block else 'atlandı'))
                 _rep.append(('Cython .so', bool(cython_so_file), 'üretildi' if cython_so_file else 'atlandı'))
-                _rep.append(('Nuitka native (ZORUNLU)', bool(native_file),
+                _rep.append(('Native derleme (ZORUNLU)', bool(native_file),
                              Path(native_file).name if native_file else 'YOK'))
                 _rep.append(('LazyChunk parçalama', bool(lazy_chunks), f'{len(lazy_chunks)} parça'))
                 # ── (v9) Yeni katmanlar ──────────────────────────────────────
@@ -8496,6 +8502,10 @@ import shutil
                 _rep.append(('JunkBytecode (tersinir)', True, 'strip ile geri alınır — marshal bozulmaz'))
                 _rep.append(('Polimorfik VM gövdesi', _vm_moved > 0,
                              'handler sırası her build farklı' if _vm_moved > 0 else 'VM fonksiyon yok'))
+                _rep.append(('FrustrationLayer (yem+tuzak)', True,
+                             'sahte lisans/anahtar + debugger tuzağı + sessiz sabotaj'))
+                _rep.append(('Watermark (filigran)', bool(watermark),
+                             f'iz gömüldü (fp={Watermark.fingerprint(watermark)})' if watermark else 'atlandı (--watermark ile aç)'))
                 self._last_report = _rep
                 _applied = sum(1 for _n, _ok, _d in _rep if _ok)
                 _sep = '─' * 58
@@ -8718,10 +8728,10 @@ def main():
             ("7",  "Fake Branch Injection",     "Sahte if/else dalları — kontrol akışı gizlenir"),
             ("8",  "MetamorphicStager",         "Her encode transform'ları farklı rastgele sırada uygular"),
             ("9",  "FakeRecursion Stub",        "Derin sahte çağrı yığını — stack trace yanıltır"),
-            ("10", "ClassCamouflage x10",       "10 sahte class — hangisi gerçek payload taşıyor bilinmez"),
-            ("11", "FakeException x300 (+decoy)","300 sahte try/except + 5 canlı anti-debug decoy"),
+            ("10", "ClassCamouflage x4",        "4 sahte class — hangisi gerçek payload taşıyor bilinmez"),
+            ("11", "FakeException x60 (+decoy)","60 sahte try/except + 5 canlı anti-debug decoy"),
             ("12", "StringSplitter chr()",      "String literaller chr() zincirine bölünür"),
-            ("13", "FakeImportTree x56",        "56 sahte import — bağımlılık/CFG analizi yanılır"),
+            ("13", "FakeImportTree x16",        "16 sahte import — bağımlılık/CFG analizi yanılır"),
             ("14", "ConstantFoldingSaboteur",   "Sabit tamsayılar runtime ifadeye dönüştürülür"),
             ("15", "LambdaSoupWrapper x20",     "Fonksiyonlar lambda zincirine sarılır"),
             ("16", "Marshal + JunkBytecode",    "Payload marshal.dumps + TERSİNİR junk (runtime strip)"),
@@ -8739,10 +8749,12 @@ def main():
             ("28", "Whitespace Stego",          "Guard bütünlük etiketi whitespace/tab encoding'e gizlenir"),
             ("29", "HW Fingerprint Key",        "hostname+arch+cpu'dan SHA256 türetme — hardcoded değil"),
             ("30", "Runtime Guards",            "JITPoison+MemoryCanary+AntiVM+SysTraceNuke+ImportHookPoison+async anti-debug"),
-            ("31", "Fake .so x15",              "15 sahte native kütüphane ZIP'e eklenir"),
-            ("32", "FakePycFlood x50",          "50 sahte .pyc ZIP'e eklenir"),
-            ("33", "Native (Nuitka ZORUNLU)",   "Kritik kaynak C'ye derlenir (+opsiyonel Cython .so) — fallback YOK"),
+            ("31", "Fake .so x6",               "6 sahte native kütüphane ZIP'e eklenir"),
+            ("32", "FakePycFlood x12",          "12 sahte .pyc ZIP'e eklenir"),
+            ("33", "Native derleme (ZORUNLU)",  "Android'de Cython .so, masaüstünde Nuitka — kritik kaynak native'e"),
             ("34", "ZIP + Chunked Loader",      "ZIP paketi base64 + parçalı loader ile sarılır"),
+            ("35", "Watermark (filigran)",      "Per-müşteri gizli iz — sızan kopyada kimin olduğu bulunur (--watermark)"),
+            ("36", "FrustrationLayer",          "Yem lisans/anahtar + debugger tuzağı + sessiz sabotaj — cracker'ı oyalar"),
         ]
 
         print(f"\n{B2}[ Mevcut Koruma Katmanları ]{X2}")
