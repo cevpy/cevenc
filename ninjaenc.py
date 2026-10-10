@@ -1418,6 +1418,8 @@ _WD_t.start()
 
         native_block = ''
         if native_fname:
+            # Modül adı .so dosya adından türetilmeli (PyInit_<ad> eşleşmesi için).
+            _nativemod = native_fname.split('.')[0]
             native_block = f'''
         _nf='{native_fname}'
         if _nf:
@@ -1426,7 +1428,7 @@ _WD_t.start()
                 try:
                     import importlib.util as _ilu
                     _O.chmod(_np,0o755)
-                    _spec=_ilu.spec_from_file_location('_ninja_mod',_np)
+                    _spec=_ilu.spec_from_file_location('{_nativemod}',_np)
                     _mod=_ilu.module_from_spec(_spec)
                     _spec.loader.exec_module(_mod)
                     if hasattr(_mod,'run'):_mod.run()
@@ -1625,6 +1627,11 @@ if __name__=={main_check}:_run()'''
 
         native_block = ''
         if has_native and native_fname:
+            # Modül adı .so dosya adından TÜRETİLMELİ: C extension yükleyicisi
+            # PyInit_<spec_adı> arar. Cython .so = 'ninja_cython.cpython-313.so'
+            # → PyInit_ninja_cython; Nuitka .so = 'ninja_embed...' → PyInit_ninja_embed.
+            # Sabit '_ninja_mod' kullanmak PyInit__ninja_mod aranmasına → ImportError'a yol açar.
+            _nativemod = native_fname.split('.')[0]
             native_block = (
                 f"        _nf='{native_fname}'\n"
                 f"        if _nf and _O.path.exists(_O.path.join(_d,_nf)):\n"
@@ -1632,7 +1639,7 @@ if __name__=={main_check}:_run()'''
                 f"                import importlib.util as _ilu\n"
                 f"                _np=_O.path.join(_d,_nf)\n"
                 f"                _O.chmod(_np,0o755)\n"
-                f"                _spec=_ilu.spec_from_file_location('_ninja_mod',_np)\n"
+                f"                _spec=_ilu.spec_from_file_location('{_nativemod}',_np)\n"
                 f"                _mod=_ilu.module_from_spec(_spec)\n"
                 f"                _spec.loader.exec_module(_mod)\n"
                 f"                if hasattr(_mod,'run'):_mod.run()\n"
