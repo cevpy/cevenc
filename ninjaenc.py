@@ -404,11 +404,10 @@ setup(
             if so_files:
                 so_path = str(so_files[0])
                 if not is_windows:
-                    # (v0.9.5 BOYUT) --strip-unneeded: yükleme için gerekmeyen TÜM
-                    # sembolleri atar (dinamik/exported PyInit korunur → .so çalışır),
-                    # --strip-debug'tan daha küçük çıktı verir.
+                    # NOT: --strip-debug (orijinal). --strip-unneeded native .so
+                    # yüklenmesini bozma riski taşıdığı için geri alındı.
                     os.system(
-                        f"strip --strip-unneeded "
+                        f"strip --strip-debug "
                         f"--remove-section=.comment "
                         f"--remove-section=.note "
                         f"--remove-section=.note.ABI-tag "
@@ -640,18 +639,17 @@ class NuitkaCompiler:
 
         with open(cython_so, 'rb') as f:
             so_bytes = f.read()
-        # (v0.9.5 BOYUT) .so'yu gömmeden önce zlib ile sıkıştır. Aksi halde ham
-        # base64 (~1.33x) Nuitka .so'su içinde taşınır ve dış ZIP deflate'i bunu
-        # ancak kısmen geri kazanır. Sıkıştırılmış gömme ~%40-60 daha küçük.
-        so_b64 = base64.b64encode(zlib.compress(so_bytes, 9)).decode('ascii')
+        # NOT: gömme HAM base64 (sıkıştırmasız) — iç .so'yu zlib ile sıkıştırmak
+        # native .so'nun runtime yüklenmesini bozma riski taşıdığı için geri alındı.
+        so_b64 = base64.b64encode(so_bytes).decode('ascii')
         cython_mod = Path(cython_so).name.split('.')[0]
 
-        embed_src = f'''import base64 as _b64, tempfile as _tf, ctypes as _ct, os as _os, sys as _sys, zlib as _zl
+        embed_src = f'''import base64 as _b64, tempfile as _tf, ctypes as _ct, os as _os, sys as _sys
 
 _SO_DATA = b"{so_b64}"
 
 def _load_embedded():
-    _raw = _zl.decompress(_b64.b64decode(_SO_DATA))
+    _raw = _b64.b64decode(_SO_DATA)
     _tmp = _tf.NamedTemporaryFile(suffix='.so', delete=False, prefix='_nj_')
     try:
         _tmp.write(_raw)
@@ -1625,7 +1623,10 @@ if __name__=={main_check}:_run()'''
                 f"                _spec.loader.exec_module(_mod)\n"
                 f"                if hasattr(_mod,'run'):_mod.run()\n"
                 f"                return\n"
-                f"            except Exception:pass\n"
+                f"            except Exception as _nje:\n"
+                f"                import sys as _njs, traceback as _njtb\n"
+                f"                _njs.stderr.write('[nj-native] native basarisiz, fallback: '+repr(_nje)+chr(10))\n"
+                f"                _njtb.print_exc()\n"
             )
 
         if vm_prog_b64:
@@ -8108,24 +8109,14 @@ import shutil
             zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr('__main__.py', ult_main_v8)
-                # (v0.9.7 BOYUT) Native ZORUNLU modda __main__ native modülü çağırıp
-                # RETURN eder (generate_v8 native_block) → 5-parça Python payload'a
-                # HİÇ ulaşılmaz (yalnızca native-yok fallback'i için). Gerçek ~333KB
-                # şifreli payload bu modda ölü ağırlık; aynı mantık zaten native .so'da.
-                # Native varsa gerçek parçalar yerine küçük DECOY yaz → çıktı ~330KB
-                # küçülür, çalışma davranışı DEĞİŞMEZ, sahte Python yolunu çözmeye
-                # çalışan analist çöp bulur (misdirection korunur). Hiçbir guard parça
-                # İÇERİĞİNE bağlı değil (whitespace stego ult_enc[:256]'yı bellekten alır,
-                # base_key yalnızca ölü loader'da kullanılır).
-                _native_present = bool(native_file and os.path.exists(native_file))
-                if _native_present:
-                    for _ci in range(len(lazy_chunks)):
-                        zf.writestr(f'__s{_ci}__.bin', os.urandom(random.randint(900, 4096)))
-                    logger.info(f'  LazyChunk: native modda {len(lazy_chunks)} DECOY parça (gerçek payload native .so içinde) — boyut tasarrufu')
-                else:
-                    for _ci, _chunk in enumerate(lazy_chunks):
-                        zf.writestr(f'__s{_ci}__.bin', _chunk)
-                        logger.info(f'  __s{_ci}__.bin: {len(_chunk)} byte')
+                # NOT: GERÇEK payload parçaları yazılır. "Native modda decoy" optimizasyonu
+                # geri alındı: native modül runtime'da başarısız olup fallback'e düştüğünde
+                # (şu an öyle oluyor) decoy çöp → "incorrect header check". Fallback'in
+                # çalışır kalması için gerçek parçalar şart. Native düzeldikten sonra
+                # decoy yeniden eklenebilir.
+                for _ci, _chunk in enumerate(lazy_chunks):
+                    zf.writestr(f'__s{_ci}__.bin', _chunk)
+                    logger.info(f'  __s{_ci}__.bin: {len(_chunk)} byte')
                 if native_file and os.path.exists(native_file):
                     # strip ile debug sembollerini sil — boyutu %40-60 küçültür
                     stripped_native = native_file
