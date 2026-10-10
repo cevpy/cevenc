@@ -319,6 +319,11 @@ class CythonCompiler:
                 '-fno-plt', '-fno-ident',
                 '-fmerge-all-constants',
                 '-funroll-loops',
+                # (v0.9.7 "E") İç cdef sembollerini .dynsym'den gizle → native
+                # kodda gezinme zorlaşır. PyInit_<mod> Cython tarafından
+                # PyMODINIT_FUNC ile üretilir (GCC/clang'da visibility("default")
+                # zorunlu kılınır), bu yüzden modül yüklenmesi ETKİLENMEZ.
+                '-fvisibility=hidden',
             ]
             extra_link = [
                 '-Wl,--strip-debug',
@@ -446,51 +451,91 @@ setup(
         finally:
             os.chdir(old_cwd)
 
-    def create_obfuscated_wrapper(self, source_code, module_name='ninja_core'):
+    def create_obfuscated_wrapper(self, source_code, module_name='ninja_core', native_primitives=None):
         hyp = HyperionObfuscator()
         vars = [hyp._randvar() for _ in range(20)]
         funcs = [hyp._randvar() for _ in range(10)]
         compressed = zlib.compress(source_code.encode('utf-8'), level=9)
-        b64_data = base64.b64encode(compressed).decode('ascii')
-        xor_keys = [random.randint(1, 255) for _ in range(3)]
-        masks = [random.randint(1, 255) for _ in range(3)]
-        blinded_keys = [xor_keys[i] ^ masks[i] for i in range(3)]
+
+        # (v0.9.7 "B") Gerçek akış şifresi: eski tek-byte XOR yerine SHA-256
+        # keystream (CTR benzeri: SHA256(key || LE64(ctr)) blokları). Anahtar
+        # .so içinde İKİ parçaya bölünür (kA rastgele, kB = key ^ kA) → düz
+        # 32-byte anahtar literali `strings` ile görünmez. Statik kırma artık
+        # "b64decode + 256'lık XOR brute" değil; saldırgan keystream'i birebir
+        # yeniden kurmak (ya da runtime'da dökmek) zorunda. (Anahtar yine .so'da
+        # olduğu için bu TABANI yükseltir — tavanı değil; dinamik dump hâlâ
+        # mümkün. Tavan için opt-in native katman -A- gerekir.)
+        def _ks(data, key):
+            out = bytearray(len(data))
+            ctr = 0
+            i = 0
+            while i < len(data):
+                blk = hashlib.sha256(key + ctr.to_bytes(8, 'little')).digest()
+                j = 0
+                while j < 32 and (i + j) < len(data):
+                    out[i + j] = data[i + j] ^ blk[j]
+                    j += 1
+                i += 32
+                ctr += 1
+            return bytes(out)
+
+        key  = os.urandom(32)
+        keyA = os.urandom(32)
+        keyB = bytes(a ^ b for a, b in zip(key, keyA))
+        ct     = _ks(compressed, key)
+        ct_b64 = base64.b64encode(ct).decode('ascii')
+        kA_b64 = base64.b64encode(keyA).decode('ascii')
+        kB_b64 = base64.b64encode(keyB).decode('ascii')
+
+        # (A) opt-in: native VM-kripto primitiflerini .so modül düzeyine göm ve
+        # runtime'da eval globals'ına (_gl) enjekte et. native_primitives None ise
+        # (varsayılan) hiçbir şey eklenmez → .so B+E ile BİREBİR aynı kalır.
+        _native_defs = ''
+        _inject = ''
+        if native_primitives:
+            _native_defs = '\n# --- A: native VM-kripto primitifleri ---\n' + native_primitives + '\n'
+            _inject = (
+                "    _gl['_nv_h'] = _nv_h\n"
+                "    _gl['_nv_dp'] = _nv_dp\n"
+                "    _gl['_nv_ks'] = _nv_ks\n"
+                "    _gl['_nv_open'] = _nv_open\n"
+                "    _gl['_nv_seed'] = _nv_seed\n"
+            )
 
         cython_code = f'''# cython: language_level=3
 
-from cpython.ref cimport PyObject
-from libc.string cimport memset
 import base64
 import zlib
-import sys
+import hashlib
 import ctypes
 
-cdef int {vars[10]} = {blinded_keys[0]}  # blinded k0
-cdef int {vars[11]} = {masks[0]}         # mask0
-cdef int {vars[12]} = {blinded_keys[1]}  # blinded k1
-cdef int {vars[13]} = {masks[1]}         # mask1
-cdef int {vars[14]} = {blinded_keys[2]}  # blinded k2
-cdef int {vars[15]} = {masks[2]}         # mask2
+cdef bytes {vars[0]} = b"{ct_b64}"
+cdef bytes {vars[1]} = b"{kA_b64}"
+cdef bytes {vars[2]} = b"{kB_b64}"
 
-cdef bytes {vars[0]} = b"{b64_data}"
-
-cdef bytes {funcs[0]}(bytes data, int key):
+cdef bytes {funcs[0]}(bytes data, bytes key):
     cdef bytearray result = bytearray(len(data))
-    cdef int i
-    for i in range(len(data)):
-        result[i] = data[i] ^ key
+    cdef Py_ssize_t i = 0
+    cdef int j
+    _ctr = 0
+    while i < len(data):
+        _blk = hashlib.sha256(key + _ctr.to_bytes(8, 'little')).digest()
+        j = 0
+        while j < 32 and (i + j) < len(data):
+            result[i + j] = data[i + j] ^ _blk[j]
+            j += 1
+        i += 32
+        _ctr += 1
     return bytes(result)
 
 cdef bytes {funcs[1]}():
-    cdef int _k0 = {vars[10]} ^ {vars[11]}
-    cdef int _k1 = {vars[12]} ^ {vars[13]}
-    cdef int _k2 = {vars[14]} ^ {vars[15]}
-    cdef bytes {vars[2]} = base64.b64decode({vars[0]})
-    cdef bytes {vars[3]} = {funcs[0]}({vars[2]}, _k0)
-    cdef bytes {vars[4]} = {funcs[0]}({vars[3]}, _k1)
-    cdef bytes {vars[5]} = {funcs[0]}({vars[4]}, _k2)
-    return zlib.decompress({vars[5]})
-
+    cdef bytes _kA = base64.b64decode({vars[1]})
+    cdef bytes _kB = base64.b64decode({vars[2]})
+    cdef bytes _key = bytes(_kA[_i] ^ _kB[_i] for _i in range(len(_kA)))
+    cdef bytes _ct  = base64.b64decode({vars[0]})
+    cdef bytes _raw = {funcs[0]}(_ct, _key)
+    return zlib.decompress(_raw)
+{_native_defs}
 cdef void {funcs[2]}() except *:
     cdef bytes {vars[6]} = {funcs[1]}()
     cdef str {vars[7]} = {vars[6]}.decode('utf-8')
@@ -506,7 +551,7 @@ cdef void {funcs[2]}() except *:
     )
 
     _gl = {{'__name__': '__main__', '__builtins__': __builtins__}}
-    _papi.PyEval_EvalCode.restype = ctypes.py_object
+{_inject}    _papi.PyEval_EvalCode.restype = ctypes.py_object
     _papi.PyEval_EvalCode.argtypes = [ctypes.py_object, ctypes.py_object, ctypes.py_object]
     _papi.PyEval_EvalCode(_code_obj, _gl, _gl)
 
@@ -529,11 +574,6 @@ def run():
 if __name__ == '__main__':
     run()
 '''
-        data_bytes = base64.b64decode(b64_data)
-        for key in reversed(xor_keys):
-            data_bytes = bytes([b ^ key for b in data_bytes])
-        new_b64 = base64.b64encode(data_bytes).decode('ascii')
-        cython_code = cython_code.replace(b64_data, new_b64)
         pyx_file = os.path.join(self.temp_dir, f'{module_name}.pyx')
         with open(pyx_file, 'w', encoding='utf-8') as f:
             f.write(cython_code)
@@ -3872,10 +3912,15 @@ def _nv_cmp(_o,_a,_b):
 
         new_source = ''.join(src_lines)
         # prog blob'larını ve interpreter'ı en başa ekle
+        # (A) SON header üretimi: native mod YALNIZ burada aktifleşir. Fonksiyon-
+        # başı doğrulayıcılar (yukarıda) hep saf-Python prelude kullandı; böylece
+        # native wiring'in encode-zamanı doğrulamayı bozma riski olmaz.
+        self._emit_native = getattr(self, '_native_crypto', False)
         header = self.runtime_source() + '\n'
         # (VM Hardening Layer) lazy çözme/cache gibi ek runtime yardımcıları —
         # temelde boş, NinjaVMHardened doldurur.
         header += self._runtime_prelude()
+        self._emit_native = False
         # no-op decorator tanımı (kaynakta @ninja_vm kalmışsa çalışsın diye)
         header += 'def ninja_vm(_f):\n    return _f\n\n'
         for gvar, blob in prog_blobs.items():
@@ -4208,13 +4253,20 @@ class NinjaVMHardened(NinjaVM):
         self._lcgA = random.choice(self._LCG_MULS)
         self._lcgC = random.randint(1, (1 << 31) - 1) | 1  # tek sayı
         # MASTER anahtar: tüm fonksiyon anahtarlarının türediği build-sırrı.
-        # Sadece interpreter (_nv_exec) içinde gömülü → çıktı Cython/Nuitka ile
-        # NATIVE derlendiği için makine kodunda kalır; şifreli/çözülmüş _pp'de
-        # ASLA bulunmaz. Dolayısıyla _nv_open'ı hook edip _pp'yi dump eden biri
-        # bile anahtarları, operand akışını ve string havuzlarını okuyamaz —
-        # çözmek için ya native interpreter'ı tersine mühendislemeli ya da her
-        # komutu çalışma anında tek tek dump etmeli.
+        # VARSAYILAN (A kapalı): _M, interpreter (_nv_exec/_decode_setup) içinde
+        # Python LİTERALİ olarak gömülüdür → şifreli/çözülmüş _pp'de bulunmaz
+        # (statik dump'a karşı değerli) ama Py_CompileString hook'u ile dökülen
+        # kaynakta GÖRÜNÜR (dinamik dump'a karşı değil).
+        # A AÇIK (native_crypto): _M + _nv_h/_nv_dp/_nv_ks/_nv_open native .so'da
+        # derlenir ve runtime'da _gl'ye enjekte edilir → _M yalnızca aarch64
+        # makine kodunda var olur, Python kaynağında (blob'da da, hook dump'ında
+        # da) GÖRÜNMEZ.
         self._M = random.randint(1, (1 << 31) - 1)
+        # A (opt-in): native VM-kripto. _native_crypto = kullanıcı niyeti;
+        # _emit_native = yalnız SON header üretiminde True olur (doğrulayıcılar
+        # hep saf-Python prelude kullanır → encode-zamanı doğrulama bozulmaz).
+        self._native_crypto = False
+        self._emit_native   = False
 
     # ── dış blob keystream (encode) — runtime _nv_ks ile birebir ──
     def _keystream(self, seed: int, n: int) -> bytes:
@@ -4277,7 +4329,19 @@ class NinjaVMHardened(NinjaVM):
     def _decode_setup(self) -> str:
         # salt'ı oku → seed türet → sabit/isim havuzlarını çöz (base'in düz
         # _k=_p["k"]/_nm=_p["n"] atamasını EZER). Operandlar dispatch'te pozisyona
-        # göre inline çözülür (_op_read/_arg_read). M burada literal gömülü.
+        # göre inline çözülür (_op_read/_arg_read).
+        if getattr(self, '_emit_native', False):
+            # A: _seed native _nv_seed(_S) = _nv_h(_M,_S,0)'dan gelir → _M literali
+            # kaynakta YOK, yalnız native .so içinde. (_nv_seed runtime'da _gl'ye
+            # enjekte edilir; native .so yüklenemezse NameError ile AÇIKÇA patlar,
+            # sessiz bozulma olmaz.)
+            return ('_S=_p.get("s",0)\n'
+                    '    if "s" in _p:\n'
+                    '        _seed=_nv_seed(_S)\n'
+                    '        _k=_nv_dp(_p["k"],_seed,3); _nm=_nv_dp(_p["n"],_seed,4)\n'
+                    '    else:\n'
+                    '        _seed=0')
+        # VARSAYILAN (A kapalı): _M burada Python literali olarak gömülü.
         return ('_S=_p.get("s",0)\n'
                 '    if "s" in _p:\n'
                 f'        _seed=_nv_h({self._M},_S,0)\n'
@@ -4333,6 +4397,11 @@ class NinjaVMHardened(NinjaVM):
     # ── seam override: runtime yardımcıları (keystream + lazy çözücü + cache) ──
     # _nv_ks, yukarıdaki _keystream ile BİREBİR; _nv_open, _prog_unseal ile BİREBİR.
     def _runtime_prelude(self) -> str:
+        if getattr(self, '_emit_native', False):
+            # A: _nv_h/_nv_dp/_nv_ks/_nv_open/_NV_CACHE native .so'dan runtime'da
+            # _gl'ye enjekte edilir → burada (Python kaynağında) TANIMLANMAZ,
+            # böylece sabitler ve _M yalnız makine kodunda kalır.
+            return ''
         # _nv_h/_nv_dp = encode'daki _h/_ksb/_prog_literal pool-şifre ile BİREBİR.
         # _nv_ks/_nv_open = dış blob keystream + lazy çözücü (öncekiyle aynı).
         return (
@@ -4365,6 +4434,49 @@ class NinjaVMHardened(NinjaVM):
             "    return _pp\n\n"
         ) % (self._H_ADD1, self._H_ADD2, self._H_MUL1, self._H_MUL2,
              self._lcgA, self._lcgC, self._blobSeed)
+
+    # ── (A) native VM-kripto kaynağı (Cython .so'ya gömülür) ──
+    def native_crypto_pyx(self) -> str:
+        """
+        VM kripto primitiflerinin Cython (.so) kaynağı. _runtime_prelude'un saf-
+        Python sürümüyle BİREBİR aynı formüller; fark: sabitler (_H_*, _lcg*,
+        _blobSeed) ve MASTER anahtar _M burada Cython tarafından C immediate'larına
+        derlenir → Py_CompileString hook'u / _pp dump'ı bunları GÖRMEZ, yalnız
+        aarch64 makine kodunda var olurlar. create_obfuscated_wrapper bu bloğu
+        .pyx modül düzeyine gömer ve fonksiyonları runtime'da eval globals'ına
+        (_gl) enjekte eder; _seed türetimi _nv_seed(_S)=_nv_h(_M,_S,0) ile yapılır.
+        (base64 wrapper .pyx'te zaten import edilir.)
+        """
+        return (
+            "import marshal as _njm\n"
+            "_NV_CACHE = {}\n"
+            "def _nv_h(_s, _i, _d):\n"
+            f"    _x = (_s + _i*{self._H_ADD1} + _d*{self._H_ADD2}) & 0xFFFFFFFF\n"
+            f"    _x ^= _x >> 15; _x = (_x*{self._H_MUL1}) & 0xFFFFFFFF\n"
+            f"    _x ^= _x >> 12; _x = (_x*{self._H_MUL2}) & 0xFFFFFFFF\n"
+            "    _x ^= _x >> 15\n"
+            "    return _x\n"
+            "def _nv_dp(_enc, _s, _d):\n"
+            "    _ks = bytes(_nv_h(_s, _i, _d) & 0xFF for _i in range(len(_enc)))\n"
+            "    return _njm.loads(bytes(_b ^ _k for _b, _k in zip(_enc, _ks)))\n"
+            f"def _nv_ks(_seed, _n, _a={self._lcgA}, _c={self._lcgC}):\n"
+            "    _x = _seed & 0xFFFFFFFF; _ob = bytearray()\n"
+            "    for _ in range(_n):\n"
+            "        _x = (_a * _x + _c) & 0xFFFFFFFF; _ob.append((_x >> 16) & 0xFF)\n"
+            "    return bytes(_ob)\n"
+            f"def _nv_open(_blob, _s={self._blobSeed}):\n"
+            "    _k = id(_blob)\n"
+            "    _hit = _NV_CACHE.get(_k)\n"
+            "    if _hit is not None: return _hit\n"
+            "    _enc = base64.b64decode(_blob); _n = len(_enc)\n"
+            "    _seed = (_s + _n * 0x9E3779B1) & 0xFFFFFFFF\n"
+            "    _ks = _nv_ks(_seed, _n)\n"
+            "    _raw = bytes(_bb ^ _kk for _bb, _kk in zip(_enc, _ks))\n"
+            "    _pp = _njm.loads(_raw); _NV_CACHE[_k] = _pp\n"
+            "    return _pp\n"
+            "def _nv_seed(_S):\n"
+            f"    return _nv_h({self._M}, _S, 0)\n"
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -7836,10 +7948,21 @@ class NinjaEncoder:
             shutil.rmtree(self.temp_dir)
 
     def encode_ultimate(self, input_file, output_file=None, use_cython=True, use_nuitka=True,
-                        seed=None, assume_yes=False, watermark=None):
+                        seed=None, assume_yes=False, watermark=None, native_vm_crypto=False):
         if output_file is None:
             base = os.path.splitext(input_file)[0]
             output_file = f'{base}_enc.py'
+        # (A) opt-in native VM-kripto: _M + VM primitifleri native .so'da derlenir.
+        # YALNIZ Cython gerçekten kullanılabilirse etkinleştir — enjeksiyon Cython
+        # .so'nun run()'ında yapılır; Cython yoksa native _decode_setup çalışma
+        # anında _nv_seed'i bulamaz. Bu yüzden Cython yoksa A güvenle atlanır
+        # (_M saf-Python literali olarak kalır; mevcut davranış).
+        self._want_native_vm = bool(native_vm_crypto and use_cython and check_cython())
+        if self._want_native_vm:
+            self.ninja_vm._native_crypto = True
+            logger.info('A (native VM-kripto) ETKİN: _M + VM primitifleri native .so\'da derlenecek, Python kaynağında görünmeyecek')
+        elif native_vm_crypto:
+            logger.warning('A (native VM-kripto) istendi fakat Cython yok/kapalı → A ATLANDI (güvenli: _M saf-Python kalır)')
         # NATIVE ZORUNLU (her zaman). Native derleme zinciri hazır değilse veya
         # derleme başarısız olursa encode DURUR — pure-Python fallback YOK.
         # Sonuç: çıktı yalnızca derlendiği OS + mimaride çalışır (taşınabilir değil).
@@ -8014,7 +8137,8 @@ class NinjaEncoder:
                 logger.info('Ultimate Adım 17: Cython → ninja_cython.so')
                 try:
                     cython = CythonCompiler(temp_dir)
-                    pyx_file = cython.create_obfuscated_wrapper(nuitka_source, 'ninja_cython')
+                    _nprim = self.ninja_vm.native_crypto_pyx() if getattr(self, '_want_native_vm', False) else None
+                    pyx_file = cython.create_obfuscated_wrapper(nuitka_source, 'ninja_cython', native_primitives=_nprim)
                     cython_so_file = cython.compile_to_so(pyx_file, 'ninja_cython')
                     if cython_so_file:
                         logger.info(f'Cython .so üretildi: {Path(cython_so_file).name}')
@@ -8022,6 +8146,16 @@ class NinjaEncoder:
                         print('\x1b[93m[!] Cython derleme başarısız\x1b[0m')
                 except Exception as _ce:
                     print(f'\x1b[93m[!] Cython adımı atlandı: {_ce}\x1b[0m')
+
+            # (A) güvenlik ağı: native VM-kripto istendiyse enjeksiyon SADECE
+            # Cython .so yolunda yapılabilir. .so üretilemediyse kaynak native
+            # _decode_setup (_nv_seed çağrısı) içerir ama _nv_seed enjekte
+            # EDİLEMEZ → bozuk çıktı olurdu. Bunu önlemek için AÇIKÇA dur.
+            if getattr(self, '_want_native_vm', False) and not cython_so_file:
+                raise RuntimeError(
+                    'A (native VM-kripto) etkin fakat Cython .so üretilemedi — '
+                    'native primitif enjeksiyonu yapılamaz. --native-vm-crypto '
+                    'kapatın ya da Cython/derleyici kurulumunu düzeltin.')
 
             _is_android = os.path.exists('/system/build.prop') or os.path.exists('/data/data')
             if _is_android and cython_so_file and os.path.exists(cython_so_file):
@@ -8687,6 +8821,10 @@ def main():
                         help='Per-müşteri gizli iz (ör. müşteri adı/lisans no) — sızan kopyada iz kalır')
     parser.add_argument('--extract-watermark', default=None, metavar='DOSYA',
                         help='Şifreli bir çıktıdan gömülü filigranı çıkar (OWNER_SECRET gerekir)')
+    parser.add_argument('--native-vm-crypto', action='store_true',
+                        help='(A, deneysel) VM master anahtarı _M + kripto primitiflerini native .so\'da derle '
+                             '→ Python kaynağında/blob\'da görünmez. Cython GEREKTİRİR; .so yüklenemezse VM\'li '
+                             'fonksiyonlar çalışmaz. Cihazında test etmeden üretimde kullanma.')
     args = parser.parse_args()
 
     # ── Filigran çıkarma modu (encode yapmaz, sadece okur) ──
@@ -8795,7 +8933,8 @@ def main():
         print(S + f'[+] Decoded: {B}{output}')
     else:
         output = encoder.encode_ultimate(args.input, args.output, seed=args.seed,
-                                         assume_yes=args.yes, watermark=args.watermark)
+                                         assume_yes=args.yes, watermark=args.watermark,
+                                         native_vm_crypto=getattr(args, 'native_vm_crypto', False))
         print(S + f'[+] Encoded: {B}{output}')
         input_size = os.path.getsize(args.input)
         output_size = os.path.getsize(output)
