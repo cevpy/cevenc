@@ -7952,7 +7952,7 @@ class NinjaEncoder:
             shutil.rmtree(self.temp_dir)
 
     def encode_ultimate(self, input_file, output_file=None, use_cython=True, use_nuitka=True,
-                        seed=None, assume_yes=False, watermark=None, native_vm_crypto=False):
+                        seed=None, assume_yes=False, watermark=None, native_vm_crypto=True):
         if output_file is None:
             base = os.path.splitext(input_file)[0]
             output_file = f'{base}_enc.py'
@@ -7968,9 +7968,9 @@ class NinjaEncoder:
         # çağrı kendi niyetini kesin olarak yazar.
         self.ninja_vm._native_crypto = self._want_native_vm
         if self._want_native_vm:
-            logger.info('A (native VM-kripto) ETKİN: _M + VM primitifleri native .so\'da derlenecek, Python kaynağında görünmeyecek')
+            logger.info('A (native VM-kripto) ETKİN (varsayılan): _M + VM primitifleri native .so\'da derlenecek, Python kaynağında görünmeyecek')
         elif native_vm_crypto:
-            logger.warning('A (native VM-kripto) istendi fakat Cython yok/kapalı → A ATLANDI (güvenli: _M saf-Python kalır)')
+            logger.warning('A (native VM-kripto) açık fakat Cython yok/kapalı → A ATLANDI (güvenli: _M saf-Python kalır, bozuk çıktı YOK)')
         # NATIVE ZORUNLU (her zaman). Native derleme zinciri hazır değilse veya
         # derleme başarısız olursa encode DURUR — pure-Python fallback YOK.
         # Sonuç: çıktı yalnızca derlendiği OS + mimaride çalışır (taşınabilir değil).
@@ -8162,8 +8162,8 @@ class NinjaEncoder:
             if getattr(self, '_want_native_vm', False) and not cython_so_file:
                 raise RuntimeError(
                     'A (native VM-kripto) etkin fakat Cython .so üretilemedi — '
-                    'native primitif enjeksiyonu yapılamaz. --native-vm-crypto '
-                    'kapatın ya da Cython/derleyici kurulumunu düzeltin.')
+                    'native primitif enjeksiyonu yapılamaz. --no-native-vm-crypto '
+                    'ile A\'yı kapatın ya da Cython/derleyici kurulumunu düzeltin.')
 
             _is_android = os.path.exists('/system/build.prop') or os.path.exists('/data/data')
             if _is_android and cython_so_file and os.path.exists(cython_so_file):
@@ -8829,10 +8829,10 @@ def main():
                         help='Per-müşteri gizli iz (ör. müşteri adı/lisans no) — sızan kopyada iz kalır')
     parser.add_argument('--extract-watermark', default=None, metavar='DOSYA',
                         help='Şifreli bir çıktıdan gömülü filigranı çıkar (OWNER_SECRET gerekir)')
-    parser.add_argument('--native-vm-crypto', action='store_true',
-                        help='(A, deneysel) VM master anahtarı _M + kripto primitiflerini native .so\'da derle '
-                             '→ Python kaynağında/blob\'da görünmez. Cython GEREKTİRİR; .so yüklenemezse VM\'li '
-                             'fonksiyonlar çalışmaz. Cihazında test etmeden üretimde kullanma.')
+    parser.add_argument('--native-vm-crypto', action=argparse.BooleanOptionalAction, default=True,
+                        help='(A) VM master anahtarı _M + kripto primitiflerini native .so\'da derle → Python '
+                             'kaynağında/blob\'da görünmez (VARSAYILAN AÇIK). Cython varsa devreye girer, yoksa '
+                             'güvenle atlanır (bozuk çıktı üretmez). Kapatmak için: --no-native-vm-crypto')
     args = parser.parse_args()
 
     # ── Filigran çıkarma modu (encode yapmaz, sadece okur) ──
@@ -8942,7 +8942,7 @@ def main():
     else:
         output = encoder.encode_ultimate(args.input, args.output, seed=args.seed,
                                          assume_yes=args.yes, watermark=args.watermark,
-                                         native_vm_crypto=getattr(args, 'native_vm_crypto', False))
+                                         native_vm_crypto=getattr(args, 'native_vm_crypto', True))
         print(S + f'[+] Encoded: {B}{output}')
         input_size = os.path.getsize(args.input)
         output_size = os.path.getsize(output)
