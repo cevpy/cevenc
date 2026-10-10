@@ -8108,9 +8108,24 @@ import shutil
             zip_buffer = BytesIO()
             with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
                 zf.writestr('__main__.py', ult_main_v8)
-                for _ci, _chunk in enumerate(lazy_chunks):
-                    zf.writestr(f'__s{_ci}__.bin', _chunk)
-                    logger.info(f'  __s{_ci}__.bin: {len(_chunk)} byte')
+                # (v0.9.7 BOYUT) Native ZORUNLU modda __main__ native modülü çağırıp
+                # RETURN eder (generate_v8 native_block) → 5-parça Python payload'a
+                # HİÇ ulaşılmaz (yalnızca native-yok fallback'i için). Gerçek ~333KB
+                # şifreli payload bu modda ölü ağırlık; aynı mantık zaten native .so'da.
+                # Native varsa gerçek parçalar yerine küçük DECOY yaz → çıktı ~330KB
+                # küçülür, çalışma davranışı DEĞİŞMEZ, sahte Python yolunu çözmeye
+                # çalışan analist çöp bulur (misdirection korunur). Hiçbir guard parça
+                # İÇERİĞİNE bağlı değil (whitespace stego ult_enc[:256]'yı bellekten alır,
+                # base_key yalnızca ölü loader'da kullanılır).
+                _native_present = bool(native_file and os.path.exists(native_file))
+                if _native_present:
+                    for _ci in range(len(lazy_chunks)):
+                        zf.writestr(f'__s{_ci}__.bin', os.urandom(random.randint(900, 4096)))
+                    logger.info(f'  LazyChunk: native modda {len(lazy_chunks)} DECOY parça (gerçek payload native .so içinde) — boyut tasarrufu')
+                else:
+                    for _ci, _chunk in enumerate(lazy_chunks):
+                        zf.writestr(f'__s{_ci}__.bin', _chunk)
+                        logger.info(f'  __s{_ci}__.bin: {len(_chunk)} byte')
                 if native_file and os.path.exists(native_file):
                     # strip ile debug sembollerini sil — boyutu %40-60 küçültür
                     stripped_native = native_file
@@ -8131,7 +8146,7 @@ import shutil
                     logger.info(f'  Native binary: {Path(native_file).name} ({os.path.getsize(stripped_native):,} byte)')
                 FakeSoGenerator.add_to_zip(zf, count=_JUNK_FAKE_SO)
                 FakePycFlood.add_to_zip(zf, count=_JUNK_FAKE_PYC)
-                logger.info('  50 sahte .pyc + 15 sahte .so tuzağı eklendi')
+                logger.info(f'  {_JUNK_FAKE_PYC} sahte .pyc + {_JUNK_FAKE_SO} sahte .so tuzağı eklendi')
                 fake_pyc = bytes([0x0d, 0x0a, 0x00, 0x00]) + os.urandom(random.randint(512, 2048))
                 zf.writestr('_cache.pyc', fake_pyc)
                 zf.writestr('__script__.bin', os.urandom(random.randint(256, 512)))
