@@ -323,10 +323,24 @@ class CythonCompiler:
             extra_link = [
                 '-Wl,--strip-debug',
                 '-Wl,--gc-sections',
-                '-Wl,--as-needed',
                 '-Wl,--build-id=none',
                 '-Wl,--discard-locals',
             ]
+
+        # (Android/Pydroid3) extension .so'su libpython'a AÇIKÇA link edilmeli.
+        # Aksi halde PyDictValues_Type gibi iç CPython sembolleri çalışma anında
+        # dlopen ile çözülemez (Android'de interpreter sembollerini dlopen'lanan
+        # modüllere global export ETMEZ — masaüstü Linux eder). --no-as-needed ile
+        # libpython bağımlılığının linkten düşmemesini garanti ederiz.
+        if not is_windows and (os.path.exists('/system/build.prop') or os.path.exists('/data/data')):
+            import sysconfig as _sc
+            _ldver = _sc.get_config_var('LDVERSION') or f'{sys.version_info.major}.{sys.version_info.minor}'
+            _libdir = _sc.get_config_var('LIBDIR')
+            if _libdir:
+                extra_link.append(f'-L{_libdir}')
+                extra_link.append(f'-Wl,-rpath,{_libdir}')
+            extra_link.append('-Wl,--no-as-needed')
+            extra_link.append(f'-lpython{_ldver}')
 
         setup_file = os.path.join(self.temp_dir, 'setup_cython.py')
         setup_code = f"""\nimport os, sys, platform
@@ -7733,7 +7747,15 @@ class NinjaEncoder:
                 except Exception as _ce:
                     print(f'\x1b[93m[!] Cython adımı atlandı: {_ce}\x1b[0m')
 
-            if use_nuitka and check_nuitka():
+            _is_android = os.path.exists('/system/build.prop') or os.path.exists('/data/data')
+            if _is_android and cython_so_file and os.path.exists(cython_so_file):
+                # Android/Pydroid3: Nuitka "so içinde so" çıktısı runtime'da YÜKLENMİYOR
+                # (PyDictValues_Type gibi iç CPython sembolü dlopen'da çözülemiyor).
+                # libpython'a açıkça link edilmiş Cython .so'yu DOĞRUDAN native katman
+                # yap → Pydroid3'te yüklenme şansı en yüksek, Nuitka dış katmanı atlanır.
+                native_file = cython_so_file
+                logger.info('Ultimate Adım 18: Android → libpython-linked Cython .so native katman (Nuitka embed atlandı)')
+            elif use_nuitka and check_nuitka():
                 try:
                     if cython_so_file and os.path.exists(cython_so_file):
                         logger.info('Ultimate Adım 18: Nuitka → Cython .so embed (so içinde so)')
