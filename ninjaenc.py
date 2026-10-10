@@ -3916,11 +3916,15 @@ def _nv_cmp(_o,_a,_b):
         # başı doğrulayıcılar (yukarıda) hep saf-Python prelude kullandı; böylece
         # native wiring'in encode-zamanı doğrulamayı bozma riski olmaz.
         self._emit_native = getattr(self, '_native_crypto', False)
-        header = self.runtime_source() + '\n'
-        # (VM Hardening Layer) lazy çözme/cache gibi ek runtime yardımcıları —
-        # temelde boş, NinjaVMHardened doldurur.
-        header += self._runtime_prelude()
-        self._emit_native = False
+        try:
+            header = self.runtime_source() + '\n'
+            # (VM Hardening Layer) lazy çözme/cache gibi ek runtime yardımcıları —
+            # temelde boş, NinjaVMHardened doldurur.
+            header += self._runtime_prelude()
+        finally:
+            # _emit_native invariant'ı her durumda sıfırlansın (bir sonraki
+            # doğrulayıcı/çağrı saf-Python prelude görsün).
+            self._emit_native = False
         # no-op decorator tanımı (kaynakta @ninja_vm kalmışsa çalışsın diye)
         header += 'def ninja_vm(_f):\n    return _f\n\n'
         for gvar, blob in prog_blobs.items():
@@ -7958,8 +7962,12 @@ class NinjaEncoder:
         # anında _nv_seed'i bulamaz. Bu yüzden Cython yoksa A güvenle atlanır
         # (_M saf-Python literali olarak kalır; mevcut davranış).
         self._want_native_vm = bool(native_vm_crypto and use_cython and check_cython())
+        # KOŞULSUZ ata: yeniden kullanılan bir encoder'da önceki A-açık çağrının
+        # _native_crypto=True durumu bir sonraki A-kapalı çağrıya SIZMAMALI (aksi
+        # halde native header üretilir ama enjeksiyon olmaz → bozuk .so). Her
+        # çağrı kendi niyetini kesin olarak yazar.
+        self.ninja_vm._native_crypto = self._want_native_vm
         if self._want_native_vm:
-            self.ninja_vm._native_crypto = True
             logger.info('A (native VM-kripto) ETKİN: _M + VM primitifleri native .so\'da derlenecek, Python kaynağında görünmeyecek')
         elif native_vm_crypto:
             logger.warning('A (native VM-kripto) istendi fakat Cython yok/kapalı → A ATLANDI (güvenli: _M saf-Python kalır)')
