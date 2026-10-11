@@ -2522,6 +2522,22 @@ class ASTObfuscator:
                         pass
                     return node
 
+                def visit_ExceptHandler(self_, node):
+                    # KRİTİK: `except X as NAME:` bağlayıcısı ExceptHandler.name'de
+                    # (düz string) tutulur; Name düğümü DEĞİL. visit_Name gövdedeki
+                    # NAME başvurularını yeniden adlandırır ama bağlayıcı adı aynı
+                    # eşlemeyle güncellenmezse gövde var-olmayan ada başvurur →
+                    # NameError (özellikle NinjaVM runtime'ının `except ... as _exc`
+                    # işleyicisi → try/except içeren TÜM VM'li fonksiyonlar patlar).
+                    try:
+                        if (node.name and node.name not in protected
+                                and obf._should_rename(node.name)):
+                            node.name = obf._get_mapped(node.name)
+                    except (AttributeError, TypeError):
+                        pass
+                    self_.generic_visit(node)
+                    return node
+
                 def visit_Global(self_, node):
                     try:
                         node.names = [obf._get_mapped(n) if obf._should_rename(n) else n for n in node.names]
@@ -4206,10 +4222,18 @@ def _nv_cmp(_o,_a,_b):
             except Exception as _e:
                 return (True, f'test altyapısı hatası ({_e}) — derleme geçerli')
 
-        # Argümanlı + yan-etkili (API/IO): yapısal kontrol yeterli → KABUL
-        # Bu fonksiyonlar HTTP çağrısı yapıyor; test edemeyiz ama VM bytecode'u
-        # doğru çevirdi → runtime'da çalışır. Exception-table artık destekleniyor.
-        return (True, 'API/IO fonksiyon — yapısal kontrol geçti')
+        # Argümanlı + yan-etkili (API/IO): runtime'da GÜVENLE doğrulayamayız (ağ/
+        # dosya/IO yan etkisi). ESKİDEN körlemesine KABUL ediyorduk ("VM doğru
+        # çevirmiştir" varsayımıyla) — ama VM bazı gerçek-dünya bytecode kalıplarını
+        # (with/context-manager, fonksiyon-içi import, exception akışı) HATALI
+        # çevirebiliyor; doğrulanmadan VM'lenen ağ checker'ları runtime'da
+        # NameError/IndexError ile PATLIYORDU (ana işlevler bozuluyordu).
+        # Güvenlik ağının görevi ASLA bozuk fonksiyon göndermemek → doğrulanamayan
+        # fonksiyonu VM-DIŞI bırak. Düz Python olarak kalır ama yine native(.so)+
+        # keystream-kripto+AST-obf+FrustrationLayer ile korunur. Saf (yan-etkisiz)
+        # fonksiyonlar yukarıda ÇALIŞTIRILIP doğrulandıkları için VM'e girmeye
+        # devam eder.
+        return (False, 'API/IO/yan-etkili — runtime doğrulanamıyor → güvenli tarafta VM-dışı')
 
 
 # ══════════════════════════════════════════════════════════════════════════════
