@@ -3916,6 +3916,16 @@ def _nv_cmp(_o,_a,_b):
         # başı doğrulayıcılar (yukarıda) hep saf-Python prelude kullandı; böylece
         # native wiring'in encode-zamanı doğrulamayı bozma riski olmaz.
         self._emit_native = getattr(self, '_native_crypto', False)
+        if self._emit_native:
+            # (A) KRİTİK: native primitifler runtime'da eval globals'ına TAM bu
+            # adlarla (_nv_h/_nv_dp/_nv_ks/_nv_open/_nv_seed) enjekte edilir, ama
+            # kaynakta TANIMLANMAZLAR (prelude boş). ast_obf bu adların
+            # BAŞVURULARINI yeniden adlandırırsa (tanım olmadığı için serbest ad
+            # sanıp), stub/_nv_exec gövdesi var-olmayan ada çağrı yapar →
+            # runtime NameError (tüm VM'li fonksiyonlar patlar). Bu yüzden ast_obf
+            # öncesi KORU: protected_names'e ekle ki yeniden adlandırılmasınlar.
+            self.protected_names.update(
+                ('_nv_h', '_nv_dp', '_nv_ks', '_nv_open', '_nv_seed'))
         try:
             header = self.runtime_source() + '\n'
             # (VM Hardening Layer) lazy çözme/cache gibi ek runtime yardımcıları —
