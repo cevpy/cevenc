@@ -16153,6 +16153,8 @@ def _clone_menu(user_id: int):
         rows.append([ibtn("↩️ İsteği geri çek", "cl|cancel", RED)] if pend else [ibtn("🔑 Token gönder", "cl|tok", GREEN)])
         return text, InlineKeyboardMarkup(rows)
     c = mine[0]
+    if _clone_premium_on(c['bot_id']):
+        wait = "\n💎 Premium emoji açık: /premiumemoji" + wait
     st = {'active': "🟢 Çalışıyor", 'stopped': "⏸ Durduruldu", 'invalid': "⚠️ Token geçersiz"}.get(c['status'], c['status'])
     with get_db() as conn:
         n = conn.execute("SELECT COUNT(*) FROM channels WHERE bot_id = ?", (c['bot_id'],)).fetchone()[0]
@@ -16167,6 +16169,29 @@ def _clone_menu(user_id: int):
             [ibtn("⏸ Durdur", f"cl|stop|{b}", RED) if c['status'] == 'active' else ibtn("▶️ Başlat", f"cl|go|{b}", GREEN),
              ibtn("↩️ İsteği geri çek", "cl|cancel", RED) if pend else ibtn("🔑 Token değiştir", "cl|tok", BLUE)],
             [ibtn("🗑 Klonu sil", f"cl|del|{b}", RED)]]
+    if user_id == FOUNDER_ID:
+        rows.append([_clone_premium_btn(b)])
+    return text, InlineKeyboardMarkup(rows)
+
+def _clone_premium_on(bid: int) -> bool:
+    """Kurucu bu klon için premium emoji temasını açtı mı (varsayılan kapalı)."""
+    return kv_get(f'premium_on:{bid}') == '1'
+
+def _clone_premium_btn(bid: int):
+    on = _clone_premium_on(bid)
+    return ibtn("💎 Premium: Açık" if on else "💎 Premium: Kapalı", f"cl|prem|{bid}", GREEN if on else BLUE)
+
+def _clone_admin_view(bid: int):
+    """Bot sahibi (kurucu): tek klonun yönetimi."""
+    r = clone_row(bid) or {}
+    st = {'active': "🟢 Çalışıyor", 'stopped': "⏸ Durduruldu", 'invalid': "⚠️ Token geçersiz"}.get(r.get('status'), r.get('status'))
+    text = (f"🤖 <b>@{html.escape(r.get('username') or '?')}</b>\nDurum: {st} · Sahip <code>{r.get('owner_id')}</code>\n"
+            f"🏷 Marka: <b>{html.escape(r.get('brand') or r.get('name') or '-')}</b>")
+    active = r.get('status') == 'active'
+    rows = [[_clone_premium_btn(bid)],
+            [ibtn("⏸ Durdur", f"cl|stop|{bid}", RED) if active else ibtn("▶️ Başlat", f"cl|go|{bid}", GREEN),
+             ibtn("🗑 Klonu sil", f"cl|del|{bid}", RED)],
+            [ibtn("↩️ Liste", "cl|list")]]
     return text, InlineKeyboardMarkup(rows)
 
 async def cmd_klon(update: Update, context):
@@ -16270,11 +16295,40 @@ async def clone_callback(update: Update, context):
                                        "Vazgeçmek için: iptal", parse_mode=ParseMode.HTML,
                                        reply_markup=ForceReply(input_field_placeholder="123456789:ABC..."))
         return
-    elif op in ('ed', 'stop', 'go', 'del', 'delok', 'adm'):
+    elif op == 'list':
+        if uid != FOUNDER_ID:
+            await query.answer("Bu işlemi sadece bot sahibi yapabilir.", show_alert=True)
+            return
+        await query.answer()
+        text, markup = _clones_admin_view()
+        try:
+            await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+        except BadRequest:
+            pass
+        return
+    elif op in ('ed', 'stop', 'go', 'del', 'delok', 'adm', 'prem'):
         bid = int(parts[2])
         row = clone_row(bid)
         if not row or (row['owner_id'] != uid and uid != FOUNDER_ID):
             await query.answer("Bu klon senin değil.", show_alert=True)
+            return
+        if op == 'prem':
+            if uid != FOUNDER_ID:
+                await query.answer("Bu işlemi sadece bot sahibi yapabilir.", show_alert=True)
+                return
+            on = not _clone_premium_on(bid)
+            kv_set(f'premium_on:{bid}', '1' if on else None)
+            await query.answer("💎 Premium emoji açıldı" if on else "💎 Premium emoji kapatıldı")
+            if row['owner_id'] != uid:
+                uname = html.escape(row.get('username') or '?')
+                await _main_send(row['owner_id'], (
+                    f"💎 Klon botun @{uname} için premium emoji açıldı. Botuna özelden /premiumemoji yazıp "
+                    "premium emojilerini öğret.") if on else f"💎 Klon botun @{uname} için premium emoji kapatıldı.")
+            text, markup = _clone_admin_view(bid) if row['owner_id'] != uid else _clone_menu(uid)
+            try:
+                await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML)
+            except BadRequest:
+                pass
             return
         if op == 'ed':
             field = parts[3]
@@ -16315,7 +16369,9 @@ async def clone_callback(update: Update, context):
                 await _main_send(row['owner_id'], f"🗑 Klon botun @{row.get('username')} bot sahibi tarafından silindi.")
         else:
             await query.answer()
-        if uid == FOUNDER_ID and uid != row['owner_id']:
+        if op == 'adm' and uid == FOUNDER_ID and uid != row['owner_id']:
+            text, markup = _clone_admin_view(bid)
+        elif uid == FOUNDER_ID and uid != row['owner_id']:
             text, markup = _clones_admin_view()
         else:
             text, markup = _clone_menu(uid)
@@ -16474,8 +16530,9 @@ def _clones_admin_view():
         pend = [dict(r) for r in conn.execute("SELECT * FROM clone_requests WHERE status = 'pending' AND token IS NOT NULL "
                                               "ORDER BY created_at")]
     icon = {'active': "🟢", 'stopped': "⏸", 'invalid': "⚠️"}
-    lines = [f"{icon.get(r['status'], '•')} @{html.escape(r.get('username') or '?')} — sahip <code>{r['owner_id']}</code>"
-             for r in rows]
+    for r in rows:
+        r['_ic'] = icon.get(r['status'], '•') + (" 💎" if _clone_premium_on(r['bot_id']) else "")
+    lines = [f"{r['_ic']} @{html.escape(r.get('username') or '?')} — sahip <code>{r['owner_id']}</code>" for r in rows]
     plines = [f"⏳ @{html.escape(p.get('bot_username') or '?')} — isteyen <code>{p['user_id']}</code>" for p in pend]
     text = (f"🤖 <b>Klon botlar</b> ({len(rows)}) · Onay bekleyen: {len(pend)}\n\n" + ("\n".join(lines) or "Henüz klon yok.")
             + ("\n\n<b>Onay bekleyenler</b>\n" + "\n".join(plines) if plines else ""))
@@ -18271,6 +18328,23 @@ e7c66ff8b	Grup ayarları → Yöneticiler → Yönetici ekle → @⟨0⟩ (mesaj
 8298e9706	… ve ⟨0⟩ tane daha
 7ba765796	🏆 <b>En aktif gruplar</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ mesaj
+b7620563d	💎 Premium emoji teması bu klon için bot kurucusu tarafından henüz açılmadı.
+d7acaf0b4	<tg-emoji emoji-id="⟨0⟩">⟨1⟩</tg-emoji> → <code>⟨2⟩</code>
+653362ae5	🗑 Premium emoji haritası silindi.
+68628d04b	✅ Premium emoji teması açıldı.
+0e4cfa229	⏸ Premium emoji teması kapatıldı.
+762017774	✅ Açık
+cd5bd9458	⏸ Kapalı
+85d2de620	💎 <b>Premium emoji teması</b>: ⟨0⟩
+5246a6025	Eşlenen emoji: ⟨0⟩
+26c237a40	⟨0⟩Premium emojili bir mesaj gönder: içindeki her premium emoji, normal karşılığının yerine botun mesajlarında ve buton simgelerinde kullanılır.
+98b029c06	Bot sahibinin hesabında Telegram Premium olmalı.
+19460491f	<code>/premiumemoji sil</code> · <code>/premiumemoji kapat</code> · <code>/premiumemoji ac</code>
+0adaad0bb	Vazgeçmek için: iptal
+272826aad	Vazgeçildi.
+218a28de3	Bu mesajda premium emoji yok. Premium emojili bir mesaj gönder ya da iptal yaz.
+d1bb29a8d	Emojiler okunamadı: ⟨0⟩
+808236f33	✅ ⟨0⟩ premium emoji öğrenildi (toplam ⟨1⟩).
 57d75c0ab	🛠 Bot kısa bir bakımda; birazdan dönecek. Korumalar çalışmaya devam ediyor.
 fc94758f1	🛠 Bakım modu <b>açık</b>⟨0⟩
 588994912	— ⟨0⟩'de kapanır
@@ -18578,6 +18652,7 @@ d094b4c43	/gbanlist — Global ban listesi
 d729d3ba2	/yedek — Veritabani yedegi al
 0e556fad9	/gmedyaengel — Yanitlanan medyayi tum gruplarda engelle
 8af5e8c17	/kurtar — Admin kurtarma
+e948b5d9b	/premiumemoji — Premium emoji temasi (mesajlar ve buton simgeleri)
 f0032f0c7	/kanal — Kanal sec
 97a1889ae	/kanalsettings — Kanal ayarlari
 def1847f5	⟨0⟩/start — Baslat
@@ -18769,6 +18844,7 @@ a38b6848f	Global ban listesi
 cfc719f1d	Veritabanı yedeği
 efdd2ee59	Bakım modu
 bf65fdcd0	Medyayı tüm gruplarda engelle
+0c0f2746b	Premium emoji teması
 385efb5c0	⚡ Main bot: @⟨0⟩
 8f13119d3	⟨0⟩ — grup ve kanal koruma botu: spam, link, flood, raid ve captcha.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -19514,7 +19590,6 @@ b7301e99a	Bu grupta filtre yok.
 bd0505102	⚠️ Bu gruptaki <b>⟨0⟩</b> filtrenin hepsi silinsin mi?
 8d8252e68	🗑 Evet, hepsini sil
 9b6fcea87	↩️ Vazgeç
-272826aad	Vazgeçildi.
 cf9d69e94	🗑 ⟨0⟩ filtre silindi.
 13c07c249	🧹 Tüm filtreler silindi (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Marka adı
@@ -19542,6 +19617,7 @@ f3fc6979c	Kendi bot adınla, ULUS altyapısını kullanan bir koruma botu aç.
 632cbf17b	2) Aldığın token'ı aşağıdaki butonla gönder
 883193ad7	3) Bot sahibi onaylayınca botun çalışmaya başlar⟨0⟩
 3a5be4fd4	🔑 Token gönder
+f3e051762	💎 Premium emoji açık: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Çalışıyor
 f8a7fde2a	⚠️ Token geçersiz
 b535c1e0c	🤖 <b>Klon botun</b>: @⟨0⟩
@@ -19556,6 +19632,10 @@ b8abb05fb	▶️ Başlat
 60446c88d	↩️ İsteği geri çek
 ded7cc646	🔑 Token değiştir
 d3fb29907	🗑 Klonu sil
+e211ffa2a	💎 Premium: Açık
+60c71135b	💎 Premium: Kapalı
+783d8db23	Durum: ⟨0⟩ · Sahip <code>⟨1⟩</code>
+1a2ec4716	↩️ Liste
 367b6aa51	Klon işlemleri bota özelden yapılır.
 a51f7d30f	Bu istek zaten işlendi.
 c862658b2	Eski sürümden kalan istek; kullanıcı /klon ile token göndermeli.
@@ -19577,9 +19657,12 @@ dffc58eb3	Artık izin istemene gerek yok: token'ı gönder, bot sahibi onaylayı
 a353b8903	↩️ Kullanıcı isteği geri çekti
 cb7da55c2	↩️ İstek geri çekildi
 b30c05510	🔑 @BotFather'dan aldığın bot token'ını yaz (ör. <code>123456789:ABC...</code>).
-0adaad0bb	Vazgeçmek için: iptal
 661af98d3	123456789:ABC...
 a54c0e304	Bu klon senin değil.
+5965faff8	💎 Premium emoji açıldı
+b248ddfb0	💎 Premium emoji kapatıldı
+8526f556f	💎 Klon botun @⟨0⟩ için premium emoji açıldı. Botuna özelden /premiumemoji yazıp premium emojilerini öğret.
+83be7cafe	💎 Klon botun @⟨0⟩ için premium emoji kapatıldı.
 8f8af330e	Geçersiz.
 6a47f34ed	Bu klon silinmiş.
 21d148b57	🗑 @⟨0⟩ klonu silinsin mi? Bot durur, gruplardaki ayarlar kalır.
@@ -20469,6 +20552,21 @@ e7c66ff8b	إعدادات المجموعة ← المشرفون ← إضافة م
 8298e9706	… و⟨0⟩ أخرى
 7ba765796	🏆 <b>أنشط المجموعات</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ رسالة
+b7620563d	💎 لم يفعّل مؤسس البوت سمة الإيموجي المميزة لهذا النسخة بعد.
+653362ae5	🗑 تم حذف خريطة الإيموجي المميزة.
+68628d04b	✅ تم تفعيل سمة الإيموجي المميزة.
+0e4cfa229	⏸ تم إيقاف سمة الإيموجي المميزة.
+762017774	✅ مفعّل
+cd5bd9458	⏸ متوقف
+85d2de620	💎 <b>سمة الإيموجي المميزة</b>: ⟨0⟩
+5246a6025	الإيموجي المربوطة: ⟨0⟩
+26c237a40	⟨0⟩أرسل رسالة تحتوي على إيموجي مميزة: كل إيموجي مميزة فيها ستُستخدم بدل نظيرتها العادية في رسائل البوت وأيقونات الأزرار.
+98b029c06	يجب أن يكون لدى حساب مالك البوت Telegram Premium.
+0adaad0bb	للإلغاء: cancel
+272826aad	تم الإلغاء.
+218a28de3	لا توجد إيموجي مميزة في هذه الرسالة. أرسل رسالة تحتوي على إيموجي مميزة أو اكتب iptal.
+d1bb29a8d	تعذّرت قراءة الإيموجي: ⟨0⟩
+808236f33	✅ تم تعلّم ⟨0⟩ إيموجي مميزة (المجموع ⟨1⟩).
 57d75c0ab	🛠 البوت في صيانة قصيرة؛ سيعود قريبًا. الحمايات تعمل.
 fc94758f1	🛠 وضع الصيانة <b>مفعّل</b>⟨0⟩
 588994912	— ينتهي في ⟨0⟩
@@ -20771,6 +20869,7 @@ d094b4c43	/gbanlist — قائمة الحظر العالمي
 d729d3ba2	/backup — أخذ نسخة احتياطية من قاعدة البيانات
 0e556fad9	/gblockmedia — حظر الوسائط المردود عليها في كل المجموعات
 8af5e8c17	/recover — استعادة المشرفين
+e948b5d9b	/premiumemoji — سمة الإيموجي المميزة (الرسائل وأيقونات الأزرار)
 f0032f0c7	/select — اختيار قناة
 97a1889ae	/channelsettings — إعدادات القناة
 def1847f5	⟨0⟩/start — البدء
@@ -20959,6 +21058,7 @@ a38b6848f	قائمة الحظر العالمي
 cfc719f1d	نسخة احتياطية لقاعدة البيانات
 efdd2ee59	وضع الصيانة
 bf65fdcd0	حظر الوسائط في كل المجموعات
+0c0f2746b	سمة الإيموجي المميزة
 385efb5c0	⚡ البوت الرئيسي: @⟨0⟩
 8f13119d3	⟨0⟩ — بوت حماية المجموعات والقنوات: السبام والروابط والإغراق والهجمات والكابتشا.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -21663,7 +21763,6 @@ b7301e99a	لا فلاتر في هذه المجموعة.
 bd0505102	⚠️ حذف كل الفلاتر (<b>⟨0⟩</b>) في هذه المجموعة؟
 8d8252e68	🗑 نعم، احذف الكل
 9b6fcea87	↩️ إلغاء
-272826aad	تم الإلغاء.
 cf9d69e94	🗑 حُذف ⟨0⟩ فلتر.
 13c07c249	🧹 حُذفت كل الفلاتر (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 اسم العلامة
@@ -21691,6 +21790,7 @@ f3fc6979c	افتح بوت حماية باسم بوتك الخاص يعمل بم�
 632cbf17b	2) أرسل التوكن الذي حصلت عليه بالزر أدناه
 883193ad7	3) عندما يوافق مالك البوت يبدأ بوتك العمل⟨0⟩
 3a5be4fd4	🔑 إرسال التوكن
+f3e051762	💎 الإيموجي المميزة مفعّلة: /premiumemoji⟨0⟩
 e76ac71f1	🟢 يعمل
 f8a7fde2a	⚠️ توكن غير صالح
 b535c1e0c	🤖 <b>بوتك المستنسخ</b>: @⟨0⟩
@@ -21705,6 +21805,10 @@ b8abb05fb	▶️ تشغيل
 60446c88d	↩️ سحب الطلب
 ded7cc646	🔑 تغيير التوكن
 d3fb29907	🗑 حذف النسخة
+e211ffa2a	💎 بريميوم: مفعّل
+60c71135b	💎 بريميوم: متوقف
+783d8db23	الحالة: ⟨0⟩ · المالك <code>⟨1⟩</code>
+1a2ec4716	↩️ القائمة
 367b6aa51	إجراءات النسخة تتم في الخاص مع البوت.
 a51f7d30f	عولج هذا الطلب مسبقًا.
 c862658b2	طلب من إصدار قديم؛ يجب أن يرسل المستخدم التوكن عبر /clone.
@@ -21726,8 +21830,11 @@ dffc58eb3	لم تعد بحاجة لطلب إذن: أرسل التوكن، ويب
 a353b8903	↩️ سحب المستخدم الطلب
 cb7da55c2	↩️ سُحب الطلب
 b30c05510	🔑 اكتب توكن البوت الذي حصلت عليه من @BotFather (مثل <code>123456789:ABC...</code>).
-0adaad0bb	للإلغاء: cancel
 a54c0e304	هذه النسخة ليست لك.
+5965faff8	💎 تم تفعيل الإيموجي المميزة
+b248ddfb0	💎 تم إيقاف الإيموجي المميزة
+8526f556f	💎 تم تفعيل الإيموجي المميزة لبوتك المستنسخ @⟨0⟩. اكتب /premiumemoji لبوتك في الخاص وعلّمه إيموجياتك المميزة.
+83be7cafe	💎 تم إيقاف الإيموجي المميزة لبوتك المستنسخ @⟨0⟩.
 8f8af330e	غير صالح.
 6a47f34ed	حُذفت هذه النسخة.
 21d148b57	🗑 حذف النسخة @⟨0⟩؟ سيتوقف البوت وتبقى الإعدادات في المجموعات.
@@ -22582,6 +22689,21 @@ e7c66ff8b	Qrup ayarları → Administratorlar → Admin əlavə et → @⟨0⟩ 
 8298e9706	… və daha ⟨0⟩
 7ba765796	🏆 <b>Ən aktiv qruplar</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ mesaj
+b7620563d	💎 Premium emoji mövzusu bu klon üçün bot qurucusu tərəfindən hələ açılmayıb.
+653362ae5	🗑 Premium emoji xəritəsi silindi.
+68628d04b	✅ Premium emoji mövzusu açıldı.
+0e4cfa229	⏸ Premium emoji mövzusu bağlandı.
+762017774	✅ Açıq
+cd5bd9458	⏸ Bağlı
+85d2de620	💎 <b>Premium emoji mövzusu</b>: ⟨0⟩
+5246a6025	Uyğunlaşdırılan emoji: ⟨0⟩
+26c237a40	⟨0⟩Premium emojili mesaj göndər: içindəki hər premium emoji botun mesajlarında və düymə ikonlarında adi qarşılığının yerinə istifadə olunacaq.
+98b029c06	Bot sahibinin hesabında Telegram Premium olmalıdır.
+0adaad0bb	Ləğv etmək üçün: cancel
+272826aad	Ləğv edildi.
+218a28de3	Bu mesajda premium emoji yoxdur. Premium emojili mesaj göndər və ya iptal yaz.
+d1bb29a8d	Emojilər oxuna bilmədi: ⟨0⟩
+808236f33	✅ ⟨0⟩ premium emoji öyrənildi (cəmi ⟨1⟩).
 57d75c0ab	🛠 Bot qısa texniki xidmətdədir; tezliklə qayıdacaq. Qorumalar işləməyə davam edir.
 fc94758f1	🛠 Texniki xidmət rejimi <b>açıqdır</b>⟨0⟩
 588994912	— bitmə vaxtı: ⟨0⟩
@@ -22879,6 +23001,7 @@ d094b4c43	/gbanlist — Qlobal ban siyahısı
 d729d3ba2	/backup — Verilənlər bazasının ehtiyat nüsxəsini al
 0e556fad9	/gblockmedia — Cavab verilən medianı bütün qruplarda blokla
 8af5e8c17	/recover — Admin bərpası
+e948b5d9b	/premiumemoji — Premium emoji mövzusu (mesajlar və düymə ikonları)
 f0032f0c7	/select — Kanal seç
 97a1889ae	/channelsettings — Kanal ayarları
 def1847f5	⟨0⟩/start — Başlat
@@ -23061,6 +23184,7 @@ a38b6848f	Qlobal ban siyahısı
 cfc719f1d	Verilənlər bazasının ehtiyat nüsxəsi
 efdd2ee59	Texniki xidmət rejimi
 bf65fdcd0	Bütün qruplarda medianı blokla
+0c0f2746b	Premium emoji mövzusu
 385efb5c0	⚡ Əsas bot: @⟨0⟩
 8f13119d3	⟨0⟩ — qrup və kanal qoruma botu: spam, linklər, flood, reydlər və captcha.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -23749,7 +23873,6 @@ b7301e99a	Bu qrupda filtr yoxdur.
 bd0505102	⚠️ Bu qrupdakı bütün <b>⟨0⟩</b> filtr silinsin?
 8d8252e68	🗑 Bəli, hamısını sil
 9b6fcea87	↩️ Ləğv et
-272826aad	Ləğv edildi.
 cf9d69e94	🗑 ⟨0⟩ filtr silindi.
 13c07c249	🧹 Bütün filtrlər silindi (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Brend adı
@@ -23776,6 +23899,7 @@ f3fc6979c	ULUS mühərriki ilə işləyən, öz bot adınla qoruma botu aç.
 632cbf17b	2) Aldığın tokeni aşağıdakı düymə ilə göndər
 883193ad7	3) Bot sahibi təsdiqləyəndə botun işə düşür⟨0⟩
 3a5be4fd4	🔑 Token göndər
+f3e051762	💎 Premium emoji açıqdır: /premiumemoji⟨0⟩
 e76ac71f1	🟢 İşləyir
 f8a7fde2a	⚠️ Yanlış token
 b535c1e0c	🤖 <b>Klon botun</b>: @⟨0⟩
@@ -23788,6 +23912,10 @@ de54dae36	standart
 53f82bc49	⏸ Dayandır
 60446c88d	↩️ Sorğunu geri götür
 ded7cc646	🔑 Tokeni dəyiş
+e211ffa2a	💎 Premium: Açıq
+60c71135b	💎 Premium: Bağlı
+783d8db23	Status: ⟨0⟩ · Sahib <code>⟨1⟩</code>
+1a2ec4716	↩️ Siyahı
 367b6aa51	Klon əməliyyatları botla şəxsi çatda edilir.
 a51f7d30f	Bu sorğuya artıq baxılıb.
 c862658b2	Köhnə versiyadan sorğu; istifadəçi /clone ilə token göndərməlidir.
@@ -23809,8 +23937,10 @@ dffc58eb3	Artıq icazə istəməyə ehtiyac yoxdur: tokeni göndər, bot sahibi 
 a353b8903	↩️ İstifadəçi sorğunu geri götürdü
 cb7da55c2	↩️ Sorğu geri götürüldü
 b30c05510	🔑 @BotFather-dən aldığın bot tokenini yaz (məs. <code>123456789:ABC...</code>).
-0adaad0bb	Ləğv etmək üçün: cancel
 a54c0e304	Bu klon sənin deyil.
+b248ddfb0	💎 Premium emoji bağlandı
+8526f556f	💎 Klon botun @⟨0⟩ üçün premium emoji açıldı. Botuna şəxsidə /premiumemoji yazıb premium emojilərini öyrət.
+83be7cafe	💎 Klon botun @⟨0⟩ üçün premium emoji bağlandı.
 8f8af330e	Yanlışdır.
 6a47f34ed	Bu klon silinib.
 21d148b57	🗑 @⟨0⟩ klonu silinsin? Bot dayanır, qruplardakı ayarlar qalır.
@@ -24678,6 +24808,21 @@ e7c66ff8b	Gruppeneinstellungen → Administratoren → Administrator hinzufügen
 8298e9706	… und ⟨0⟩ weitere
 7ba765796	🏆 <b>Aktivste Gruppen</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ Nachrichten
+b7620563d	💎 Das Premium-Emoji-Theme wurde für diesen Klon vom Bot-Gründer noch nicht aktiviert.
+653362ae5	🗑 Premium-Emoji-Zuordnung gelöscht.
+68628d04b	✅ Premium-Emoji-Theme aktiviert.
+0e4cfa229	⏸ Premium-Emoji-Theme deaktiviert.
+762017774	✅ An
+cd5bd9458	⏸ Aus
+85d2de620	💎 <b>Premium-Emoji-Theme</b>: ⟨0⟩
+5246a6025	Zugeordnete Emojis: ⟨0⟩
+26c237a40	⟨0⟩Sende eine Nachricht mit Premium-Emojis: Jedes Premium-Emoji darin wird in den Nachrichten des Bots und in Button-Symbolen statt des normalen Emojis verwendet.
+98b029c06	Das Konto des Bot-Besitzers muss Telegram Premium haben.
+0adaad0bb	Zum Abbrechen: cancel
+272826aad	Abgebrochen.
+218a28de3	Diese Nachricht enthält keine Premium-Emojis. Sende eine Nachricht mit Premium-Emojis oder schreib iptal.
+d1bb29a8d	Emojis konnten nicht gelesen werden: ⟨0⟩
+808236f33	✅ ⟨0⟩ Premium-Emojis gelernt (insgesamt ⟨1⟩).
 57d75c0ab	🛠 Der Bot ist kurz in Wartung und gleich zurück. Die Schutzfunktionen laufen weiter.
 fc94758f1	🛠 Wartungsmodus <b>an</b>⟨0⟩
 588994912	— endet um ⟨0⟩
@@ -24978,6 +25123,7 @@ d094b4c43	/gbanlist — Globale Bannliste
 d729d3ba2	/backup — Datenbank-Backup erstellen
 0e556fad9	/gblockmedia — Das beantwortete Medium in allen Gruppen sperren
 8af5e8c17	/recover — Admin-Wiederherstellung
+e948b5d9b	/premiumemoji — Premium-Emoji-Theme (Nachrichten und Button-Symbole)
 f0032f0c7	/select — Kanal auswählen
 97a1889ae	/channelsettings — Kanaleinstellungen
 def1847f5	⟨0⟩/start — Starten
@@ -25166,6 +25312,7 @@ a38b6848f	Globale Bannliste
 cfc719f1d	Datenbank-Backup
 efdd2ee59	Wartungsmodus
 bf65fdcd0	Medien in allen Gruppen sperren
+0c0f2746b	Premium-Emoji-Theme
 385efb5c0	⚡ Hauptbot: @⟨0⟩
 8f13119d3	⟨0⟩ — Schutzbot für Gruppen und Kanäle: Spam, Links, Flood, Raids und Captcha.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -25862,7 +26009,6 @@ b7301e99a	In dieser Gruppe gibt es keine Filter.
 bd0505102	⚠️ Alle <b>⟨0⟩</b> Filter in dieser Gruppe löschen?
 8d8252e68	🗑 Ja, alle löschen
 9b6fcea87	↩️ Abbrechen
-272826aad	Abgebrochen.
 cf9d69e94	🗑 ⟨0⟩ Filter gelöscht.
 13c07c249	🧹 Alle Filter gelöscht (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Markenname
@@ -25890,6 +26036,7 @@ f3fc6979c	Eröffne einen Schutzbot mit deinem eigenen Bot-Namen, der auf der ULU
 632cbf17b	2) Sende das erhaltene Token mit dem Button unten
 883193ad7	3) Sobald der Bot-Besitzer zustimmt, startet dein Bot⟨0⟩
 3a5be4fd4	🔑 Token senden
+f3e051762	💎 Premium-Emojis an: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Läuft
 f8a7fde2a	⚠️ Ungültiges Token
 b535c1e0c	🤖 <b>Dein Klon-Bot</b>: @⟨0⟩
@@ -25904,6 +26051,9 @@ b8abb05fb	▶️ Starten
 60446c88d	↩️ Anfrage zurückziehen
 ded7cc646	🔑 Token ändern
 d3fb29907	🗑 Klon löschen
+e211ffa2a	💎 Premium: An
+60c71135b	💎 Premium: Aus
+783d8db23	Status: ⟨0⟩ · Besitzer <code>⟨1⟩</code>
 367b6aa51	Klon-Aktionen erfolgen privat mit dem Bot.
 a51f7d30f	Diese Anfrage wurde bereits bearbeitet.
 c862658b2	Eine Anfrage aus einer alten Version; der Nutzer muss mit /clone ein Token senden.
@@ -25925,8 +26075,11 @@ dffc58eb3	Du musst nicht mehr um Erlaubnis fragen: Sende das Token, dein Bot sta
 a353b8903	↩️ Der Nutzer hat die Anfrage zurückgezogen
 cb7da55c2	↩️ Anfrage zurückgezogen
 b30c05510	🔑 Schreib das Bot-Token, das du von @BotFather erhalten hast (z. B. <code>123456789:ABC...</code>).
-0adaad0bb	Zum Abbrechen: cancel
 a54c0e304	Dieser Klon gehört nicht dir.
+5965faff8	💎 Premium-Emojis aktiviert
+b248ddfb0	💎 Premium-Emojis deaktiviert
+8526f556f	💎 Für deinen Klon-Bot @⟨0⟩ wurden Premium-Emojis aktiviert. Schreib deinem Bot privat /premiumemoji und bring ihm deine Premium-Emojis bei.
+83be7cafe	💎 Für deinen Klon-Bot @⟨0⟩ wurden Premium-Emojis deaktiviert.
 8f8af330e	Ungültig.
 6a47f34ed	Dieser Klon wurde gelöscht.
 21d148b57	🗑 Den Klon @⟨0⟩ löschen? Der Bot stoppt, die Einstellungen in den Gruppen bleiben.
@@ -26787,6 +26940,21 @@ e7c66ff8b	Group settings → Administrators → Add admin → @⟨0⟩ (deleting
 8298e9706	… and ⟨0⟩ more
 7ba765796	🏆 <b>Most active groups</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ messages
+b7620563d	💎 The premium emoji theme hasn't been enabled for this clone by the bot founder yet.
+653362ae5	🗑 Premium emoji map deleted.
+68628d04b	✅ Premium emoji theme turned on.
+0e4cfa229	⏸ Premium emoji theme turned off.
+762017774	✅ On
+cd5bd9458	⏸ Off
+85d2de620	💎 <b>Premium emoji theme</b>: ⟨0⟩
+5246a6025	Mapped emoji: ⟨0⟩
+26c237a40	⟨0⟩Send a message with premium emoji: each premium emoji in it will be used instead of its normal counterpart in the bot's messages and button icons.
+98b029c06	The bot owner's account must have Telegram Premium.
+0adaad0bb	To cancel: cancel
+272826aad	Cancelled.
+218a28de3	There is no premium emoji in this message. Send a message with premium emoji or type iptal.
+d1bb29a8d	Couldn't read the emoji: ⟨0⟩
+808236f33	✅ ⟨0⟩ premium emoji learned (total ⟨1⟩).
 57d75c0ab	🛠 The bot is in a short maintenance; it'll be back soon. Protections keep working.
 fc94758f1	🛠 Maintenance mode <b>on</b>⟨0⟩
 588994912	— ends at ⟨0⟩
@@ -27082,6 +27250,7 @@ d094b4c43	/gbanlist — Global ban list
 d729d3ba2	/backup — Take a database backup
 0e556fad9	/gblockmedia — Block the replied media in all groups
 8af5e8c17	/recover — Admin recovery
+e948b5d9b	/premiumemoji — Premium emoji theme (messages and button icons)
 f0032f0c7	/select — Select a channel
 97a1889ae	/channelsettings — Channel settings
 def1847f5	⟨0⟩/start — Start
@@ -27269,6 +27438,7 @@ a38b6848f	Global ban list
 cfc719f1d	Database backup
 efdd2ee59	Maintenance mode
 bf65fdcd0	Block media in all groups
+0c0f2746b	Premium emoji theme
 8f13119d3	⟨0⟩ — group and channel protection bot: spam, links, flood, raids and captcha.
 7ebe2ab6b	Protects your group and channel against spam, links, flood, raids and fake accounts. All settings are made from a panel with buttons.
 287dec170	To get started: /start⟨0⟩
@@ -27961,7 +28131,6 @@ b7301e99a	There are no filters in this group.
 bd0505102	⚠️ Delete all <b>⟨0⟩</b> filters in this group?
 8d8252e68	🗑 Yes, delete all
 9b6fcea87	↩️ Cancel
-272826aad	Cancelled.
 cf9d69e94	🗑 ⟨0⟩ filters deleted.
 13c07c249	🧹 All filters deleted (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Brand name
@@ -27989,6 +28158,7 @@ f3fc6979c	Open a protection bot with your own bot name that runs on the ULUS eng
 632cbf17b	2) Send the token you got with the button below
 883193ad7	3) When the bot owner approves, your bot starts working⟨0⟩
 3a5be4fd4	🔑 Send token
+f3e051762	💎 Premium emoji is on: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Running
 f8a7fde2a	⚠️ Invalid token
 b535c1e0c	🤖 <b>Your clone bot</b>: @⟨0⟩
@@ -28003,6 +28173,10 @@ b8abb05fb	▶️ Start
 60446c88d	↩️ Withdraw request
 ded7cc646	🔑 Change token
 d3fb29907	🗑 Delete clone
+e211ffa2a	💎 Premium: On
+60c71135b	💎 Premium: Off
+783d8db23	Status: ⟨0⟩ · Owner <code>⟨1⟩</code>
+1a2ec4716	↩️ List
 367b6aa51	Clone actions are done privately with the bot.
 a51f7d30f	This request was already handled.
 c862658b2	A request from an old version; the user must send a token with /clone.
@@ -28024,8 +28198,11 @@ dffc58eb3	You no longer need to ask for permission: send the token, your bot sta
 a353b8903	↩️ The user withdrew the request
 cb7da55c2	↩️ Request withdrawn
 b30c05510	🔑 Write the bot token you got from @BotFather (e.g. <code>123456789:ABC...</code>).
-0adaad0bb	To cancel: cancel
 a54c0e304	This clone isn't yours.
+5965faff8	💎 Premium emoji turned on
+b248ddfb0	💎 Premium emoji turned off
+8526f556f	💎 Premium emoji has been turned on for your clone bot @⟨0⟩. Type /premiumemoji to your bot in private to teach it your premium emoji.
+83be7cafe	💎 Premium emoji has been turned off for your clone bot @⟨0⟩.
 8f8af330e	Invalid.
 6a47f34ed	This clone was deleted.
 21d148b57	🗑 Delete the clone @⟨0⟩? The bot stops, settings in groups stay.
@@ -28143,6 +28320,7 @@ add542f6d	rapor #⟨0⟩
 82b029e57	<code>#⟨0⟩</code> — ⟨1⟩
 404522550	https://t.me/⟨0⟩?startgroup=kurulum&admin=⟨1⟩
 8290f7d5e	· <code>⟨0⟩</code>
+d7acaf0b4	<tg-emoji emoji-id="⟨0⟩">⟨1⟩</tg-emoji> → <code>⟨2⟩</code>
 e9d283a8a	ID: ⟨0⟩
 eaf7ea115	<blockquote expandable>⟨0⟩⟨1⟩</blockquote>
 fccc7c16c	🆔 ID: ⟨0⟩
@@ -28942,6 +29120,21 @@ e7c66ff8b	Ajustes del grupo → Administradores → Añadir admin → @⟨0⟩ (
 8298e9706	… y ⟨0⟩ más
 7ba765796	🏆 <b>Grupos más activos</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ mensajes
+b7620563d	💎 El fundador del bot aún no ha activado el tema de emojis premium para este clon.
+653362ae5	🗑 Mapa de emojis premium eliminado.
+68628d04b	✅ Tema de emojis premium activado.
+0e4cfa229	⏸ Tema de emojis premium desactivado.
+762017774	✅ Activado
+cd5bd9458	⏸ Desactivado
+85d2de620	💎 <b>Tema de emojis premium</b>: ⟨0⟩
+5246a6025	Emojis asignados: ⟨0⟩
+26c237a40	⟨0⟩Envía un mensaje con emojis premium: cada emoji premium que contenga se usará en lugar de su equivalente normal en los mensajes del bot y en los iconos de los botones.
+98b029c06	La cuenta del dueño del bot debe tener Telegram Premium.
+0adaad0bb	Para cancelar: cancel
+272826aad	Cancelado.
+218a28de3	Este mensaje no tiene emojis premium. Envía un mensaje con emojis premium o escribe iptal.
+d1bb29a8d	No se pudieron leer los emojis: ⟨0⟩
+808236f33	✅ ⟨0⟩ emojis premium aprendidos (total ⟨1⟩).
 57d75c0ab	🛠 El bot está en un breve mantenimiento; volverá pronto. Las protecciones siguen funcionando.
 fc94758f1	🛠 Modo mantenimiento <b>activado</b>⟨0⟩
 588994912	— termina a las ⟨0⟩
@@ -29242,6 +29435,7 @@ d094b4c43	/gbanlist — Lista de baneos globales
 d729d3ba2	/backup — Hacer una copia de la base de datos
 0e556fad9	/gblockmedia — Bloquear la multimedia respondida en todos los grupos
 8af5e8c17	/recover — Recuperación de admins
+e948b5d9b	/premiumemoji — Tema de emojis premium (mensajes e iconos de botones)
 f0032f0c7	/select — Elegir un canal
 97a1889ae	/channelsettings — Ajustes del canal
 def1847f5	⟨0⟩/start — Inicio
@@ -29430,6 +29624,7 @@ a38b6848f	Lista de baneos globales
 cfc719f1d	Copia de la base de datos
 efdd2ee59	Modo mantenimiento
 bf65fdcd0	Bloquear multimedia en todos los grupos
+0c0f2746b	Tema de emojis premium
 385efb5c0	⚡ Bot principal: @⟨0⟩
 8f13119d3	⟨0⟩ — bot de protección de grupos y canales: spam, enlaces, flood, raids y captcha.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -30128,7 +30323,6 @@ b7301e99a	No hay filtros en este grupo.
 bd0505102	⚠️ ¿Borrar los <b>⟨0⟩</b> filtros de este grupo?
 8d8252e68	🗑 Sí, borrar todo
 9b6fcea87	↩️ Cancelar
-272826aad	Cancelado.
 cf9d69e94	🗑 ⟨0⟩ filtros borrados.
 13c07c249	🧹 Todos los filtros borrados (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nombre de marca
@@ -30156,6 +30350,7 @@ f3fc6979c	Abre un bot de protección con tu propio nombre que funciona con el mo
 632cbf17b	2) Envía el token que recibiste con el botón de abajo
 883193ad7	3) Cuando el dueño del bot lo apruebe, tu bot empezará a funcionar⟨0⟩
 3a5be4fd4	🔑 Enviar token
+f3e051762	💎 Emojis premium activados: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Funcionando
 f8a7fde2a	⚠️ Token no válido
 b535c1e0c	🤖 <b>Tu bot clon</b>: @⟨0⟩
@@ -30170,6 +30365,10 @@ b8abb05fb	▶️ Iniciar
 60446c88d	↩️ Retirar solicitud
 ded7cc646	🔑 Cambiar token
 d3fb29907	🗑 Borrar clon
+e211ffa2a	💎 Premium: Activado
+60c71135b	💎 Premium: Desactivado
+783d8db23	Estado: ⟨0⟩ · Dueño <code>⟨1⟩</code>
+1a2ec4716	↩️ Lista
 367b6aa51	Las acciones del clon se hacen en privado con el bot.
 a51f7d30f	Esta solicitud ya fue gestionada.
 c862658b2	Solicitud de una versión antigua; el usuario debe enviar un token con /clone.
@@ -30191,8 +30390,11 @@ dffc58eb3	Ya no necesitas pedir permiso: envía el token y tu bot empezará cuan
 a353b8903	↩️ El usuario retiró la solicitud
 cb7da55c2	↩️ Solicitud retirada
 b30c05510	🔑 Escribe el token del bot que te dio @BotFather (ej. <code>123456789:ABC...</code>).
-0adaad0bb	Para cancelar: cancel
 a54c0e304	Este clon no es tuyo.
+5965faff8	💎 Emojis premium activados
+b248ddfb0	💎 Emojis premium desactivados
+8526f556f	💎 Se activaron los emojis premium para tu bot clon @⟨0⟩. Escribe /premiumemoji a tu bot por privado y enséñale tus emojis premium.
+83be7cafe	💎 Se desactivaron los emojis premium para tu bot clon @⟨0⟩.
 8f8af330e	No válido.
 6a47f34ed	Este clon fue borrado.
 21d148b57	🗑 ¿Borrar el clon @⟨0⟩? El bot se detiene; los ajustes en los grupos se mantienen.
@@ -31069,6 +31271,21 @@ e7c66ff8b	تنظیمات گروه ← مدیران ← افزودن ادمین �
 8298e9706	… و ⟨0⟩ مورد دیگر
 7ba765796	🏆 <b>فعال‌ترین گروه‌ها</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ پیام
+b7620563d	💎 تم ایموجی پریمیوم برای این کلون هنوز توسط بنیان‌گذار ربات فعال نشده است.
+653362ae5	🗑 نقشه ایموجی پریمیوم حذف شد.
+68628d04b	✅ تم ایموجی پریمیوم روشن شد.
+0e4cfa229	⏸ تم ایموجی پریمیوم خاموش شد.
+762017774	✅ روشن
+cd5bd9458	⏸ خاموش
+85d2de620	💎 <b>تم ایموجی پریمیوم</b>: ⟨0⟩
+5246a6025	ایموجی‌های نگاشت‌شده: ⟨0⟩
+26c237a40	⟨0⟩یک پیام با ایموجی پریمیوم بفرست: هر ایموجی پریمیوم آن به‌جای نسخه معمولی‌اش در پیام‌های ربات و آیکون دکمه‌ها استفاده می‌شود.
+98b029c06	حساب مالک ربات باید Telegram Premium داشته باشد.
+0adaad0bb	برای لغو: cancel
+272826aad	لغو شد.
+218a28de3	این پیام ایموجی پریمیوم ندارد. یک پیام با ایموجی پریمیوم بفرست یا iptal بنویس.
+d1bb29a8d	خواندن ایموجی‌ها ممکن نشد: ⟨0⟩
+808236f33	✅ ⟨0⟩ ایموجی پریمیوم یاد گرفته شد (مجموع ⟨1⟩).
 57d75c0ab	🛠 ربات در تعمیر کوتاهی است؛ به‌زودی برمی‌گردد. محافظت‌ها کار می‌کنند.
 fc94758f1	🛠 حالت تعمیر <b>روشن</b>⟨0⟩
 588994912	— پایان در ⟨0⟩
@@ -31371,6 +31588,7 @@ d094b4c43	/gbanlist — فهرست بن سراسری
 d729d3ba2	/backup — پشتیبان‌گیری از پایگاه داده
 0e556fad9	/gblockmedia — مسدود کردن رسانه ریپلای‌شده در همه گروه‌ها
 8af5e8c17	/recover — بازیابی ادمین‌ها
+e948b5d9b	/premiumemoji — تم ایموجی پریمیوم (پیام‌ها و آیکون دکمه‌ها)
 f0032f0c7	/select — انتخاب کانال
 97a1889ae	/channelsettings — تنظیمات کانال
 def1847f5	⟨0⟩/start — شروع
@@ -31559,6 +31777,7 @@ a38b6848f	فهرست بن سراسری
 cfc719f1d	پشتیبان پایگاه داده
 efdd2ee59	حالت تعمیر
 bf65fdcd0	مسدود کردن رسانه در همه گروه‌ها
+0c0f2746b	تم ایموجی پریمیوم
 385efb5c0	⚡ ربات اصلی: @⟨0⟩
 8f13119d3	⟨0⟩ — ربات محافظت گروه و کانال: اسپم، لینک، فلود، حمله و کپچا.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -32263,7 +32482,6 @@ b7301e99a	در این گروه فیلتری نیست.
 bd0505102	⚠️ همه <b>⟨0⟩</b> فیلتر این گروه حذف شوند؟
 8d8252e68	🗑 بله، همه را حذف کن
 9b6fcea87	↩️ لغو
-272826aad	لغو شد.
 cf9d69e94	🗑 ⟨0⟩ فیلتر حذف شد.
 13c07c249	🧹 همه فیلترها حذف شدند (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 نام برند
@@ -32291,6 +32509,7 @@ f3fc6979c	یک ربات محافظ با نام ربات خودتان باز کن
 632cbf17b	2) توکنی را که گرفتید با دکمه زیر بفرستید
 883193ad7	3) وقتی مالک ربات تأیید کند، ربات شما شروع به کار می‌کند⟨0⟩
 3a5be4fd4	🔑 ارسال توکن
+f3e051762	💎 ایموجی پریمیوم روشن است: /premiumemoji⟨0⟩
 e76ac71f1	🟢 در حال اجرا
 f8a7fde2a	⚠️ توکن نامعتبر
 b535c1e0c	🤖 <b>ربات کپی شما</b>: @⟨0⟩
@@ -32305,6 +32524,10 @@ b8abb05fb	▶️ شروع
 60446c88d	↩️ پس گرفتن درخواست
 ded7cc646	🔑 تغییر توکن
 d3fb29907	🗑 حذف کپی
+e211ffa2a	💎 پریمیوم: روشن
+60c71135b	💎 پریمیوم: خاموش
+783d8db23	وضعیت: ⟨0⟩ · مالک <code>⟨1⟩</code>
+1a2ec4716	↩️ فهرست
 367b6aa51	کارهای مربوط به کپی در خصوصی با ربات انجام می‌شود.
 a51f7d30f	این درخواست قبلاً رسیدگی شده است.
 c862658b2	درخواست از نسخه قدیمی؛ کاربر باید با /clone توکن بفرستد.
@@ -32326,8 +32549,11 @@ dffc58eb3	دیگر نیازی به اجازه گرفتن نیست: توکن را
 a353b8903	↩️ کاربر درخواست را پس گرفت
 cb7da55c2	↩️ درخواست پس گرفته شد
 b30c05510	🔑 توکن رباتی را که از @BotFather گرفته‌اید بنویسید (مثلاً <code>123456789:ABC...</code>).
-0adaad0bb	برای لغو: cancel
 a54c0e304	این کپی مال شما نیست.
+5965faff8	💎 ایموجی پریمیوم روشن شد
+b248ddfb0	💎 ایموجی پریمیوم خاموش شد
+8526f556f	💎 ایموجی پریمیوم برای ربات کلون تو @⟨0⟩ روشن شد. در خصوصی ربات /premiumemoji را بنویس و ایموجی‌های پریمیومت را به آن یاد بده.
+83be7cafe	💎 ایموجی پریمیوم برای ربات کلون تو @⟨0⟩ خاموش شد.
 8f8af330e	نامعتبر.
 6a47f34ed	این کپی حذف شده است.
 21d148b57	🗑 کپی @⟨0⟩ حذف شود؟ ربات متوقف می‌شود، تنظیمات گروه‌ها می‌ماند.
@@ -33200,6 +33426,21 @@ e7c66ff8b	Paramètres du groupe → Administrateurs → Ajouter un administrateu
 8298e9706	… et ⟨0⟩ de plus
 7ba765796	🏆 <b>Groupes les plus actifs</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ messages
+b7620563d	💎 Le fondateur du bot n'a pas encore activé le thème d'emojis premium pour ce clone.
+653362ae5	🗑 Correspondance des emojis premium supprimée.
+68628d04b	✅ Thème d'emojis premium activé.
+0e4cfa229	⏸ Thème d'emojis premium désactivé.
+762017774	✅ Activé
+cd5bd9458	⏸ Désactivé
+85d2de620	💎 <b>Thème d'emojis premium</b> : ⟨0⟩
+5246a6025	Emojis associés : ⟨0⟩
+26c237a40	⟨0⟩Envoyez un message contenant des emojis premium : chaque emoji premium sera utilisé à la place de son équivalent normal dans les messages du bot et les icônes des boutons.
+98b029c06	Le compte du propriétaire du bot doit avoir Telegram Premium.
+0adaad0bb	Pour annuler : cancel
+272826aad	Annulé.
+218a28de3	Ce message ne contient aucun emoji premium. Envoyez un message avec des emojis premium ou écrivez iptal.
+d1bb29a8d	Impossible de lire les emojis : ⟨0⟩
+808236f33	✅ ⟨0⟩ emojis premium appris (total ⟨1⟩).
 57d75c0ab	🛠 Le bot est en courte maintenance ; il revient bientôt. Les protections continuent de fonctionner.
 fc94758f1	🛠 Mode maintenance <b>activé</b>⟨0⟩
 588994912	— se termine à ⟨0⟩
@@ -33500,6 +33741,7 @@ d094b4c43	/gbanlist — Liste des bans globaux
 d729d3ba2	/backup — Faire une sauvegarde de la base de données
 0e556fad9	/gblockmedia — Bloquer le média cité dans tous les groupes
 8af5e8c17	/recover — Récupération des admins
+e948b5d9b	/premiumemoji — Thème d'emojis premium (messages et icônes des boutons)
 f0032f0c7	/select — Choisir un canal
 97a1889ae	/channelsettings — Paramètres du canal
 def1847f5	⟨0⟩/start — Démarrer
@@ -33688,6 +33930,7 @@ a38b6848f	Liste des bans globaux
 cfc719f1d	Sauvegarde de la base de données
 efdd2ee59	Mode maintenance
 bf65fdcd0	Bloquer un média dans tous les groupes
+0c0f2746b	Thème d'emojis premium
 385efb5c0	⚡ Bot principal : @⟨0⟩
 8f13119d3	⟨0⟩ — bot de protection des groupes et canaux : spam, liens, flood, raids et captcha.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -34388,7 +34631,6 @@ b7301e99a	Il n’y a aucun filtre dans ce groupe.
 bd0505102	⚠️ Supprimer les <b>⟨0⟩</b> filtres de ce groupe ?
 8d8252e68	🗑 Oui, tout supprimer
 9b6fcea87	↩️ Annuler
-272826aad	Annulé.
 cf9d69e94	🗑 ⟨0⟩ filtres supprimés.
 13c07c249	🧹 Tous les filtres supprimés (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nom de marque
@@ -34416,6 +34658,7 @@ f3fc6979c	Ouvrez un bot de protection à votre propre nom, qui fonctionne sur le
 632cbf17b	2) Envoyez le jeton obtenu avec le bouton ci-dessous
 883193ad7	3) Quand le propriétaire du bot l’approuve, votre bot démarre⟨0⟩
 3a5be4fd4	🔑 Envoyer le jeton
+f3e051762	💎 Emojis premium activés : /premiumemoji⟨0⟩
 e76ac71f1	🟢 En marche
 f8a7fde2a	⚠️ Jeton invalide
 b535c1e0c	🤖 <b>Votre bot clone</b> : @⟨0⟩
@@ -34430,6 +34673,9 @@ b8abb05fb	▶️ Démarrer
 60446c88d	↩️ Retirer la demande
 ded7cc646	🔑 Changer le jeton
 d3fb29907	🗑 Supprimer le clone
+e211ffa2a	💎 Premium : Activé
+60c71135b	💎 Premium : Désactivé
+783d8db23	Statut : ⟨0⟩ · Propriétaire <code>⟨1⟩</code>
 367b6aa51	Les actions sur les clones se font en privé avec le bot.
 a51f7d30f	Cette demande a déjà été traitée.
 c862658b2	Une demande d’une ancienne version ; l’utilisateur doit envoyer un jeton avec /clone.
@@ -34451,8 +34697,11 @@ dffc58eb3	Vous n’avez plus besoin de demander la permission : envoyez le jeton
 a353b8903	↩️ L’utilisateur a retiré la demande
 cb7da55c2	↩️ Demande retirée
 b30c05510	🔑 Écrivez le jeton du bot obtenu auprès de @BotFather (ex. <code>123456789:ABC...</code>).
-0adaad0bb	Pour annuler : cancel
 a54c0e304	Ce clone n’est pas à vous.
+5965faff8	💎 Emojis premium activés
+b248ddfb0	💎 Emojis premium désactivés
+8526f556f	💎 Les emojis premium ont été activés pour votre bot clone @⟨0⟩. Écrivez /premiumemoji à votre bot en privé pour lui apprendre vos emojis premium.
+83be7cafe	💎 Les emojis premium ont été désactivés pour votre bot clone @⟨0⟩.
 8f8af330e	Invalide.
 6a47f34ed	Ce clone a été supprimé.
 21d148b57	🗑 Supprimer le clone @⟨0⟩ ? Le bot s’arrête, les paramètres dans les groupes restent.
@@ -35329,6 +35578,21 @@ e7c66ff8b	ग्रुप सेटिंग्स → एडमिनिस्�
 8298e9706	… और ⟨0⟩
 7ba765796	🏆 <b>सबसे सक्रिय ग्रुप</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ संदेश
+b7620563d	💎 बॉट संस्थापक ने इस क्लोन के लिए प्रीमियम इमोजी थीम अभी चालू नहीं की है।
+653362ae5	🗑 प्रीमियम इमोजी मैप हटा दिया गया।
+68628d04b	✅ प्रीमियम इमोजी थीम चालू की गई।
+0e4cfa229	⏸ प्रीमियम इमोजी थीम बंद की गई।
+762017774	✅ चालू
+cd5bd9458	⏸ बंद
+85d2de620	💎 <b>प्रीमियम इमोजी थीम</b>: ⟨0⟩
+5246a6025	मैप किए गए इमोजी: ⟨0⟩
+26c237a40	⟨0⟩प्रीमियम इमोजी वाला संदेश भेजें: उसमें हर प्रीमियम इमोजी बॉट के संदेशों और बटन आइकनों में सामान्य इमोजी की जगह इस्तेमाल होगा।
+98b029c06	बॉट मालिक के खाते में Telegram Premium होना चाहिए।
+0adaad0bb	रद्द करने के लिए: cancel
+272826aad	रद्द किया गया।
+218a28de3	इस संदेश में कोई प्रीमियम इमोजी नहीं है। प्रीमियम इमोजी वाला संदेश भेजें या iptal लिखें।
+d1bb29a8d	इमोजी पढ़े नहीं जा सके: ⟨0⟩
+808236f33	✅ ⟨0⟩ प्रीमियम इमोजी सीखे गए (कुल ⟨1⟩)।
 57d75c0ab	🛠 बॉट थोड़ी देर के मेंटेनेंस में है; जल्द ही वापस आएगा। सुरक्षाएँ काम करती रहेंगी।
 fc94758f1	🛠 मेंटेनेंस मोड <b>चालू</b>⟨0⟩
 588994912	— ⟨0⟩ पर खत्म होगा
@@ -35631,6 +35895,7 @@ d094b4c43	/gbanlist — ग्लोबल बैन सूची
 d729d3ba2	/backup — डेटाबेस का बैकअप लें
 0e556fad9	/gblockmedia — रिप्लाई किए गए मीडिया को सभी ग्रुप में ब्लॉक करें
 8af5e8c17	/recover — एडमिन रिकवरी
+e948b5d9b	/premiumemoji — प्रीमियम इमोजी थीम (संदेश और बटन आइकन)
 f0032f0c7	/select — चैनल चुनें
 97a1889ae	/channelsettings — चैनल सेटिंग्स
 def1847f5	⟨0⟩/start — शुरू करें
@@ -35819,6 +36084,7 @@ a38b6848f	ग्लोबल बैन सूची
 cfc719f1d	डेटाबेस बैकअप
 efdd2ee59	मेंटेनेंस मोड
 bf65fdcd0	सभी ग्रुप में मीडिया ब्लॉक करें
+0c0f2746b	प्रीमियम इमोजी थीम
 385efb5c0	⚡ मुख्य बॉट: @⟨0⟩
 8f13119d3	⟨0⟩ — ग्रुप और चैनल सुरक्षा बॉट: स्पैम, लिंक, फ़्लड, रेड और कैप्चा।
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -36523,7 +36789,6 @@ b7301e99a	इस ग्रुप में कोई फ़िल्टर न�
 bd0505102	⚠️ इस ग्रुप के सभी <b>⟨0⟩</b> फ़िल्टर हटाएं?
 8d8252e68	🗑 हाँ, सब हटाएं
 9b6fcea87	↩️ रद्द करें
-272826aad	रद्द किया गया।
 cf9d69e94	🗑 ⟨0⟩ फ़िल्टर हटाए गए।
 13c07c249	🧹 सभी फ़िल्टर हटाए गए (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 ब्रांड नाम
@@ -36551,6 +36816,7 @@ f3fc6979c	अपने बॉट नाम से एक सुरक्षा �
 632cbf17b	2) मिला हुआ टोकन नीचे दिए बटन से भेजें
 883193ad7	3) बॉट मालिक के स्वीकृत करते ही आपका बॉट काम करने लगेगा⟨0⟩
 3a5be4fd4	🔑 टोकन भेजें
+f3e051762	💎 प्रीमियम इमोजी चालू है: /premiumemoji⟨0⟩
 e76ac71f1	🟢 चल रहा है
 f8a7fde2a	⚠️ अमान्य टोकन
 b535c1e0c	🤖 <b>आपका क्लोन बॉट</b>: @⟨0⟩
@@ -36565,6 +36831,10 @@ b8abb05fb	▶️ शुरू करें
 60446c88d	↩️ अनुरोध वापस लें
 ded7cc646	🔑 टोकन बदलें
 d3fb29907	🗑 क्लोन हटाएं
+e211ffa2a	💎 प्रीमियम: चालू
+60c71135b	💎 प्रीमियम: बंद
+783d8db23	स्थिति: ⟨0⟩ · मालिक <code>⟨1⟩</code>
+1a2ec4716	↩️ सूची
 367b6aa51	क्लोन से जुड़े काम बॉट के साथ निजी में होते हैं।
 a51f7d30f	इस अनुरोध पर पहले ही फ़ैसला हो चुका है।
 c862658b2	पुराने संस्करण का अनुरोध; उपयोगकर्ता को /clone से टोकन भेजना होगा।
@@ -36586,8 +36856,11 @@ dffc58eb3	अब अनुमति माँगने की ज़रूरत
 a353b8903	↩️ उपयोगकर्ता ने अनुरोध वापस ले लिया
 cb7da55c2	↩️ अनुरोध वापस लिया गया
 b30c05510	🔑 @BotFather से मिला बॉट टोकन लिखें (जैसे <code>123456789:ABC...</code>)।
-0adaad0bb	रद्द करने के लिए: cancel
 a54c0e304	यह क्लोन आपका नहीं है।
+5965faff8	💎 प्रीमियम इमोजी चालू किए गए
+b248ddfb0	💎 प्रीमियम इमोजी बंद किए गए
+8526f556f	💎 आपके क्लोन बॉट @⟨0⟩ के लिए प्रीमियम इमोजी चालू कर दिए गए हैं। अपने बॉट को निजी में /premiumemoji लिखें और उसे अपने प्रीमियम इमोजी सिखाएँ।
+83be7cafe	💎 आपके क्लोन बॉट @⟨0⟩ के लिए प्रीमियम इमोजी बंद कर दिए गए हैं।
 8f8af330e	अमान्य।
 6a47f34ed	यह क्लोन हटा दिया गया है।
 21d148b57	🗑 क्लोन @⟨0⟩ हटाएं? बॉट रुक जाएगा, ग्रुप की सेटिंग्स बनी रहेंगी।
@@ -37455,6 +37728,21 @@ e7c66ff8b	Pengaturan grup → Administrator → Tambah admin → @⟨0⟩ (hapus
 8298e9706	… dan ⟨0⟩ lainnya
 7ba765796	🏆 <b>Grup paling aktif</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ pesan
+b7620563d	💎 Tema emoji premium untuk klon ini belum diaktifkan oleh pendiri bot.
+653362ae5	🗑 Peta emoji premium dihapus.
+68628d04b	✅ Tema emoji premium diaktifkan.
+0e4cfa229	⏸ Tema emoji premium dinonaktifkan.
+762017774	✅ Aktif
+cd5bd9458	⏸ Nonaktif
+85d2de620	💎 <b>Tema emoji premium</b>: ⟨0⟩
+5246a6025	Emoji yang dipetakan: ⟨0⟩
+26c237a40	⟨0⟩Kirim pesan berisi emoji premium: setiap emoji premium di dalamnya akan dipakai menggantikan emoji biasanya di pesan bot dan ikon tombol.
+98b029c06	Akun pemilik bot harus memiliki Telegram Premium.
+0adaad0bb	Untuk membatalkan: cancel
+272826aad	Dibatalkan.
+218a28de3	Pesan ini tidak berisi emoji premium. Kirim pesan berisi emoji premium atau ketik iptal.
+d1bb29a8d	Emoji tidak dapat dibaca: ⟨0⟩
+808236f33	✅ ⟨0⟩ emoji premium dipelajari (total ⟨1⟩).
 57d75c0ab	🛠 Bot sedang dalam pemeliharaan singkat; akan segera kembali. Perlindungan tetap berjalan.
 fc94758f1	🛠 Mode pemeliharaan <b>aktif</b>⟨0⟩
 588994912	— berakhir pukul ⟨0⟩
@@ -37754,6 +38042,7 @@ d094b4c43	/gbanlist — Daftar ban global
 d729d3ba2	/backup — Cadangkan database
 0e556fad9	/gblockmedia — Blokir media yang dibalas di semua grup
 8af5e8c17	/recover — Pemulihan admin
+e948b5d9b	/premiumemoji — Tema emoji premium (pesan dan ikon tombol)
 f0032f0c7	/select — Pilih saluran
 97a1889ae	/channelsettings — Pengaturan saluran
 def1847f5	⟨0⟩/start — Mulai
@@ -37942,6 +38231,7 @@ a38b6848f	Daftar ban global
 cfc719f1d	Cadangan database
 efdd2ee59	Mode pemeliharaan
 bf65fdcd0	Blokir media di semua grup
+0c0f2746b	Tema emoji premium
 385efb5c0	⚡ Bot utama: @⟨0⟩
 8f13119d3	⟨0⟩ — bot pelindung grup dan saluran: spam, tautan, flood, raid, dan captcha.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -38640,7 +38930,6 @@ b7301e99a	Tidak ada filter di grup ini.
 bd0505102	⚠️ Hapus semua <b>⟨0⟩</b> filter di grup ini?
 8d8252e68	🗑 Ya, hapus semua
 9b6fcea87	↩️ Batal
-272826aad	Dibatalkan.
 cf9d69e94	🗑 ⟨0⟩ filter dihapus.
 13c07c249	🧹 Semua filter dihapus (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nama merek
@@ -38668,6 +38957,7 @@ f3fc6979c	Buat bot pelindung dengan nama botmu sendiri yang berjalan di mesin UL
 632cbf17b	2) Kirim token yang kamu dapat lewat tombol di bawah
 883193ad7	3) Setelah pemilik bot menyetujui, botmu mulai bekerja⟨0⟩
 3a5be4fd4	🔑 Kirim token
+f3e051762	💎 Emoji premium aktif: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Berjalan
 f8a7fde2a	⚠️ Token tidak valid
 b535c1e0c	🤖 <b>Bot klonmu</b>: @⟨0⟩
@@ -38682,6 +38972,10 @@ b8abb05fb	▶️ Jalankan
 60446c88d	↩️ Tarik permintaan
 ded7cc646	🔑 Ganti token
 d3fb29907	🗑 Hapus klon
+e211ffa2a	💎 Premium: Aktif
+60c71135b	💎 Premium: Nonaktif
+783d8db23	Status: ⟨0⟩ · Pemilik <code>⟨1⟩</code>
+1a2ec4716	↩️ Daftar
 367b6aa51	Tindakan klon dilakukan di chat pribadi dengan bot.
 a51f7d30f	Permintaan ini sudah ditangani.
 c862658b2	Permintaan dari versi lama; pengguna harus mengirim token dengan /clone.
@@ -38703,8 +38997,11 @@ dffc58eb3	Kamu tidak perlu lagi meminta izin: kirim tokennya, botmu mulai setela
 a353b8903	↩️ Pengguna menarik permintaannya
 cb7da55c2	↩️ Permintaan ditarik
 b30c05510	🔑 Tulis token bot yang kamu dapat dari @BotFather (mis. <code>123456789:ABC...</code>).
-0adaad0bb	Untuk membatalkan: cancel
 a54c0e304	Klon ini bukan milikmu.
+5965faff8	💎 Emoji premium diaktifkan
+b248ddfb0	💎 Emoji premium dinonaktifkan
+8526f556f	💎 Emoji premium telah diaktifkan untuk bot klon kamu @⟨0⟩. Ketik /premiumemoji ke bot kamu lewat pesan pribadi untuk mengajarinya emoji premium kamu.
+83be7cafe	💎 Emoji premium telah dinonaktifkan untuk bot klon kamu @⟨0⟩.
 8f8af330e	Tidak valid.
 6a47f34ed	Klon ini telah dihapus.
 21d148b57	🗑 Hapus klon @⟨0⟩? Bot berhenti, pengaturan di grup tetap ada.
@@ -39576,6 +39873,21 @@ e7c66ff8b	Impostazioni del gruppo → Amministratori → Aggiungi amministratore
 8298e9706	… e altri ⟨0⟩
 7ba765796	🏆 <b>Gruppi più attivi</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ messaggi
+b7620563d	💎 Il fondatore del bot non ha ancora attivato il tema emoji premium per questo clone.
+653362ae5	🗑 Mappa delle emoji premium eliminata.
+68628d04b	✅ Tema emoji premium attivato.
+0e4cfa229	⏸ Tema emoji premium disattivato.
+762017774	✅ Attivo
+cd5bd9458	⏸ Disattivo
+85d2de620	💎 <b>Tema emoji premium</b>: ⟨0⟩
+5246a6025	Emoji associate: ⟨0⟩
+26c237a40	⟨0⟩Invia un messaggio con emoji premium: ogni emoji premium al suo interno verrà usata al posto di quella normale nei messaggi del bot e nelle icone dei pulsanti.
+98b029c06	L'account del proprietario del bot deve avere Telegram Premium.
+0adaad0bb	Per annullare: cancel
+272826aad	Annullato.
+218a28de3	Questo messaggio non contiene emoji premium. Invia un messaggio con emoji premium o scrivi iptal.
+d1bb29a8d	Impossibile leggere le emoji: ⟨0⟩
+808236f33	✅ ⟨0⟩ emoji premium imparate (totale ⟨1⟩).
 57d75c0ab	🛠 Il bot è in breve manutenzione; tornerà presto. Le protezioni continuano a funzionare.
 fc94758f1	🛠 Modalità manutenzione <b>attiva</b>⟨0⟩
 588994912	— termina alle ⟨0⟩
@@ -39876,6 +40188,7 @@ d094b4c43	/gbanlist — Lista dei ban globali
 d729d3ba2	/backup — Esegui un backup del database
 0e556fad9	/gblockmedia — Blocca in tutti i gruppi il media a cui rispondi
 8af5e8c17	/recover — Ripristino admin
+e948b5d9b	/premiumemoji — Tema emoji premium (messaggi e icone dei pulsanti)
 f0032f0c7	/select — Seleziona un canale
 97a1889ae	/channelsettings — Impostazioni del canale
 def1847f5	⟨0⟩/start — Avvia
@@ -40064,6 +40377,7 @@ a38b6848f	Lista dei ban globali
 cfc719f1d	Backup del database
 efdd2ee59	Modalità manutenzione
 bf65fdcd0	Blocca un media in tutti i gruppi
+0c0f2746b	Tema emoji premium
 385efb5c0	⚡ Bot principale: @⟨0⟩
 8f13119d3	⟨0⟩ — bot di protezione per gruppi e canali: spam, link, flood, raid e captcha.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -40764,7 +41078,6 @@ b7301e99a	In questo gruppo non ci sono filtri.
 bd0505102	⚠️ Eliminare tutti i <b>⟨0⟩</b> filtri di questo gruppo?
 8d8252e68	🗑 Sì, elimina tutti
 9b6fcea87	↩️ Annulla
-272826aad	Annullato.
 cf9d69e94	🗑 ⟨0⟩ filtri eliminati.
 13c07c249	🧹 Tutti i filtri eliminati (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nome del marchio
@@ -40792,6 +41105,7 @@ f3fc6979c	Apri un bot di protezione con il nome del tuo bot che funziona con il 
 632cbf17b	2) Invia il token ricevuto con il pulsante qui sotto
 883193ad7	3) Quando il proprietario del bot approva, il tuo bot parte⟨0⟩
 3a5be4fd4	🔑 Invia token
+f3e051762	💎 Emoji premium attive: /premiumemoji⟨0⟩
 e76ac71f1	🟢 In esecuzione
 f8a7fde2a	⚠️ Token non valido
 b535c1e0c	🤖 <b>Il tuo bot clone</b>: @⟨0⟩
@@ -40806,6 +41120,10 @@ b8abb05fb	▶️ Avvia
 60446c88d	↩️ Ritira la richiesta
 ded7cc646	🔑 Cambia token
 d3fb29907	🗑 Elimina clone
+e211ffa2a	💎 Premium: Attivo
+60c71135b	💎 Premium: Disattivo
+783d8db23	Stato: ⟨0⟩ · Proprietario <code>⟨1⟩</code>
+1a2ec4716	↩️ Elenco
 367b6aa51	Le azioni sui cloni si fanno in privato con il bot.
 a51f7d30f	Questa richiesta è già stata gestita.
 c862658b2	Una richiesta di una vecchia versione; l’utente deve inviare un token con /clone.
@@ -40827,8 +41145,11 @@ dffc58eb3	Non devi più chiedere il permesso: invia il token, il tuo bot parte q
 a353b8903	↩️ L’utente ha ritirato la richiesta
 cb7da55c2	↩️ Richiesta ritirata
 b30c05510	🔑 Scrivi il token del bot ricevuto da @BotFather (es. <code>123456789:ABC...</code>).
-0adaad0bb	Per annullare: cancel
 a54c0e304	Questo clone non è tuo.
+5965faff8	💎 Emoji premium attivate
+b248ddfb0	💎 Emoji premium disattivate
+8526f556f	💎 Le emoji premium sono state attivate per il tuo bot clone @⟨0⟩. Scrivi /premiumemoji al tuo bot in privato e insegnagli le tue emoji premium.
+83be7cafe	💎 Le emoji premium sono state disattivate per il tuo bot clone @⟨0⟩.
 8f8af330e	Non valido.
 6a47f34ed	Questo clone è stato eliminato.
 21d148b57	🗑 Eliminare il clone @⟨0⟩? Il bot si ferma, le impostazioni nei gruppi restano.
@@ -41705,6 +42026,21 @@ e7c66ff8b	Топ баптаулары → Әкімшілер → Әкімші қ
 8298e9706	… және тағы ⟨0⟩
 7ba765796	🏆 <b>Ең белсенді топтар</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ хабар
+b7620563d	💎 Бұл клон үшін премиум эмодзи тақырыбын бот негізін қалаушы әлі қоспаған.
+653362ae5	🗑 Премиум эмодзи картасы жойылды.
+68628d04b	✅ Премиум эмодзи тақырыбы қосылды.
+0e4cfa229	⏸ Премиум эмодзи тақырыбы өшірілді.
+762017774	✅ Қосулы
+cd5bd9458	⏸ Өшірулі
+85d2de620	💎 <b>Премиум эмодзи тақырыбы</b>: ⟨0⟩
+5246a6025	Сәйкестендірілген эмодзи: ⟨0⟩
+26c237a40	⟨0⟩Премиум эмодзиі бар хабар жібер: ондағы әр премиум эмодзи боттың хабарларында және түйме белгішелерінде кәдімгі эмодзидің орнына қолданылады.
+98b029c06	Бот иесінің аккаунтында Telegram Premium болуы керек.
+0adaad0bb	Бас тарту үшін: cancel
+272826aad	Бас тартылды.
+218a28de3	Бұл хабарда премиум эмодзи жоқ. Премиум эмодзиі бар хабар жібер немесе iptal деп жаз.
+d1bb29a8d	Эмодзилерді оқу мүмкін болмады: ⟨0⟩
+808236f33	✅ ⟨0⟩ премиум эмодзи үйренілді (барлығы ⟨1⟩).
 57d75c0ab	🛠 Ботта қысқа техникалық жұмыс жүріп жатыр; жақында оралады. Қорғаныстар жұмысын жалғастыруда.
 fc94758f1	🛠 Техникалық жұмыс режимі <b>қосулы</b>⟨0⟩
 588994912	— аяқталуы: ⟨0⟩
@@ -42007,6 +42343,7 @@ d094b4c43	/gbanlist — Жаһандық бан тізімі
 d729d3ba2	/backup — Дерекқордың сақтық көшірмесін жасау
 0e556fad9	/gblockmedia — Жауап берілген медианы барлық топтарда бұғаттау
 8af5e8c17	/recover — Админдерді қалпына келтіру
+e948b5d9b	/premiumemoji — Премиум эмодзи тақырыбы (хабарлар және түйме белгішелері)
 f0032f0c7	/select — Арна таңдау
 97a1889ae	/channelsettings — Арна баптаулары
 def1847f5	⟨0⟩/start — Бастау
@@ -42195,6 +42532,7 @@ a38b6848f	Жаһандық бан тізімі
 cfc719f1d	Дерекқордың сақтық көшірмесі
 efdd2ee59	Техникалық жұмыс режимі
 bf65fdcd0	Медианы барлық топтарда бұғаттау
+0c0f2746b	Премиум эмодзи тақырыбы
 385efb5c0	⚡ Негізгі бот: @⟨0⟩
 8f13119d3	⟨0⟩ — топ пен арнаны қорғау боты: спам, сілтеме, флуд, рейд және капча.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -42899,7 +43237,6 @@ b7301e99a	Бұл топта сүзгі жоқ.
 bd0505102	⚠️ Бұл топтағы барлық <b>⟨0⟩</b> сүзгі жойылсын ба?
 8d8252e68	🗑 Иә, бәрін жою
 9b6fcea87	↩️ Бас тарту
-272826aad	Бас тартылды.
 cf9d69e94	🗑 ⟨0⟩ сүзгі жойылды.
 13c07c249	🧹 Барлық сүзгілер жойылды (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Бренд атауы
@@ -42927,6 +43264,7 @@ f3fc6979c	ULUS қозғалтқышында жұмыс істейтін, өз б
 632cbf17b	2) Алған токенді төмендегі түйме арқылы жіберіңіз
 883193ad7	3) Бот иесі мақұлдағанда ботыңыз жұмыс істей бастайды⟨0⟩
 3a5be4fd4	🔑 Токен жіберу
+f3e051762	💎 Премиум эмодзи қосулы: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Жұмыс істеп тұр
 f8a7fde2a	⚠️ Жарамсыз токен
 b535c1e0c	🤖 <b>Сіздің клон ботыңыз</b>: @⟨0⟩
@@ -42941,6 +43279,10 @@ b8abb05fb	▶️ Іске қосу
 60446c88d	↩️ Өтінімді кері алу
 ded7cc646	🔑 Токенді өзгерту
 d3fb29907	🗑 Клонды жою
+e211ffa2a	💎 Премиум: Қосулы
+60c71135b	💎 Премиум: Өшірулі
+783d8db23	Күйі: ⟨0⟩ · Иесі <code>⟨1⟩</code>
+1a2ec4716	↩️ Тізім
 367b6aa51	Клон әрекеттері ботпен жеке чатта жасалады.
 a51f7d30f	Бұл өтінім бұрын қаралған.
 c862658b2	Ескі нұсқадағы өтінім; пайдаланушы /clone арқылы токен жіберуі керек.
@@ -42962,8 +43304,11 @@ dffc58eb3	Енді рұқсат сұраудың қажеті жоқ: токен
 a353b8903	↩️ Пайдаланушы өтінімді кері алды
 cb7da55c2	↩️ Өтінім кері алынды
 b30c05510	🔑 @BotFather-ден алған бот токенін жазыңыз (мысалы, <code>123456789:ABC...</code>).
-0adaad0bb	Бас тарту үшін: cancel
 a54c0e304	Бұл клон сіздікі емес.
+5965faff8	💎 Премиум эмодзи қосылды
+b248ddfb0	💎 Премиум эмодзи өшірілді
+8526f556f	💎 @⟨0⟩ клон ботың үшін премиум эмодзи қосылды. Ботыңа жекеде /premiumemoji деп жазып, премиум эмодзилеріңді үйрет.
+83be7cafe	💎 @⟨0⟩ клон ботың үшін премиум эмодзи өшірілді.
 8f8af330e	Жарамсыз.
 6a47f34ed	Бұл клон жойылған.
 21d148b57	🗑 @⟨0⟩ клоны жойылсын ба? Бот тоқтайды, топтардағы баптаулар сақталады.
@@ -43836,6 +44181,21 @@ e7c66ff8b	Configurações do grupo → Administradores → Adicionar admin → @
 8298e9706	… e mais ⟨0⟩
 7ba765796	🏆 <b>Grupos mais ativos</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ mensagens
+b7620563d	💎 O fundador do bot ainda não ativou o tema de emojis premium para este clone.
+653362ae5	🗑 Mapa de emojis premium apagado.
+68628d04b	✅ Tema de emojis premium ativado.
+0e4cfa229	⏸ Tema de emojis premium desativado.
+762017774	✅ Ativado
+cd5bd9458	⏸ Desativado
+85d2de620	💎 <b>Tema de emojis premium</b>: ⟨0⟩
+5246a6025	Emojis mapeados: ⟨0⟩
+26c237a40	⟨0⟩Envie uma mensagem com emojis premium: cada emoji premium nela será usado no lugar do equivalente normal nas mensagens do bot e nos ícones dos botões.
+98b029c06	A conta do dono do bot precisa ter Telegram Premium.
+0adaad0bb	Para cancelar: cancel
+272826aad	Cancelado.
+218a28de3	Esta mensagem não tem emojis premium. Envie uma mensagem com emojis premium ou digite iptal.
+d1bb29a8d	Não foi possível ler os emojis: ⟨0⟩
+808236f33	✅ ⟨0⟩ emojis premium aprendidos (total ⟨1⟩).
 57d75c0ab	🛠 O bot está em uma breve manutenção; volta logo. As proteções continuam funcionando.
 fc94758f1	🛠 Modo manutenção <b>ativado</b>⟨0⟩
 588994912	— termina às ⟨0⟩
@@ -44136,6 +44496,7 @@ d094b4c43	/gbanlist — Lista de banimentos globais
 d729d3ba2	/backup — Fazer backup do banco de dados
 0e556fad9	/gblockmedia — Bloquear a mídia respondida em todos os grupos
 8af5e8c17	/recover — Recuperação de admins
+e948b5d9b	/premiumemoji — Tema de emojis premium (mensagens e ícones dos botões)
 f0032f0c7	/select — Selecionar um canal
 97a1889ae	/channelsettings — Configurações do canal
 def1847f5	⟨0⟩/start — Iniciar
@@ -44324,6 +44685,7 @@ a38b6848f	Lista de banimentos globais
 cfc719f1d	Backup do banco de dados
 efdd2ee59	Modo manutenção
 bf65fdcd0	Bloquear mídia em todos os grupos
+0c0f2746b	Tema de emojis premium
 385efb5c0	⚡ Bot principal: @⟨0⟩
 8f13119d3	⟨0⟩ — bot de proteção de grupos e canais: spam, links, flood, raids e captcha.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -45025,7 +45387,6 @@ b7301e99a	Não há filtros neste grupo.
 bd0505102	⚠️ Apagar todos os <b>⟨0⟩</b> filtros deste grupo?
 8d8252e68	🗑 Sim, apagar tudo
 9b6fcea87	↩️ Cancelar
-272826aad	Cancelado.
 cf9d69e94	🗑 ⟨0⟩ filtros apagados.
 13c07c249	🧹 Todos os filtros apagados (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nome da marca
@@ -45053,6 +45414,7 @@ f3fc6979c	Abra um bot de proteção com o nome do seu próprio bot, rodando no m
 632cbf17b	2) Envie o token que você recebeu pelo botão abaixo
 883193ad7	3) Quando o dono do bot aprovar, seu bot começa a funcionar⟨0⟩
 3a5be4fd4	🔑 Enviar token
+f3e051762	💎 Emojis premium ativados: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Funcionando
 f8a7fde2a	⚠️ Token inválido
 b535c1e0c	🤖 <b>Seu bot clone</b>: @⟨0⟩
@@ -45067,6 +45429,10 @@ b8abb05fb	▶️ Iniciar
 60446c88d	↩️ Retirar pedido
 ded7cc646	🔑 Trocar token
 d3fb29907	🗑 Apagar clone
+e211ffa2a	💎 Premium: Ativado
+60c71135b	💎 Premium: Desativado
+783d8db23	Status: ⟨0⟩ · Dono <code>⟨1⟩</code>
+1a2ec4716	↩️ Lista
 367b6aa51	As ações do clone são feitas no privado com o bot.
 a51f7d30f	Este pedido já foi tratado.
 c862658b2	Pedido de uma versão antiga; o usuário precisa enviar um token com /clone.
@@ -45088,8 +45454,11 @@ dffc58eb3	Você não precisa mais pedir permissão: envie o token e seu bot come
 a353b8903	↩️ O usuário retirou o pedido
 cb7da55c2	↩️ Pedido retirado
 b30c05510	🔑 Escreva o token do bot que você recebeu do @BotFather (ex. <code>123456789:ABC...</code>).
-0adaad0bb	Para cancelar: cancel
 a54c0e304	Este clone não é seu.
+5965faff8	💎 Emojis premium ativados
+b248ddfb0	💎 Emojis premium desativados
+8526f556f	💎 Os emojis premium foram ativados para o seu bot clone @⟨0⟩. Envie /premiumemoji ao seu bot no privado e ensine a ele seus emojis premium.
+83be7cafe	💎 Os emojis premium foram desativados para o seu bot clone @⟨0⟩.
 8f8af330e	Inválido.
 6a47f34ed	Este clone foi apagado.
 21d148b57	🗑 Apagar o clone @⟨0⟩? O bot para; as configurações nos grupos ficam.
@@ -45261,20 +45630,8 @@ e89ec2f7d	Тип: ⟨0⟩
 fbb8f4be4	Бот добавлен: ⟨0⟩ (⟨1⟩) | владелец: ⟨2⟩
 417b3cc01	✅ Бот добавлен и зарегистрирован! Команды: /help, настройки: /settings.
 189f689b9	🌍 Язык: /setlang
-cde2bd7c8	предупреждение
-929d8360f	снятие предупреждения
-3c0ddc51a	мут
-9c030a691	снятие мута
-91787bcf5	кик
 d34c44d0e	бессрочный бан
-b131626a5	разбан
-6838cf1a3	удаление
-b707492ec	временный бан
-6f1a328f6	снятие прав
 4f0282227	жалоба
-12c391a8f	кнопка
-b581541a3	чёрный список
-b01a6a6e8	голосование
 e7ff4faaf	⟨0⟩ ⟨1⟩ ⟨2⟩ → <b>⟨3⟩/⟨4⟩</b> предупреждений
 ed9933be4	⟨0⟩ ⟨1⟩ ⟨2⟩ | Предупреждение: ⟨3⟩/⟨4⟩ | ⟨5⟩
 9e23d2151	временный бан (⟨0⟩)
@@ -45588,7 +45945,6 @@ a79d71fbf	Предупреждение
 bd3c8d60c	Временный бан
 7c65bba4a	⟨0⟩ сообщений
 5df501398	⟨0⟩ сек
-cf6293e00	⟨0⟩ медиа
 637c7d4eb	⟨0⟩ участников
 2a687b503	⟨0⟩ человек
 2dd4cbf18	⟨0⟩ действий/час
@@ -45610,7 +45966,6 @@ ffb95707b	@channel
 b7be418c7	Интервал: 30m, 6h, 1d · Для медиа пишите в подписи к фото.
 dafcc65fa	6h Сообщение
 c1e570e92	🔤 Напишите слова для запрета (по одному в строке). Для regex начните с re:
-2038b8200	слов
 8031790fb	🔗 Напишите разрешённые домены (через пробел). Например: youtube.com t.me/mychannel
 dd20fa7d1	📝 Напишите заметку так: название содержание
 750db2552	rules Правила группы...
@@ -45966,6 +46321,21 @@ e7c66ff8b	Настройки группы → Администраторы → �
 8298e9706	… и ещё ⟨0⟩
 7ba765796	🏆 <b>Самые активные группы</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ сообщений
+b7620563d	💎 Тема премиум-эмодзи для этого клона ещё не включена основателем бота.
+653362ae5	🗑 Карта премиум-эмодзи удалена.
+68628d04b	✅ Тема премиум-эмодзи включена.
+0e4cfa229	⏸ Тема премиум-эмодзи выключена.
+762017774	✅ Вкл
+cd5bd9458	⏸ Выкл
+85d2de620	💎 <b>Тема премиум-эмодзи</b>: ⟨0⟩
+5246a6025	Сопоставлено эмодзи: ⟨0⟩
+26c237a40	⟨0⟩Отправь сообщение с премиум-эмодзи: каждый премиум-эмодзи из него будет использоваться вместо обычного в сообщениях бота и значках кнопок.
+98b029c06	У владельца бота должен быть Telegram Premium.
+0adaad0bb	Отмена: cancel
+272826aad	Отменено.
+218a28de3	В этом сообщении нет премиум-эмодзи. Отправь сообщение с премиум-эмодзи или напиши iptal.
+d1bb29a8d	Не удалось прочитать эмодзи: ⟨0⟩
+808236f33	✅ Изучено премиум-эмодзи: ⟨0⟩ (всего ⟨1⟩).
 57d75c0ab	🛠 У бота короткое техобслуживание; скоро вернётся. Защита продолжает работать.
 fc94758f1	🛠 Режим обслуживания <b>включён</b>⟨0⟩
 588994912	— закончится в ⟨0⟩
@@ -46268,6 +46638,7 @@ d094b4c43	/gbanlist — Глобальный бан-лист
 d729d3ba2	/backup — Резервная копия базы данных
 0e556fad9	/gblockmedia — Заблокировать медиа из ответа во всех группах
 8af5e8c17	/recover — Восстановление админов
+e948b5d9b	/premiumemoji — Тема премиум-эмодзи (сообщения и значки кнопок)
 f0032f0c7	/select — Выбрать канал
 97a1889ae	/channelsettings — Настройки канала
 def1847f5	⟨0⟩/start — Запуск
@@ -46456,6 +46827,7 @@ a38b6848f	Глобальный бан-лист
 cfc719f1d	Резервная копия базы
 efdd2ee59	Режим обслуживания
 bf65fdcd0	Заблокировать медиа во всех группах
+0c0f2746b	Тема премиум-эмодзи
 385efb5c0	⚡ Основной бот: @⟨0⟩
 8f13119d3	⟨0⟩ — бот защиты групп и каналов: спам, ссылки, флуд, рейды и капча.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -47160,7 +47532,6 @@ b7301e99a	В этой группе нет фильтров.
 bd0505102	⚠️ Удалить все <b>⟨0⟩</b> фильтров в этой группе?
 8d8252e68	🗑 Да, удалить все
 9b6fcea87	↩️ Отмена
-272826aad	Отменено.
 cf9d69e94	🗑 Удалено фильтров: ⟨0⟩.
 13c07c249	🧹 Все фильтры удалены (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Название бренда
@@ -47188,6 +47559,7 @@ f3fc6979c	Откройте бота защиты со своим именем, �
 632cbf17b	2) Отправьте полученный токен кнопкой ниже
 883193ad7	3) Когда владелец бота одобрит, ваш бот начнёт работать⟨0⟩
 3a5be4fd4	🔑 Отправить токен
+f3e051762	💎 Премиум-эмодзи включены: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Работает
 f8a7fde2a	⚠️ Неверный токен
 b535c1e0c	🤖 <b>Ваш клон бота</b>: @⟨0⟩
@@ -47202,6 +47574,10 @@ b8abb05fb	▶️ Запустить
 60446c88d	↩️ Отозвать заявку
 ded7cc646	🔑 Сменить токен
 d3fb29907	🗑 Удалить клон
+e211ffa2a	💎 Премиум: Вкл
+60c71135b	💎 Премиум: Выкл
+783d8db23	Статус: ⟨0⟩ · Владелец <code>⟨1⟩</code>
+1a2ec4716	↩️ Список
 367b6aa51	Действия с клоном выполняются в личке с ботом.
 a51f7d30f	Эта заявка уже обработана.
 c862658b2	Заявка из старой версии; пользователь должен отправить токен через /clone.
@@ -47223,8 +47599,11 @@ dffc58eb3	Разрешение больше не нужно: отправьте 
 a353b8903	↩️ Пользователь отозвал заявку
 cb7da55c2	↩️ Заявка отозвана
 b30c05510	🔑 Напишите токен бота, полученный у @BotFather (например, <code>123456789:ABC...</code>).
-0adaad0bb	Отмена: cancel
 a54c0e304	Это не ваш клон.
+5965faff8	💎 Премиум-эмодзи включены
+b248ddfb0	💎 Премиум-эмодзи выключены
+8526f556f	💎 Для твоего клон-бота @⟨0⟩ включены премиум-эмодзи. Напиши боту в личку /premiumemoji и научи его своим премиум-эмодзи.
+83be7cafe	💎 Для твоего клон-бота @⟨0⟩ выключены премиум-эмодзи.
 8f8af330e	Неверно.
 6a47f34ed	Этот клон удалён.
 21d148b57	🗑 Удалить клон @⟨0⟩? Бот остановится, настройки в группах сохранятся.
@@ -48101,6 +48480,21 @@ e7c66ff8b	Налаштування групи → Адміністратори �
 8298e9706	… і ще ⟨0⟩
 7ba765796	🏆 <b>Найактивніші групи</b>
 03a70d760	⟨0⟩. ⟨1⟩ — повідомлень: ⟨2⟩
+b7620563d	💎 Тему преміум-емодзі для цього клона ще не ввімкнув засновник бота.
+653362ae5	🗑 Карту преміум-емодзі видалено.
+68628d04b	✅ Тему преміум-емодзі ввімкнено.
+0e4cfa229	⏸ Тему преміум-емодзі вимкнено.
+762017774	✅ Увімк
+cd5bd9458	⏸ Вимк
+85d2de620	💎 <b>Тема преміум-емодзі</b>: ⟨0⟩
+5246a6025	Зіставлено емодзі: ⟨0⟩
+26c237a40	⟨0⟩Надішли повідомлення з преміум-емодзі: кожен преміум-емодзі з нього використовуватиметься замість звичайного в повідомленнях бота та значках кнопок.
+98b029c06	Власник бота повинен мати Telegram Premium.
+0adaad0bb	Щоб скасувати: cancel
+272826aad	Скасовано.
+218a28de3	У цьому повідомленні немає преміум-емодзі. Надішли повідомлення з преміум-емодзі або напиши iptal.
+d1bb29a8d	Не вдалося прочитати емодзі: ⟨0⟩
+808236f33	✅ Вивчено преміум-емодзі: ⟨0⟩ (усього ⟨1⟩).
 57d75c0ab	🛠 Бот на короткому обслуговуванні; скоро повернеться. Захист продовжує працювати.
 fc94758f1	🛠 Режим обслуговування <b>увімкнено</b>⟨0⟩
 588994912	— завершиться о ⟨0⟩
@@ -48403,6 +48797,7 @@ d094b4c43	/gbanlist — Список глобальних банів
 d729d3ba2	/backup — Зробити резервну копію бази даних
 0e556fad9	/gblockmedia — Заблокувати медіа з відповіді в усіх групах
 8af5e8c17	/recover — Відновлення адмінів
+e948b5d9b	/premiumemoji — Тема преміум-емодзі (повідомлення та значки кнопок)
 f0032f0c7	/select — Вибрати канал
 97a1889ae	/channelsettings — Налаштування каналу
 def1847f5	⟨0⟩/start — Почати
@@ -48591,6 +48986,7 @@ a38b6848f	Список глобальних банів
 cfc719f1d	Резервна копія бази даних
 efdd2ee59	Режим обслуговування
 bf65fdcd0	Заблокувати медіа в усіх групах
+0c0f2746b	Тема преміум-емодзі
 385efb5c0	⚡ Основний бот: @⟨0⟩
 8f13119d3	⟨0⟩ — бот захисту груп і каналів: спам, посилання, флуд, рейди та капча.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -49295,7 +49691,6 @@ b7301e99a	У цій групі немає фільтрів.
 bd0505102	⚠️ Видалити всі фільтри цієї групи (<b>⟨0⟩</b>)?
 8d8252e68	🗑 Так, видалити все
 9b6fcea87	↩️ Скасувати
-272826aad	Скасовано.
 cf9d69e94	🗑 Видалено фільтрів: ⟨0⟩.
 13c07c249	🧹 Усі фільтри видалено (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Назва бренду
@@ -49323,6 +49718,7 @@ f3fc6979c	Створіть бота захисту з власною назво�
 632cbf17b	2) Надішліть отриманий токен кнопкою нижче
 883193ad7	3) Коли власник бота схвалить, ваш бот почне працювати⟨0⟩
 3a5be4fd4	🔑 Надіслати токен
+f3e051762	💎 Преміум-емодзі ввімкнено: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Працює
 f8a7fde2a	⚠️ Недійсний токен
 b535c1e0c	🤖 <b>Ваш бот-клон</b>: @⟨0⟩
@@ -49337,6 +49733,10 @@ b8abb05fb	▶️ Запустити
 60446c88d	↩️ Відкликати заявку
 ded7cc646	🔑 Змінити токен
 d3fb29907	🗑 Видалити клон
+e211ffa2a	💎 Преміум: Увімк
+60c71135b	💎 Преміум: Вимк
+783d8db23	Статус: ⟨0⟩ · Власник <code>⟨1⟩</code>
+1a2ec4716	↩️ Список
 367b6aa51	Дії з клоном виконуються в особистому чаті з ботом.
 a51f7d30f	Цю заявку вже оброблено.
 c862658b2	Заявка зі старої версії; користувач має надіслати токен через /clone.
@@ -49358,8 +49758,11 @@ dffc58eb3	Більше не потрібно просити дозволу: на
 a353b8903	↩️ Користувач відкликав заявку
 cb7da55c2	↩️ Заявку відкликано
 b30c05510	🔑 Напишіть токен бота, отриманий від @BotFather (напр. <code>123456789:ABC...</code>).
-0adaad0bb	Щоб скасувати: cancel
 a54c0e304	Цей клон не ваш.
+5965faff8	💎 Преміум-емодзі ввімкнено
+b248ddfb0	💎 Преміум-емодзі вимкнено
+8526f556f	💎 Для твого клон-бота @⟨0⟩ ввімкнено преміум-емодзі. Напиши боту в особисті /premiumemoji і навчи його своїх преміум-емодзі.
+83be7cafe	💎 Для твого клон-бота @⟨0⟩ вимкнено преміум-емодзі.
 8f8af330e	Недійсно.
 6a47f34ed	Цей клон видалено.
 21d148b57	🗑 Видалити клон @⟨0⟩? Бот зупиниться, налаштування в групах залишаться.
@@ -50230,6 +50633,21 @@ e7c66ff8b	Guruh sozlamalari → Administratorlar → Admin qo‘shish → @⟨0�
 8298e9706	… va yana ⟨0⟩ ta
 7ba765796	🏆 <b>Eng faol guruhlar</b>
 03a70d760	⟨0⟩. ⟨1⟩ — ⟨2⟩ xabar
+b7620563d	💎 Bu klon uchun premium emoji mavzusi hali bot asoschisi tomonidan yoqilmagan.
+653362ae5	🗑 Premium emoji xaritasi o‘chirildi.
+68628d04b	✅ Premium emoji mavzusi yoqildi.
+0e4cfa229	⏸ Premium emoji mavzusi o‘chirildi.
+762017774	✅ Yoqilgan
+cd5bd9458	⏸ O‘chirilgan
+85d2de620	💎 <b>Premium emoji mavzusi</b>: ⟨0⟩
+5246a6025	Moslangan emoji: ⟨0⟩
+26c237a40	⟨0⟩Premium emojili xabar yubor: undagi har bir premium emoji bot xabarlarida va tugma belgilarida oddiy emoji o‘rniga ishlatiladi.
+98b029c06	Bot egasining hisobida Telegram Premium bo‘lishi kerak.
+0adaad0bb	Bekor qilish uchun: cancel
+272826aad	Bekor qilindi.
+218a28de3	Bu xabarda premium emoji yo‘q. Premium emojili xabar yubor yoki iptal deb yoz.
+d1bb29a8d	Emojilarni o‘qib bo‘lmadi: ⟨0⟩
+808236f33	✅ ⟨0⟩ ta premium emoji o‘rganildi (jami ⟨1⟩).
 57d75c0ab	🛠 Bot qisqa texnik xizmatda; tez orada qaytadi. Himoyalar ishlamoqda.
 fc94758f1	🛠 Texnik xizmat rejimi <b>yoqiq</b>⟨0⟩
 588994912	— ⟨0⟩ da tugaydi
@@ -50529,6 +50947,7 @@ d094b4c43	/gbanlist — Global banlar ro‘yxati
 d729d3ba2	/backup — Ma’lumotlar bazasining zaxira nusxasini olish
 0e556fad9	/gblockmedia — Javob berilgan mediani barcha guruhlarda bloklash
 8af5e8c17	/recover — Adminlarni tiklash
+e948b5d9b	/premiumemoji — Premium emoji mavzusi (xabarlar va tugma belgilari)
 f0032f0c7	/select — Kanal tanlash
 97a1889ae	/channelsettings — Kanal sozlamalari
 def1847f5	⟨0⟩/start — Boshlash
@@ -50714,6 +51133,7 @@ a38b6848f	Global banlar ro‘yxati
 cfc719f1d	Ma’lumotlar bazasi zaxirasi
 efdd2ee59	Texnik xizmat rejimi
 bf65fdcd0	Barcha guruhlarda mediani bloklash
+0c0f2746b	Premium emoji mavzusi
 385efb5c0	⚡ Asosiy bot: @⟨0⟩
 8f13119d3	⟨0⟩ — guruh va kanallarni himoya qiluvchi bot: spam, havolalar, flud, reydlar va captcha.
 63edd3296	🛡 ⟨0⟩ Security Bot
@@ -51410,7 +51830,6 @@ b7301e99a	Bu guruhda filtrlar yo‘q.
 bd0505102	⚠️ Bu guruhdagi barcha <b>⟨0⟩</b> ta filtr o‘chirilsinmi?
 8d8252e68	🗑 Ha, hammasini o‘chirish
 9b6fcea87	↩️ Bekor qilish
-272826aad	Bekor qilindi.
 cf9d69e94	🗑 ⟨0⟩ ta filtr o‘chirildi.
 13c07c249	🧹 Barcha filtrlar o‘chirildi (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Brend nomi
@@ -51437,6 +51856,7 @@ f3fc6979c	ULUS dvigatelida ishlaydigan, o‘z bot nomingiz bilan himoya botini o
 632cbf17b	2) Olgan tokeningizni quyidagi tugma orqali yuboring
 883193ad7	3) Bot egasi tasdiqlagach, botingiz ishga tushadi⟨0⟩
 3a5be4fd4	🔑 Token yuborish
+f3e051762	💎 Premium emoji yoqilgan: /premiumemoji⟨0⟩
 e76ac71f1	🟢 Ishlamoqda
 f8a7fde2a	⚠️ Noto‘g‘ri token
 b535c1e0c	🤖 <b>Klon botingiz</b>: @⟨0⟩
@@ -51451,6 +51871,10 @@ b8abb05fb	▶️ Ishga tushirish
 60446c88d	↩️ So‘rovni qaytarib olish
 ded7cc646	🔑 Tokenni almashtirish
 d3fb29907	🗑 Klonni o‘chirish
+e211ffa2a	💎 Premium: Yoqilgan
+60c71135b	💎 Premium: O‘chirilgan
+783d8db23	Holat: ⟨0⟩ · Egasi <code>⟨1⟩</code>
+1a2ec4716	↩️ Ro‘yxat
 367b6aa51	Klon amallari bot bilan shaxsiy chatda bajariladi.
 a51f7d30f	Bu so‘rov allaqachon ko‘rib chiqilgan.
 c862658b2	Eski versiyadagi so‘rov; foydalanuvchi /clone bilan token yuborishi kerak.
@@ -51472,8 +51896,11 @@ dffc58eb3	Endi ruxsat so‘rashingiz shart emas: tokenni yuboring, bot egasi tas
 a353b8903	↩️ Foydalanuvchi so‘rovni qaytarib oldi
 cb7da55c2	↩️ So‘rov qaytarib olindi
 b30c05510	🔑 @BotFather dan olgan bot tokeningizni yozing (masalan, <code>123456789:ABC...</code>).
-0adaad0bb	Bekor qilish uchun: cancel
 a54c0e304	Bu klon sizniki emas.
+5965faff8	💎 Premium emoji yoqildi
+b248ddfb0	💎 Premium emoji o‘chirildi
+8526f556f	💎 @⟨0⟩ klon botingiz uchun premium emoji yoqildi. Botingizga shaxsiyda /premiumemoji deb yozib, premium emojilaringizni o‘rgating.
+83be7cafe	💎 @⟨0⟩ klon botingiz uchun premium emoji o‘chirildi.
 8f8af330e	Noto‘g‘ri.
 6a47f34ed	Bu klon o‘chirilgan.
 21d148b57	🗑 @⟨0⟩ kloni o‘chirilsinmi? Bot to‘xtaydi, guruhlardagi sozlamalar qoladi.
