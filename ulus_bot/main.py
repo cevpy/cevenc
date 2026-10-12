@@ -730,15 +730,148 @@ def i18n_request(endpoint: str, data: dict, lang: str) -> dict:
             new[key] = tr_text(new[key], lang)[:limit]
     return new if any(new.get(k) is not data.get(k) for k in new) else data
 
+# ═══════════════════════════ PREMIUM EMOJİ TEMASI ═══════════════════════════
+# Bot sahibi Premium ise bot, gönderdiği mesajlarda ve buton simgelerinde premium emoji kullanabilir (Bot API 9.4).
+# /premiumemoji ile öğretilen {normal emoji: custom_emoji_id} haritası her giden isteğe otomatik uygulanır.
+_PE_CACHE: dict = {}        # bot_id -> (zaman, açık mı, harita, regex)
+_pe_bad_chats: set = set()  # premium emojiyi kabul etmeyen sohbetler (ör. kanal) → düz gönderilir
+_pe_warned: dict = {}       # bot_id -> son uyarı zamanı (saatte bir log)
+_PE_TAG = re.compile(r'(<[^>]*>)')
+_PE_SKIP_TAGS = ('code', 'pre', 'tg-emoji')
+
+def _pe_norm(e: str) -> str:
+    return (e or '').replace('️', '')
+
+def premium_map(bot_id) -> dict:
+    try:
+        m = json.loads(kv_get(f'premium_map:{bot_id}') or '{}')
+    except (ValueError, TypeError):
+        m = {}
+    return m if isinstance(m, dict) else {}
+
+def _pe_state(bot_id):
+    hit = _PE_CACHE.get(bot_id)
+    if hit and time.time() - hit[0] < 600:
+        return hit
+    try:
+        m = premium_map(bot_id)
+        on = bool(m) and kv_get(f'premium_off:{bot_id}') != '1' and (
+            bot_id == BOT_ID or kv_get(f'premium_on:{bot_id}') == '1')
+    except sqlite3.Error:
+        m, on = {}, False
+    rx = None
+    if on:  # uzun emoji önce; ZWJ dizisinin / ten renginin parçası eşleşmesin
+        alts = '|'.join(''.join(re.escape(c) + '️?' for c in k) for k in sorted(m, key=len, reverse=True) if k)
+        rx = re.compile(f'(?<!‍)(?:{alts})(?![‍⃣\U0001F3FB-\U0001F3FF])') if alts else None
+    hit = (time.time(), on and rx is not None, m, rx)
+    _PE_CACHE[bot_id] = hit
+    return hit
+
+def premium_enabled(bot_id) -> bool:
+    return bool(bot_id) and _pe_state(bot_id)[1]
+
+def _pe_html(text: str, m: dict, rx) -> str:
+    """HTML metindeki emojileri <tg-emoji> yapar (etiket içi, <code>/<pre> ve mevcut <tg-emoji> hariç)."""
+    out, skip = [], 0
+    for i, part in enumerate(_PE_TAG.split(text)):
+        if i % 2:
+            name = re.match(r'<\s*(/?)\s*([\w-]+)', part)
+            if name and name.group(2).lower() in _PE_SKIP_TAGS:
+                skip = max(0, skip + (-1 if name.group(1) else 1))
+            out.append(part)
+        elif skip or not part:
+            out.append(part)
+        else:
+            out.append(rx.sub(lambda g: f'<tg-emoji emoji-id="{m[_pe_norm(g.group(0))]}">{g.group(0)}</tg-emoji>', part))
+    return ''.join(out)
+
+def _pe_markup(markup, m: dict, rx):
+    """Başında eşlenmiş emoji olan butonlar: emoji, buton simgesi (icon_custom_emoji_id) olur."""
+    if not isinstance(markup, InlineKeyboardMarkup):
+        return markup
+    rows, changed = [], False
+    for row in markup.inline_keyboard:
+        r2 = []
+        for b in row:
+            g = None if getattr(b, 'icon_custom_emoji_id', None) else rx.match(b.text or '')
+            rest = b.text[g.end():].lstrip() if g else ''
+            if rest:
+                d = b.to_dict()
+                d['text'], d['icon_custom_emoji_id'], changed = rest, m[_pe_norm(g.group(0))], True
+                b = InlineKeyboardButton.de_json(d, None)
+            r2.append(b)
+        rows.append(r2)
+    return InlineKeyboardMarkup(rows) if changed else markup
+
+def premium_request(endpoint: str, data: dict, bot_id: int) -> dict:
+    """Giden isteğe premium emoji teması uygular (yeni sözlük; değişiklik yoksa aynısı)."""
+    if not endpoint.startswith(('send', 'edit', 'copyMessage')) or endpoint in ('sendPoll', 'sendChatAction') \
+            or str(data.get('chat_id')) in _pe_bad_chats or not premium_enabled(bot_id):
+        return data
+    _, _, m, rx = _pe_state(bot_id)
+    new = dict(data)
+    if not (data.get('entities') or data.get('caption_entities')):
+        for key, limit in _TR_SEND_KEYS.items():
+            t = data.get(key)
+            if not isinstance(t, str) or not rx.search(t):
+                continue
+            pm = data.get('parse_mode')
+            if pm is None:
+                t2 = _pe_html(html.escape(t, quote=False), m, rx)
+            elif str(pm).upper() == 'HTML':
+                t2 = _pe_html(t, m, rx)
+            else:
+                continue  # Markdown'a dokunulmaz
+            if t2 != t and len(t2) <= limit:
+                new[key], new['parse_mode'] = t2, ParseMode.HTML
+    if data.get('reply_markup') is not None:
+        new['reply_markup'] = _pe_markup(data['reply_markup'], m, rx)
+    return new if any(new.get(k) is not data.get(k) for k in new) else data
+
+def _pe_request_for(b, endpoint: str, data: dict) -> dict:
+    try:
+        return premium_request(endpoint, data, b.id)
+    except Exception as e:  # premium tema hiçbir zaman gönderimi engellemesin
+        logger.debug(f"Premium emoji uygulanamadı ({endpoint}): {e}")
+        return data
+
+def _pe_failed(b, data: dict, err) -> None:
+    """Premium emojili istek reddedildi, düz hali gitti: bu sohbette bir daha denenmez; log saatte bir."""
+    if len(_pe_bad_chats) > 5000:
+        _pe_bad_chats.clear()
+    if data.get('chat_id') is not None:
+        _pe_bad_chats.add(str(data['chat_id']))
+    try:
+        bid = b.id
+    except Exception:
+        bid = 0
+    if time.time() - _pe_warned.get(bid, 0) > 3600:
+        _pe_warned[bid] = time.time()
+        logger.warning(f"Premium emoji reddedildi, düz gönderildi (bot {bid}, sohbet {data.get('chat_id')}): {err}")
+
 _ORIG_DO_POST = ExtBot._do_post
 
 async def _i18n_do_post(self, endpoint, data, *args, **kwargs):
+    lang = None
     try:
         lang = _request_lang(endpoint, data)
         new = i18n_request(endpoint, data, lang) if lang and lang != DEFAULT_LANG else data
     except Exception as e:  # çeviri hiçbir zaman gönderimi engellemesin
         logger.debug(f"Çeviri hatası ({endpoint}): {e}")
         new = data
+    prem = _pe_request_for(self, endpoint, new)
+    if prem is not new:
+        try:
+            return await _ORIG_DO_POST(self, endpoint, prem, *args, **kwargs)
+        except BadRequest as e:  # premium emoji reddedildi → premiumsuz (çevrilmiş) hali, o da olmazsa Türkçesi
+            if 'not modified' in str(e).lower():
+                raise  # düzenleme aynı: düz hali gönderilirse premium emojiler silinirdi
+            res = await _i18n_plain_post(self, endpoint, data, new, lang, *args, **kwargs)
+            _pe_failed(self, data, e)
+            return res
+    return await _i18n_plain_post(self, endpoint, data, new, lang, *args, **kwargs)
+
+async def _i18n_plain_post(self, endpoint, data, new, lang, *args, **kwargs):
     if new is data:
         return await _ORIG_DO_POST(self, endpoint, data, *args, **kwargs)
     try:
@@ -7361,6 +7494,94 @@ def kv_set(key: str, value) -> None:
             conn.execute("DELETE FROM kv WHERE k = ?", (key,))
         else:
             conn.execute("INSERT OR REPLACE INTO kv (k, v) VALUES (?, ?)", (key, str(value)))
+    if str(key).startswith('premium_'):
+        _PE_CACHE.clear()  # premium emoji teması önbelleği
+
+# ── /premiumemoji: bot sahibinin premium emoji teması ──
+def _pe_access(uid: int) -> str | None:
+    """Yetki yoksa kullanıcıya gösterilecek hata (sessiz kalınacaksa boş metin); varsa None."""
+    if not is_bot_owner(uid):
+        return ''
+    bid = cur_bot_id()
+    if bid != BOT_ID and kv_get(f'premium_on:{bid}') != '1':
+        return "💎 Premium emoji teması bu klon için bot kurucusu tarafından henüz açılmadı."
+    return None
+
+def _pe_list(m: dict, limit: int = 60) -> str:
+    items = [f'<tg-emoji emoji-id="{html.escape(str(i))}">{html.escape(e)}</tg-emoji> → <code>{html.escape(e)}</code>'
+             for e, i in list(m.items())[:limit]]
+    more = f"\n… +{len(m) - limit}" if len(m) > limit else ''
+    return '\n'.join(items) + more
+
+async def cmd_premiumemoji(update: Update, context):
+    """/premiumemoji [sil|kapat|ac] — premium emoji teması (sadece özelden, bot sahibi)."""
+    msg, user = update.effective_message, update.effective_user
+    if not msg or not user or update.effective_chat.type != 'private':
+        return
+    err = _pe_access(user.id)
+    if err is not None:
+        if err:
+            await msg.reply_text(err)
+        return
+    bid = cur_bot_id()
+    arg = (context.args[0].lower() if context.args else '')
+    if arg in ('sil', 'clear', 'reset'):
+        kv_set(f'premium_map:{bid}', None)
+        context.user_data.pop('await_premium', None)
+        await msg.reply_text("🗑 Premium emoji haritası silindi.")
+        return
+    if arg in ('kapat', 'off', 'ac', 'aç', 'on'):
+        kv_set(f'premium_off:{bid}', '1' if arg in ('kapat', 'off') else None)
+        await msg.reply_text("✅ Premium emoji teması açıldı." if arg not in ('kapat', 'off') else "⏸ Premium emoji teması kapatıldı.")
+        return
+    m = premium_map(bid)
+    durum = "✅ Açık" if premium_enabled(bid) else "⏸ Kapalı"
+    text = (f"💎 <b>Premium emoji teması</b>: {durum}\n"
+            f"Eşlenen emoji: {len(m)}\n\n"
+            + (_pe_list(m) + "\n\n" if m else '') +
+            "Premium emojili bir mesaj gönder: içindeki her premium emoji, normal karşılığının yerine "
+            "botun mesajlarında ve buton simgelerinde kullanılır.\n"
+            "Bot sahibinin hesabında Telegram Premium olmalı.\n"
+            "<code>/premiumemoji sil</code> · <code>/premiumemoji kapat</code> · <code>/premiumemoji ac</code>\n"
+            "Vazgeçmek için: iptal")
+    context.user_data['await_premium'] = {'expires': time.time() + 600}
+    await msg.reply_text(text, parse_mode=ParseMode.HTML)
+
+async def premium_input_handler(update: Update, context):
+    """/premiumemoji sonrası gelen premium emojili mesajdan emoji haritasını öğrenir."""
+    pend = context.user_data.get('await_premium')
+    msg = update.effective_message
+    if not pend or not msg or update.effective_chat.type != 'private':
+        return
+    if time.time() > pend['expires'] or _pe_access(update.effective_user.id) is not None:
+        context.user_data.pop('await_premium', None)
+        return
+    if (msg.text or '').strip().lower() in ('iptal', 'vazgeç', 'vazgec'):
+        context.user_data.pop('await_premium', None)
+        await msg.reply_text("Vazgeçildi.")
+        raise ApplicationHandlerStop
+    ids = list(dict.fromkeys(e.custom_emoji_id for e in (*(msg.entities or ()), *(msg.caption_entities or ()))
+                             if e.type == MessageEntity.CUSTOM_EMOJI and e.custom_emoji_id))
+    if not ids:
+        await msg.reply_text("Bu mesajda premium emoji yok. Premium emojili bir mesaj gönder ya da iptal yaz.")
+        raise ApplicationHandlerStop
+    learned = {}
+    try:
+        for i in range(0, len(ids), 200):
+            for st in await context.bot.get_custom_emoji_stickers(ids[i:i + 200]):
+                if st.emoji and st.custom_emoji_id:
+                    learned[_pe_norm(st.emoji)] = st.custom_emoji_id
+    except TelegramError as e:
+        await msg.reply_text(f"Emojiler okunamadı: {html.escape(str(e))}", parse_mode=ParseMode.HTML)
+        raise ApplicationHandlerStop
+    bid = cur_bot_id()
+    m = premium_map(bid)
+    m.update(learned)
+    kv_set(f'premium_map:{bid}', json.dumps(m, ensure_ascii=False))
+    context.user_data.pop('await_premium', None)
+    await msg.reply_text(f"✅ {len(learned)} premium emoji öğrenildi (toplam {len(m)}).\n\n{_pe_list(learned)}",
+                         parse_mode=ParseMode.HTML)
+    raise ApplicationHandlerStop
 
 # ═══════════════════════════ BAKIM MODU ═══════════════════════════
 # /bakim: komutlar ve butonlar herkese kapanır (bot sahibi hariç); otomatik korumalar (spam, link, flood, captcha…)
@@ -10170,6 +10391,7 @@ async def help_command(update: Update, context):
                 "/duyurusablon — Duyuru sablonlari\n"
                 "/buyume — Haftalik buyume raporu (her pazartesi otomatik gelir)\n"
                 "/destek — Destek hatti (ozelden gelen mesajlar sana iletilir)\n"
+                "/premiumemoji — Premium emoji temasi (mesajlar ve buton simgeleri)\n"
                 "/kanal — Kanal sec\n"
                 "/kanalsettings — Kanal ayarlari\n"
             ))
@@ -10407,7 +10629,7 @@ FOUNDER_COMMANDS = [("klonlar", "Klon botları yönet"), ("perf", "Performans ö
     ("gbanlist", "Global ban listesi"), ("engelle", "Kullanıcı/sohbet engelle"), ("engelkaldir", "Engeli kaldır"),
     ("duyuru", "Gruplara, kanallara, kişilere duyuru"), ("duyurular", "Duyuru geçmişi"), ("duyurusablon", "Duyuru şablonları"), ("buyume", "Haftalık büyüme raporu"), ("yedek", "Veritabanı yedeği"),
     ("destek", "Destek hattı aç/kapat"), ("bakim", "Bakım modu"),
-    ("gmedyaengel", "Medyayı tüm gruplarda engelle"),
+    ("gmedyaengel", "Medyayı tüm gruplarda engelle"), ("premiumemoji", "Premium emoji teması"),
 ]
 
 async def setup_bot_profile(b):
@@ -16821,6 +17043,9 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('duyurudur', cmd_duyurudur))
     app.add_handler(CommandHandler('duyurusablon', cmd_duyurusablon))
     app.add_handler(CommandHandler('buyume', cmd_buyume))
+    app.add_handler(CommandHandler('premiumemoji', cmd_premiumemoji, filters=filters.ChatType.PRIVATE))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE & ~filters.COMMAND,
+                                   premium_input_handler), group=-61)
     app.add_handler(CommandHandler('bakim', cmd_bakim))
     app.add_handler(CommandHandler(['del', 'sil'], cmd_del))
     app.add_handler(CommandHandler(['setlang', 'lang', 'language', 'dil'], cmd_setlang))
