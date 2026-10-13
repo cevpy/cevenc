@@ -32,6 +32,7 @@ import json
 import time
 import random
 import copy
+import hashlib
 import html
 import traceback
 import unicodedata
@@ -1732,6 +1733,12 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_botrem ON bot_removals(bot_id, at);
             CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+            CREATE TABLE IF NOT EXISTS rules_accepted (
+                chat_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                at REAL NOT NULL,
+                PRIMARY KEY (chat_id, user_id)
+            );
             CREATE TABLE IF NOT EXISTS user_lang (user_id INTEGER PRIMARY KEY, lang TEXT NOT NULL, at REAL);
             CREATE TABLE IF NOT EXISTS admin_actions (
                 chat_id TEXT NOT NULL,
@@ -2497,6 +2504,10 @@ def _default_channel_settings():
         # Topluluk koruması: ortak kara liste (botun başka grubunda banlı) + CAS, isim takibi, oylamalı susturma
         'shared_blacklist': True, 'blacklist_action': 'mute', 'cas_enabled': False, 'name_track': True,
         'vote_mute': True, 'vote_needed': 5, 'vote_mute_minutes': 60,
+        # Üye ve grup güvenliği: kural onayı, grup bilgisi koruması, kişisel bilgi / dolandırıcılık kalıpları
+        'rules_gate': False, 'info_guard': False,
+        'pii_guard': False, 'pii_phone': True, 'pii_email': True, 'pii_iban': True, 'pii_crypto': True, 'pii_dm': True,
+        'pii_action': 'warn',
     }
 
 async def _register_chat(chat_id: str, owner_id: int, chat_type: str, added_by: int | None = -1):
@@ -2788,12 +2799,13 @@ async def apply_punishment(chat_id: str, user_id: int, username: str, reason: st
 # ─────────────────────────── KORUMA CEZALARI + MODERASYON BUTONLARI ───────────────────────────
 
 async def enforce_action(chat_id: str, msg, channel: dict, prot: str, reason: str, bot_data: dict,
-                         mute_minutes: int | None = None):
+                         mute_minutes: int | None = None, action: str | None = None):
     """Korumanın panelden seçilen cezasını uygular (ihlal mesajı önceden silinmiş olmalı).
     delete: sadece sil · warn: uyarı (limitte warn_action) · mute · kick · ban.
-    mute_minutes verilirse (flood/forward/medya kademeli süre) ayar yerine o kullanılır."""
+    mute_minutes verilirse (flood/forward/medya kademeli süre) ayar yerine o kullanılır.
+    action verilirse (PROTECTIONS dışındaki korumalar, ör. kişisel bilgi) ayar yerine o kullanılır."""
     user = msg.from_user
-    action = channel['settings'].get(f'action_{prot}') or PROTECTIONS[prot][2]
+    action = action or channel['settings'].get(f'action_{prot}') or PROTECTIONS[prot][2]
     tkw = thread_kw(msg, chat_id)
     username = user.username or user.first_name
     if action == 'warn':
@@ -3274,13 +3286,20 @@ async def captcha_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chosen == str(row['answer']):
         await query.answer("✅ Doğru!")
         try:
-            perms = await _default_member_permissions(chat_id)
-            await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=perms)
+            gate = await rules_gate_needed(chat_id, query.from_user)  # kural onayı captcha'dan sonra sorulur
+            if not gate:
+                perms = await _default_member_permissions(chat_id)
+                await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id, permissions=perms)
             await query.edit_message_text(f"✅ {who} doğrulandı!", parse_mode=ParseMode.HTML)
             await send_log(chat_id, f"✅ Captcha geçti: {who} | {chat_id}", ParseMode.HTML)
             if context.job_queue:
                 context.job_queue.run_once(_delete_message_job, 15,
                                            data={'chat_id': chat_id, 'message_id': query.message.message_id})
+            if gate and await send_rules_gate(chat_id, query.from_user):
+                return  # hoş geldin, kurallar kabul edilince gönderilir
+            if gate:  # kural istemi gönderilemedi: kişi kısıtlı kalmasın
+                await bot.restrict_chat_member(chat_id=chat_id, user_id=user_id,
+                                               permissions=await _default_member_permissions(chat_id))
             await send_welcome(chat_id, [query.from_user])  # captcha'dan geçene hoş geldin
         except Exception as e:
             logger.error(f"Captcha doğrulama hata: {e}")
@@ -4081,6 +4100,384 @@ async def spam_memory_cleanup(context: ContextTypes.DEFAULT_TYPE):
                 context.bot_data.pop(k, None)
         elif isinstance(k, str) and k.startswith('flood_notice_') and isinstance(v, (int, float)) and now - v > 300:
             context.bot_data.pop(k, None)
+
+# ═══════════════════════════ ÜYE VE GRUP GÜVENLİĞİ ═══════════════════════════
+# 📜 Kural onayı: yeni üye kuralları butonla kabul edene kadar yazamaz. Captcha açıksa önce captcha çözülür, kural
+#    onayı ondan sonra sorulur. Bir kez kabul eden (rules_accepted) gruba tekrar katılınca sorulmaz.
+# 🏷 Grup bilgisi koruması: ad / fotoğraf / sabit mesaj değişikliği servis mesajıyla gelir; kurucu (ve botun kendisi)
+#    dışında biri yaptıysa kayıtlı hâle döndürülür. Açıklama değişikliği servis mesajı üretmez: 10 dk'da bir kontrol.
+# 🔐 Kişisel bilgi / dolandırıcılık kalıpları: telefon, e-posta, IBAN (mod-97), kripto cüzdan (sağlama toplamlı),
+#    "özelden yaz" çağrıları. Sadece yetkili olmayan üyelerin mesajlarına uygulanır.
+
+def _rules_accepted(chat_id: str, user_id: int) -> bool:
+    with get_db() as conn:
+        return conn.execute("SELECT 1 FROM rules_accepted WHERE chat_id = ? AND user_id = ?",
+                            (str(chat_id), user_id)).fetchone() is not None
+
+async def rules_gate_needed(chat_id: str, user, channel: dict | None = None) -> bool:
+    """Kural onayı açık, kişi bot/yetkili değil ve daha önce kabul etmemişse True."""
+    channel = channel or get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('rules_gate') or not user or user.is_bot:
+        return False
+    if await is_staff_user(chat_id, user.id, channel):
+        return False
+    return not _rules_accepted(chat_id, user.id)
+
+async def send_rules_gate(chat_id: str, user, channel: dict | None = None) -> bool:
+    """Yeni üyeyi kısıtlar ve kuralları 'kabul ediyorum' butonuyla gruba gönderir. Gönderilemezse kısıt kaldırılır."""
+    channel = channel or get_channel_settings(chat_id)
+    rules = rich_plain(rules_rich(channel['settings']), 3000) if channel else ''
+    if rules:
+        text = (f"📜 Hoş geldin {mention(user)}! Gruba yazabilmek için kuralları okuyup kabul etmelisin:\n\n"
+                f"<blockquote expandable>{html.escape(rules)}</blockquote>")
+    else:
+        text = f"📜 Hoş geldin {mention(user)}! Grubun kurallarına uymayı kabul ediyor musun?"
+    markup = InlineKeyboardMarkup([[ibtn("✅ Kuralları okudum, kabul ediyorum", f"rg|{chat_id}|{user.id}", GREEN)]])
+    try:
+        await bot.restrict_chat_member(chat_id, user.id, permissions=ChatPermissions.no_permissions())
+    except Exception as e:
+        logger.debug(f"Kural onayı kısıtlaması uygulanamadı ({chat_id}/{user.id}): {e}")
+        return False
+    try:
+        await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup,
+                               disable_web_page_preview=True)
+    except Exception as e:
+        logger.warning(f"Kural onayı mesajı gönderilemedi ({chat_id}): {e}")
+        try:  # buton gönderilemediyse kişi kısıtlı kalmasın
+            await bot.restrict_chat_member(chat_id, user.id, permissions=await _default_member_permissions(chat_id))
+        except Exception as e2:
+            logger.debug(f"Kural onayı kısıtı geri alınamadı: {e2}")
+        return False
+    await send_log(chat_id, f"📜 Kural onayı bekleniyor: {mention(user)} | {chat_id}", ParseMode.HTML)
+    return True
+
+async def rules_gate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """rg|<grup>|<kullanıcı>: sadece o kişi basabilir; kısıt kalkar, kabul kaydedilir, istem silinir."""
+    query = update.callback_query
+    parts = (query.data or '').split('|')
+    if len(parts) != 3 or not parts[2].isdigit() or not valid_id(parts[2]):
+        await query.answer("Bu buton geçersiz.", show_alert=True)
+        return
+    cid, uid = parts[1], int(parts[2])
+    if query.from_user.id != uid:
+        await query.answer("Bu buton sana ait değil; kuralları sadece yeni katılan kişi onaylayabilir.", show_alert=True)
+        return
+    if not get_channel_settings(cid):
+        await query.answer("Grup bulunamadı.", show_alert=True)
+        return
+    try:
+        await bot.restrict_chat_member(cid, uid, permissions=await _default_member_permissions(cid))
+    except Exception as e:
+        logger.warning(f"Kural onayı sonrası kısıt kaldırılamadı ({cid}/{uid}): {e}")
+        await query.answer("Kısıtlaman kaldırılamadı; lütfen yöneticilere haber ver.", show_alert=True)
+        return
+    async with _db_lock:
+        with get_db() as conn:
+            conn.execute("INSERT OR REPLACE INTO rules_accepted (chat_id, user_id, at) VALUES (?, ?, ?)",
+                         (cid, uid, time.time()))
+            conn.commit()
+    await query.answer("✅ Teşekkürler! Artık yazabilirsin.")
+    if query.message:
+        try:
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Kural onayı mesajı silinemedi: {e}")
+    await send_log(cid, f"✅ Kurallar kabul edildi: {mention(query.from_user)} | {cid}", ParseMode.HTML)
+    await send_welcome(cid, [query.from_user])
+
+# ── 🏷 Grup bilgisi koruması ──
+def info_snap_get(chat_id: str) -> dict | None:
+    try:
+        raw = kv_get(f'info_snap:{chat_id}')
+        return json.loads(raw) if raw else None
+    except ValueError:
+        return None
+
+def _info_snap_set(chat_id: str, snap: dict):
+    kv_set(f'info_snap:{chat_id}', json.dumps(snap, ensure_ascii=False))
+
+async def info_snapshot(chat_id: str) -> dict | None:
+    """Grubun şu anki adı, açıklaması, fotoğrafı ve sabit mesajı kaydedilir."""
+    try:
+        chat = await bot.get_chat(chat_id)
+    except Exception as e:
+        logger.debug(f"Grup bilgisi kaydedilemedi ({chat_id}): {e}")
+        return None
+    photo = getattr(chat, 'photo', None)
+    pinned = getattr(chat, 'pinned_message', None)
+    snap = {'title': getattr(chat, 'title', None) or '', 'description': getattr(chat, 'description', None) or '',
+            'photo': getattr(photo, 'big_file_id', None), 'pinned': getattr(pinned, 'message_id', None),
+            'at': time.time()}
+    _info_snap_set(chat_id, snap)
+    return snap
+
+async def _info_restore_photo(chat_id: str, file_id, removed: bool):
+    """Kayıtlı fotoğrafı geri koyar; kayıt yoksa ya da indirilemiyorsa yeni fotoğrafı kaldırır."""
+    if file_id:
+        try:
+            data = await (await bot.get_file(file_id)).download_as_bytearray()
+            await bot.set_chat_photo(chat_id, bytes(data))
+            return
+        except Exception as e:
+            logger.debug(f"Kayıtlı grup fotoğrafı geri konamadı ({chat_id}): {e}")
+            if removed:
+                raise
+    if not removed:
+        await bot.delete_chat_photo(chat_id)
+
+async def _info_revert(chat_id: str, field: str, snap: dict, new_val) -> bool:
+    try:
+        if field == 'title':
+            if not snap.get('title'):
+                return False
+            await bot.set_chat_title(chat_id, snap['title'])
+        elif field == 'photo':
+            await _info_restore_photo(chat_id, snap.get('photo'), removed=new_val is None)
+        else:
+            await bot.unpin_chat_message(chat_id, message_id=new_val)
+            if snap.get('pinned') and snap['pinned'] != new_val:
+                await bot.pin_chat_message(chat_id, snap['pinned'], disable_notification=True)
+        return True
+    except Exception as e:
+        logger.warning(f"Grup bilgisi geri alınamadı ({chat_id}/{field}): {e}")
+        return False
+
+async def info_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ad / fotoğraf / sabit mesaj değişikliği: kurucu veya bot yaptıysa kayıt güncellenir, başkası yaptıysa geri alınır."""
+    msg = update.message
+    if not msg or msg.chat.type not in ('group', 'supergroup'):
+        return
+    chat_id = str(msg.chat_id)
+    channel = get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('info_guard'):
+        return
+    if msg.new_chat_title:
+        field, new_val = 'title', msg.new_chat_title
+    elif msg.new_chat_photo:
+        field, new_val = 'photo', msg.new_chat_photo[-1].file_id
+    elif msg.delete_chat_photo:
+        field, new_val = 'photo', None
+    elif msg.pinned_message:
+        field, new_val = 'pinned', msg.pinned_message.message_id
+    else:
+        return
+    snap = info_snap_get(chat_id)
+    if snap is None:
+        await info_snapshot(chat_id)  # kayıt yoksa (ör. web panelden açıldı) mevcut hâl kaydedilir
+        return
+    actor = msg.from_user
+    anon = msg.sender_chat is not None
+    if actor and not anon and (actor.id == cur_bot_id() or user_level(chat_id, actor.id) >= LVL_KURUCU):
+        snap[field] = new_val
+        _info_snap_set(chat_id, snap)
+        return
+    if field != 'pinned' and snap.get(field) == new_val:
+        return
+    who = "anonim yönetici" if anon or not actor else mention(actor)
+    what = {'title': "grup adını", 'photo': "grup fotoğrafını", 'pinned': "sabit mesajı"}[field]
+    if await _info_revert(chat_id, field, snap, new_val):
+        await send_log(chat_id, f"🏷 Grup bilgisi koruması: {who} {what} değiştirdi → eski hâline döndürüldü | {chat_id}",
+                       ParseMode.HTML)
+    else:
+        await send_log(chat_id, f"🏷 Grup bilgisi koruması: {who} {what} değiştirdi → geri alınamadı "
+                                f"(botun grup bilgisi ve sabitleme yetkisi olmalı) | {chat_id}", ParseMode.HTML)
+
+async def info_guard_job(context: ContextTypes.DEFAULT_TYPE):
+    """Açıklama değişikliği servis mesajı üretmez: koruması açık gruplarda 10 dk'da bir karşılaştırılır."""
+    with get_db() as conn:
+        chats = [r['chat_id'] for r in conn.execute(
+            "SELECT chat_id FROM channels WHERE mybot(bot_id) AND chat_type IN ('group','supergroup') "
+            "AND (settings LIKE '%\"info_guard\": true%' OR settings LIKE '%\"info_guard\":true%')")]
+    for cid in chats:
+        channel = get_channel_settings(cid)
+        if not channel or not channel['settings'].get('info_guard'):
+            continue
+        snap = info_snap_get(cid)
+        if snap is None:
+            await info_snapshot(cid)
+            continue
+        try:
+            chat = await bot.get_chat(cid)
+        except Exception as e:
+            logger.debug(f"Grup bilgisi okunamadı ({cid}): {e}")
+            continue
+        if (getattr(chat, 'description', None) or '') == (snap.get('description') or ''):
+            continue
+        try:
+            await bot.set_chat_description(cid, snap.get('description') or '')
+        except Exception as e:
+            logger.warning(f"Grup açıklaması geri alınamadı ({cid}): {e}")
+            continue
+        await send_log(cid, "📝 Grup açıklaması değiştirilmiş; eski hâline döndürüldü. Değişikliği kurucu yaptıysa "
+                            "panelde 🛂 Üye ve grup güvenliği → 📸 Şu anki hâli kaydet'e bas.")
+
+# ── 🔐 Kişisel bilgi ve dolandırıcılık kalıpları ──
+PII_KINDS = {'pii_phone': "telefon numarası", 'pii_email': "e-posta adresi", 'pii_iban': "IBAN",
+             'pii_crypto': "kripto cüzdan adresi", 'pii_dm': "özelden yazma çağrısı"}
+PII_SHORT = {'pii_phone': "📞 Telefon", 'pii_email': "📧 E-posta", 'pii_iban': "🏦 IBAN",
+             'pii_crypto': "🪙 Kripto cüzdan", 'pii_dm': "💬 \"Özelden yaz\""}
+_PHONE_RE = re.compile(r'(?<![\w+/.:,\-])(\+?)(\(?\d[\d \-()]{8,22}\d)(?![\w/:\-]|[.,]\d)')
+_EMAIL_RE = re.compile(r'(?<![\w.+\-])[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,24}(?!\w)')
+_IBAN_RE = re.compile(r'(?<![A-Za-z0-9])([A-Za-z]{2})(\d{2})((?:[ \-]?[A-Za-z0-9]){10,32})')
+_IBAN_LEN = {'TR': 26, 'DE': 22, 'GB': 22, 'FR': 27, 'NL': 18, 'BE': 16, 'AT': 20, 'CH': 21, 'IT': 27, 'ES': 24,
+             'PT': 25, 'IE': 22, 'LU': 20, 'PL': 28, 'CZ': 24, 'SK': 24, 'HU': 28, 'RO': 24, 'BG': 22, 'GR': 27,
+             'CY': 28, 'MT': 31, 'HR': 21, 'SI': 19, 'SE': 24, 'NO': 15, 'DK': 18, 'FI': 18, 'IS': 26, 'EE': 20,
+             'LV': 21, 'LT': 20, 'AZ': 28, 'GE': 22, 'KZ': 20, 'UA': 29, 'BY': 28, 'MD': 24, 'RU': 33, 'AL': 28,
+             'BA': 20, 'RS': 22, 'ME': 22, 'MK': 19, 'XK': 20, 'SA': 24, 'AE': 23, 'QA': 29, 'KW': 30, 'BH': 22,
+             'JO': 30, 'LB': 28, 'IL': 23, 'EG': 29, 'IQ': 23, 'PK': 24, 'TN': 24, 'BR': 29, 'LI': 21, 'MC': 27}
+_ETH_RE = re.compile(r'(?<![0-9A-Za-z])0x[0-9a-fA-F]{40}(?![0-9A-Za-z])')
+_B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+_B58_RE = re.compile(r'(?<![0-9A-Za-z])[13T][1-9A-HJ-NP-Za-km-z]{25,34}(?![0-9A-Za-z])')
+_BECH32_RE = re.compile(r'(?<![0-9A-Za-z])bc1[ac-hj-np-z02-9]{11,71}(?![0-9A-Za-z])', re.IGNORECASE)
+_BECH32 = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+_DM_BAIT_RE = re.compile(
+    r'(?<![a-z0-9])(?:'
+    r'ozelden (?:yaz|yazin|yazsin|ulas|ulasin|gel|mesaj at|iletisime gec)|ozel(?:e|ime) (?:gel|yaz|mesaj at)'
+    r'|bana ozelden|(?:dm|dmden|pm|pmden) (?:at|yaz|gel)|yaz kazan'
+    r'|(?:dm|pm|inbox) me|send me a (?:dm|pm|private message)|message me (?:privately|in private)'
+    r'|contact me (?:privately|in dm|in pm))(?![a-z0-9])')
+
+def _phone_ok(plus: str, raw: str) -> bool:
+    d = re.sub(r'\D', '', raw)
+    if not 10 <= len(d) <= 15 or len(set(d)) < 3 or raw.count('(') != raw.count(')'):
+        return False
+    if plus:
+        return True
+    # Ülke kodu yoksa sadece yerel/Türkiye biçimleri: 0xxx…(11), 5xx…(10), 90…(12), 00…  (tarih/fiyat/sipariş no değil)
+    return d.startswith('00') or (d[0] == '0' and len(d) == 11) or (d[0] == '5' and len(d) == 10) or \
+        (d.startswith('90') and len(d) == 12)
+
+def _iban_valid(s: str) -> bool:
+    s = s.upper()
+    if _IBAN_LEN.get(s[:2]) != len(s) or not s[2:4].isdigit() or sum(c.isdigit() for c in s[4:]) < 8:
+        return False
+    return int(''.join(str(int(c, 36)) for c in s[4:] + s[:4])) % 97 == 1
+
+def _find_iban(text: str) -> bool:
+    for m in _IBAN_RE.finditer(text):
+        size = _IBAN_LEN.get(m.group(1).upper())
+        compact = re.sub(r'[ \-]', '', m.group(0))
+        if size and len(compact) >= size and _iban_valid(compact[:size]):
+            return True
+    return False
+
+def _b58check(addr: str):
+    n = 0
+    for c in addr:
+        n = n * 58 + _B58.index(c)
+    if n.bit_length() > 200:
+        return None
+    raw = n.to_bytes(25, 'big')
+    if hashlib.sha256(hashlib.sha256(raw[:21]).digest()).digest()[:4] != raw[21:]:
+        return None
+    return raw[0]
+
+def _bech32_ok(addr: str) -> bool:
+    hrp, _, data = addr.lower().rpartition('1')
+    if hrp != 'bc' or len(data) < 6:
+        return False
+    gen = (0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3)
+    chk = 1
+    for v in [ord(x) >> 5 for x in hrp] + [0] + [ord(x) & 31 for x in hrp] + [_BECH32.index(c) for c in data]:
+        top = chk >> 25
+        chk = (chk & 0x1ffffff) << 5 ^ v
+        for i in range(5):
+            if (top >> i) & 1:
+                chk ^= gen[i]
+    return chk in (1, 0x2bc830a3)  # bech32 (segwit v0) / bech32m (taproot)
+
+def _find_wallet(text: str) -> bool:
+    if _ETH_RE.search(text):
+        return True
+    for m in _B58_RE.finditer(text):
+        a = m.group(0)
+        ver = _b58check(a)
+        if (a[0] == 'T' and len(a) == 34 and ver == 0x41) or (a[0] in '13' and ver in (0x00, 0x05)):
+            return True  # TRX / USDT-TRC20, BTC (P2PKH / P2SH)
+    return any(_bech32_ok(m.group(0)) for m in _BECH32_RE.finditer(text))
+
+def _find_phone(text: str) -> bool:
+    return any(_phone_ok(m.group(1), m.group(2)) for m in _PHONE_RE.finditer(text))
+
+def _find_dm_bait(text: str) -> bool:
+    norm = re.sub(r'\s+', ' ', re.sub(r"['’`]", '', normalize_text(text)))
+    return bool(_DM_BAIT_RE.search(norm))
+
+def find_pii(text: str, s: dict) -> str | None:
+    """Mesajdaki ilk kişisel bilgi / dolandırıcılık kalıbının ayar anahtarı (pii_phone …) ya da None."""
+    if not text:
+        return None
+    checks = (('pii_iban', _find_iban), ('pii_crypto', _find_wallet), ('pii_email', lambda t: bool(_EMAIL_RE.search(t))),
+              ('pii_phone', _find_phone), ('pii_dm', _find_dm_bait))
+    for key, fn in checks:
+        if s.get(key, True) and fn(text):
+            return key
+    return None
+
+async def pii_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.effective_message  # düzenlenen mesajlar da kontrol edilir
+    if not msg or msg.chat.type not in ('group', 'supergroup'):
+        return
+    text = message_text(msg)
+    if not text:
+        return
+    chat_id = str(msg.chat_id)
+    channel = get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('pii_guard'):
+        return
+    s = channel['settings']
+    kind = find_pii(text, s)
+    if not kind or await is_exempt_message(chat_id, msg, channel):
+        return
+    if msg.sender_chat:
+        await _sender_chat_violation(msg, chat_id, "Kişisel bilgi")
+        raise ApplicationHandlerStop
+    try:
+        await msg.delete()
+    except Exception as e:
+        logger.debug(f"Kişisel bilgi içeren mesaj silinemedi: {e}")
+    label = PII_KINDS[kind]
+    action = s.get('pii_action') if s.get('pii_action') in ACTION_LABELS else 'warn'
+    if action == 'delete':  # diğer cezalar kendi duyurusunu gönderir
+        try:
+            notice = await bot.send_message(
+                chat_id, f"🛂 {mention(msg.from_user)}, mesajında {label} olduğu için silindi. "
+                         f"Güvenliğin için kişisel bilgilerini grupta paylaşma.",
+                parse_mode=ParseMode.HTML, **thread_kw(msg, chat_id))
+            if context.job_queue:
+                context.job_queue.run_once(_delete_message_job, 20, data={'chat_id': chat_id, 'message_id': notice.message_id})
+        except Exception as e:
+            logger.debug(f"Kişisel bilgi uyarısı gönderilemedi: {e}")
+    await enforce_action(chat_id, msg, channel, 'pii', f"kişisel bilgi / dolandırıcılık kalıbı ({label})",
+                         context.bot_data, action=action)
+    raise ApplicationHandlerStop  # silinen mesaj için diğer filtreler çalışmasın
+
+def render_sec_page(cid: str, s: dict, title: str):
+    act = s.get('pii_action') if s.get('pii_action') in ACTION_LABELS else 'warn'
+    snap = info_snap_get(cid)
+    when = datetime.fromtimestamp(snap['at'], TZ_TR).strftime('%d.%m %H:%M') if snap and snap.get('at') else "henüz yok"
+    text = (f"🛂 <b>Üye ve grup güvenliği</b> — {title}\n\n"
+            "📜 <b>Kural onayı:</b> yeni üye, grubun kurallarını butonla kabul edene kadar yazamaz (captcha açıksa "
+            "captcha'dan sonra sorulur). Bir kez kabul eden, gruba tekrar katılınca sorulmaz.\n\n"
+            "🏷 <b>Grup bilgisi koruması:</b> kurucu dışında biri grup adını, fotoğrafını veya sabit mesajı değiştirirse "
+            "eski hâline döndürülür; açıklama 10 dakikada bir kontrol edilir. Kurucunun değişiklikleri otomatik kaydedilir; "
+            "açıklamayı kurucu değiştirdiyse 📸 ile kaydet. Sadece kurucu / yardımcı kurucu değiştirir.\n"
+            f"Son kayıt: {when}\n\n"
+            "🔐 <b>Kişisel bilgi ve dolandırıcılık kalıpları:</b> üyelerin telefon numarası, e-posta, IBAN, kripto cüzdan "
+            "adresi veya \"özelden yaz\" çağrısı içeren mesajları silinir ve seçilen ceza uygulanır.")
+    rows = [[toggle_btn("📜 Kural onayı", s.get('rules_gate'), f"s|{cid}|t|rules_gate|sec")],
+            [toggle_btn("🏷 Grup bilgisi koruması", s.get('info_guard'), f"s|{cid}|t|info_guard|sec")],
+            [ibtn("📸 Şu anki hâli kaydet", f"s|{cid}|is", BLUE)],
+            [toggle_btn("🔐 Kişisel bilgi koruması", s.get('pii_guard'), f"s|{cid}|t|pii_guard|sec")]]
+    keys = list(PII_SHORT)
+    for i in range(0, len(keys), 2):
+        rows.append([toggle_btn(PII_SHORT[k], s.get(k, True), f"s|{cid}|t|{k}|sec") for k in keys[i:i + 2]])
+    rows.append([ibtn(f"• {lbl} •" if a == act else lbl, f"s|{cid}|pa|{a}", BLUE if a == act else None)
+                 for a, lbl in ACTION_LABELS.items()])
+    if act == 'mute':
+        rows.append(_num_row(cid, 'mute_minutes', s, 'sec', "Susturma"))
+    rows.append(_back(cid))
+    return text, rows
 
 async def cmd_antiforward(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -5677,7 +6074,9 @@ TOGGLE_KEYS = {v[1] for v in PROTECTIONS.values()} | {
     'restrict_no_username', 'welcome_enabled', 'nsfw_scan', 'file_block', 'media_autolock', 'edit_guard',
     'edit_notify', 'reports_enabled', 'recovery_autorestore', 'welcome_clean', 'welcome_batch', 'welcome_dm',
     'goodbye_enabled', 'fsub_enabled', 'tag_active_only', 'shared_blacklist', 'cas_enabled', 'name_track', 'vote_mute',
-    'admin_audit', 'admin_limit_on', 'del_log'}
+    'admin_audit', 'admin_limit_on', 'del_log', 'rules_gate', 'info_guard', 'pii_guard', 'pii_phone', 'pii_email',
+    'pii_iban', 'pii_crypto', 'pii_dm'}
+YARDIMCI_KEYS = {'info_guard'}  # sadece kurucu / yardımcı kurucu (kişiye özel yetki verilse de)
 NIGHT_RESTRICTIONS = [('block_messages', "Mesaj"), ('block_media', "Foto/Video"), ('block_voice', "Ses/Video not"),
                       ('block_sticker', "Sticker/GIF"), ('block_links', "Link önizleme"), ('block_files', "Dosya/Müzik")]
 PAGE_SIZE = 8
@@ -5864,6 +6263,9 @@ async def render_settings(cid: str, page: str = 'main'):
     elif base == 'comm':
         text, rows = render_comm_page(cid, s, title)
 
+    elif base == 'sec':
+        text, rows = render_sec_page(cid, s, title)
+
     elif base == 'warn':
         wa = s.get('warn_action', 'ban')
         text = (f"⚠️ <b>Uyarılar</b> — {title}\n\n\"Uyar\" cezalı korumalar ve /warn uyarı verir; limit dolunca "
@@ -5965,7 +6367,8 @@ async def render_settings(cid: str, page: str = 'main'):
                 [ibtn("🔤 Kelimeler", f"s|{cid}|p|words.0", BLUE), ibtn("📝 Notlar", f"s|{cid}|p|notes.0", BLUE)],
                 [ibtn("🧩 Filtreler", f"s|{cid}|p|filters.0", BLUE), ibtn("⏰ Zamanlı mesaj", f"s|{cid}|p|sched", BLUE)],
                 [ibtn("📢 Kanal zorunluluğu", f"s|{cid}|p|fsub", BLUE), ibtn("🏷 Etiket", f"s|{cid}|p|tag", BLUE)],
-                [ibtn("🧑‍⚖️ Topluluk koruması", f"s|{cid}|p|comm", BLUE)],
+                [ibtn("🧑‍⚖️ Topluluk koruması", f"s|{cid}|p|comm", BLUE),
+                 ibtn("🛂 Üye ve grup güvenliği", f"s|{cid}|p|sec", BLUE)],
                 [ibtn("✏️ Düzenleme & Rapor", f"s|{cid}|p|edit", BLUE), ibtn("🧾 Log Kanalı", f"s|{cid}|p|log", BLUE)],
                 [ibtn("🌐 Grup Ağı", f"s|{cid}|p|net", BLUE), ibtn("🛟 Kurtarma", f"s|{cid}|p|rec", BLUE)],
                 [ibtn("👮 Admin denetimi", f"s|{cid}|p|audit", BLUE),
@@ -5991,6 +6394,9 @@ async def _settings_change(cid: str, channel: dict, op: str, args: list, query, 
     if op in ('t', 'n') and args and args[0] in KURUCU_KEYS and user_level(cid, uid) < LVL_KURUCU:
         await query.answer("Bu ayarı sadece grubun kurucusu değiştirebilir.", show_alert=True)
         return None
+    if ((op == 't' and args and args[0] in YARDIMCI_KEYS) or op == 'is') and user_level(cid, uid) < LVL_YARDIMCI:
+        await query.answer("Bu ayarı sadece kurucu ve yardımcı kurucu değiştirebilir.", show_alert=True)
+        return None
     if op == 't' and args:
         key, page = args[0], (args[1] if len(args) > 1 else 'main')
         if key not in TOGGLE_KEYS:
@@ -6003,6 +6409,8 @@ async def _settings_change(cid: str, channel: dict, op: str, args: list, query, 
         save_channel_settings(cid, channel)
         await send_log(cid, f"⚙️ {html.escape(setting_label(key))} → {'açıldı' if s[key] else 'kapatıldı'} | {by}",
                        ParseMode.HTML)
+        if key == 'info_guard' and s[key]:
+            await info_snapshot(cid)  # açıldığı andaki hâl korunur
         return page, "✅ Açıldı" if s[key] else "❌ Kapatıldı"
     if op == 'n' and len(args) >= 3 and args[0] in NUMERIC:
         key, up, page = args[0], args[1] == 'u', args[2]
@@ -6015,6 +6423,16 @@ async def _settings_change(cid: str, channel: dict, op: str, args: list, query, 
         save_channel_settings(cid, channel)
         await send_log(cid, f"⚙️ {html.escape(args[0])} cezası → {ACTION_LABELS[args[1]]} | {by}", ParseMode.HTML)
         return f"pr.{args[0]}", f"Ceza: {ACTION_LABELS[args[1]]}"
+    if op == 'pa' and args and args[0] in ACTION_LABELS:
+        s['pii_action'] = args[0]
+        save_channel_settings(cid, channel)
+        await send_log(cid, f"⚙️ Kişisel bilgi koruması cezası → {ACTION_LABELS[args[0]]} | {by}", ParseMode.HTML)
+        return 'sec', f"Ceza: {ACTION_LABELS[args[0]]}"
+    if op == 'is':
+        ok = await info_snapshot(cid)
+        if ok:
+            await send_log(cid, f"📸 Grup bilgisi (ad, açıklama, fotoğraf, sabit mesaj) kaydedildi | {by}", ParseMode.HTML)
+        return 'sec', "📸 Kaydedildi" if ok else "Kaydedilemedi (bot admin mi?)"
     if op == 'wa' and args and args[0] in WARN_ACTION_LABELS:
         s['warn_action'] = args[0]
         save_channel_settings(cid, channel)
@@ -8354,6 +8772,8 @@ async def new_member_handler(update: Update, context):
                 and not _consume_join_pass(chat_id, user.id):
             await send_captcha(chat_id, user.id, username, context, user=user)
             continue
+        if await rules_gate_needed(chat_id, user, channel) and await send_rules_gate(chat_id, user, channel):
+            continue  # hoş geldin, kurallar kabul edilince gönderilir
 
         channel['stats']['joins'] = channel['stats'].get('joins', 0) + 1
         save_channel_settings(chat_id, channel)
@@ -10319,6 +10739,9 @@ async def cmd_grupbilgi(update: Update, context):
     if settings.get('captcha_enabled'): active.append("Captcha")
     if settings.get('anti_raid'): active.append("Anti-Raid")
     if settings.get('word_ban_enabled'): active.append("Kelime Filtresi")
+    if settings.get('rules_gate'): active.append("Kural Onayı")
+    if settings.get('info_guard'): active.append("Grup Bilgisi Koruması")
+    if settings.get('pii_guard'): active.append("Kişisel Bilgi Koruması")
     active_str = ", ".join(active) if active else "Yok"
     text = (
         f"📊 {title}\n"
@@ -13972,6 +14395,18 @@ def web_schema() -> list:
             _f('cas_enabled', 'bool', "🌐 CAS spam listesi"), _f('name_track', 'bool', "✏️ İsim değişikliği takibi"),
             _f('vote_mute', 'bool', "🗳 Oylamalı susturma"), num('vote_needed', "Gerekli oy"),
             num('vote_mute_minutes', "Oylama susturma süresi")]},
+        {'id': 'sec', 'title': "🛂 Üye ve grup güvenliği", 'fields': [
+            _f('rules_gate', 'bool', "📜 Kural onayı",
+               hint="Yeni üye, grubun kurallarını butonla kabul edene kadar yazamaz. Bir kez kabul eden tekrar sorulmaz."),
+            _f('info_guard', 'bool', "🏷 Grup bilgisi koruması", 'yardimci',
+               hint="Kurucu dışında birinin değiştirdiği grup adı, fotoğrafı, sabit mesajı ve açıklaması eski hâline "
+                    "döndürülür. Sadece kurucu / yardımcı kurucu değiştirir."),
+            _f('pii_guard', 'bool', "🔐 Kişisel bilgi ve dolandırıcılık kalıpları",
+               hint="Üyelerin telefon, e-posta, IBAN, kripto cüzdan adresi veya \"özelden yaz\" çağrısı içeren mesajları silinir."),
+            _f('pii_phone', 'bool', "📞 Telefon numarası"), _f('pii_email', 'bool', "📧 E-posta adresi"),
+            _f('pii_iban', 'bool', "🏦 IBAN"), _f('pii_crypto', 'bool', "🪙 Kripto cüzdan adresi"),
+            _f('pii_dm', 'bool', "💬 \"Özelden yaz\" çağrıları"),
+            _f('pii_action', 'select', "Kişisel bilgi cezası", options=acts)]},
         {'id': 'lang', 'title': "🌍 Dil / Language", 'fields': [
             _f('lang', 'select', "Botun bu gruptaki dili", options=[[k, v] for k, v in available_langs().items()],
                hint="Botun mesajları, butonları ve uyarıları bu dilde olur. Senin yazdığın içerik değişmez.")]},
@@ -14093,6 +14528,8 @@ WEB_SCHED_INTERVALS = [[1800, "30 dakikada bir"], [3600, "Saatte bir"], [7200, "
 def _web_has(chat_id: str, uid: int, perm: str) -> bool:
     if perm == 'kurucu':
         return user_level(chat_id, uid) >= LVL_KURUCU
+    if perm == 'yardimci':
+        return user_level(chat_id, uid) >= LVL_YARDIMCI
     return has_specific_permission(chat_id, uid, perm)
 
 def _hm(h: int, m: int) -> str:
@@ -17000,6 +17437,11 @@ def register_handlers(app, main_bot: bool = True):
         & (filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Sticker.ALL | filters.Document.ALL
            | filters.VIDEO_NOTE), media_shield_handler), group=-12)
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND, newbie_guard_handler), group=-11)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & (filters.TEXT | filters.CAPTION) & ~filters.COMMAND,
+                                   pii_guard_handler), group=-16)
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & (
+        filters.StatusUpdate.NEW_CHAT_TITLE | filters.StatusUpdate.NEW_CHAT_PHOTO | filters.StatusUpdate.DELETE_CHAT_PHOTO
+        | filters.StatusUpdate.PINNED_MESSAGE), info_guard_handler), group=-17)
     app.add_handler(MessageHandler(filters.UpdateType.MESSAGE & filters.ChatType.GROUPS, message_cache_handler), group=97)
     app.add_handler(MessageHandler(filters.ALL, anti_forward_handler), group=-10)
     app.add_handler(MessageHandler(filters.ALL, anti_media_flood_handler), group=-9)
@@ -17201,6 +17643,7 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CallbackQueryHandler(setrank_callback, pattern=r'^setrank\|'))
     app.add_handler(CallbackQueryHandler(locked_callback, pattern='^locked$'))
     app.add_handler(CallbackQueryHandler(captcha_callback, pattern=r'^captcha\|'))
+    app.add_handler(CallbackQueryHandler(rules_gate_callback, pattern=r'^rg\|'))
     app.add_handler(CallbackQueryHandler(settings_panel_callback, pattern=r'^s\|'))
     app.add_handler(CallbackQueryHandler(mod_action_callback, pattern=r'^m\|'))
     app.add_handler(CallbackQueryHandler(join_captcha_callback, pattern=r'^jcap\|'))
@@ -17256,6 +17699,7 @@ def main():
     job_queue = app.job_queue
     job_queue.run_repeating(check_captcha_timeouts, interval=15, first=15)
     job_queue.run_repeating(check_join_captcha_timeouts, interval=15, first=20)
+    job_queue.run_repeating(info_guard_job, interval=600, first=180)
     job_queue.run_repeating(check_media_locks, interval=60, first=15)
     job_queue.run_repeating(admin_snapshot_job, interval=6 * 3600, first=120)
     job_queue.run_repeating(check_raid_locks, interval=60, first=10)
