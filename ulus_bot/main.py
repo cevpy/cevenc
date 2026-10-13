@@ -914,6 +914,7 @@ CMD_ALIASES = {
     'yeniuye': 'newbie', 'linkizin': 'allowlink', 'captchasure': 'captchatime', 'kanalsettings': 'channelsettings',
     'oylama': 'votemute', 'kanalzorunlu': 'forcesub', 'spamkoruma': 'antispam', 'veda': 'goodbye',
     'setveda': 'setgoodbye', 'yenile': 'reload', 'rapor': 'report', 'dil': 'setlang',
+    'komutkapat': 'disablecmd', 'komutac': 'enablecmd',
 }
 ALIAS_TO_TR = {v: k for k, v in CMD_ALIASES.items()}
 
@@ -2508,6 +2509,8 @@ def _default_channel_settings():
         'rules_gate': False, 'info_guard': False,
         'pii_guard': False, 'pii_phone': True, 'pii_email': True, 'pii_iban': True, 'pii_crypto': True, 'pii_dm': True,
         'pii_action': 'warn',
+        # Komut koruması: başka botların komutları / rapor kötüye kullanımı; gruba özel kapatılan üye komutları
+        'cmd_guard': False, 'cmd_guard_action': 'warn', 'disabled_cmds': [], 'disabled_cmd_action': 'delete',
     }
 
 async def _register_chat(chat_id: str, owner_id: int, chat_type: str, added_by: int | None = -1):
@@ -4151,6 +4154,34 @@ async def send_rules_gate(chat_id: str, user, channel: dict | None = None) -> bo
     await send_log(chat_id, f"📜 Kural onayı bekleniyor: {mention(user)} | {chat_id}", ParseMode.HTML)
     return True
 
+# Katılma mesajı gizli gruplarda katılım sadece chat_member güncellemesiyle gelir. İkisi birden gelirse kural onayı
+# bir kez sorulsun: (sohbet, kişi) → (zaman, kaynak: 'msg' katılma mesajı / 'cm' chat_member)
+JOIN_DEDUPE_SECONDS = 60
+_join_seen: dict = {}
+
+def _join_src(chat_id: str, user_id: int) -> str | None:
+    v = _join_seen.get((str(chat_id), user_id))
+    return v[1] if v and time.time() - v[0] < JOIN_DEDUPE_SECONDS else None
+
+def _join_note(chat_id: str, user_id: int, src: str):
+    now = time.time()
+    if len(_join_seen) > 5000:
+        for k in [k for k, v in _join_seen.items() if now - v[0] > JOIN_DEDUPE_SECONDS]:
+            _join_seen.pop(k, None)
+    _join_seen[(str(chat_id), user_id)] = (now, src)
+
+async def rules_gate_on_member_update(chat_id: str, user):
+    """chat_member ile gelen katılım: katılma mesajı işlenmediyse kural onayı sorulur (captcha açıksa captcha akışı
+    katılma mesajıyla yürür, burada sorulmaz)."""
+    channel = get_channel_settings(chat_id)
+    if not channel or not channel['settings'].get('rules_gate') or channel['settings'].get('captcha_enabled'):
+        return
+    if _join_src(chat_id, user.id):
+        return  # katılma mesajı (ya da az önceki güncelleme) zaten işlendi
+    _join_note(chat_id, user.id, 'cm')
+    if not (await rules_gate_needed(chat_id, user, channel) and await send_rules_gate(chat_id, user, channel)):
+        _join_seen.pop((str(chat_id), user.id), None)
+
 async def rules_gate_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """rg|<grup>|<kullanıcı>: sadece o kişi basabilir; kısıt kalkar, kabul kaydedilir, istem silinir."""
     query = update.callback_query
@@ -4454,6 +4485,7 @@ async def pii_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def render_sec_page(cid: str, s: dict, title: str):
     act = s.get('pii_action') if s.get('pii_action') in ACTION_LABELS else 'warn'
+    cact = s.get('cmd_guard_action') if s.get('cmd_guard_action') in ACTION_LABELS else 'warn'
     snap = info_snap_get(cid)
     when = datetime.fromtimestamp(snap['at'], TZ_TR).strftime('%d.%m %H:%M') if snap and snap.get('at') else "henüz yok"
     text = (f"🛂 <b>Üye ve grup güvenliği</b> — {title}\n\n"
@@ -4464,7 +4496,11 @@ def render_sec_page(cid: str, s: dict, title: str):
             "açıklamayı kurucu değiştirdiyse 📸 ile kaydet. Sadece kurucu / yardımcı kurucu değiştirir.\n"
             f"Son kayıt: {when}\n\n"
             "🔐 <b>Kişisel bilgi ve dolandırıcılık kalıpları:</b> üyelerin telefon numarası, e-posta, IBAN, kripto cüzdan "
-            "adresi veya \"özelden yaz\" çağrısı içeren mesajları silinir ve seçilen ceza uygulanır.")
+            "adresi veya \"özelden yaz\" çağrısı içeren mesajları silinir ve seçilen ceza uygulanır.\n\n"
+            "🤖 <b>Komut spamı koruması:</b> üyelerin başka botlara yazdığı komutlar silinir; "
+            f"{CMD_GUARD_WINDOW} sn içinde {CMD_GUARD_LIMIT} kez tekrarlayana seçilen ceza uygulanır. "
+            f"{REPORT_ABUSE_WINDOW // 60} dakikada {REPORT_ABUSE_LIMIT} rapordan fazlası yok sayılır ve aynı ceza uygulanır. "
+            "Sadece kurucu / yardımcı kurucu değiştirir.")
     rows = [[toggle_btn("📜 Kural onayı", s.get('rules_gate'), f"s|{cid}|t|rules_gate|sec")],
             [toggle_btn("🏷 Grup bilgisi koruması", s.get('info_guard'), f"s|{cid}|t|info_guard|sec")],
             [ibtn("📸 Şu anki hâli kaydet", f"s|{cid}|is", BLUE)],
@@ -4472,12 +4508,227 @@ def render_sec_page(cid: str, s: dict, title: str):
     keys = list(PII_SHORT)
     for i in range(0, len(keys), 2):
         rows.append([toggle_btn(PII_SHORT[k], s.get(k, True), f"s|{cid}|t|{k}|sec") for k in keys[i:i + 2]])
+    rows.append([ibtn("👇 Kişisel bilgi cezası", f"s|{cid}|p|sec")])
     rows.append([ibtn(f"• {lbl} •" if a == act else lbl, f"s|{cid}|pa|{a}", BLUE if a == act else None)
                  for a, lbl in ACTION_LABELS.items()])
-    if act == 'mute':
+    rows.append([toggle_btn("🤖 Komut spamı koruması", s.get('cmd_guard'), f"s|{cid}|t|cmd_guard|sec")])
+    rows.append([ibtn("👇 Komut spamı cezası", f"s|{cid}|p|sec")])
+    rows.append([ibtn(f"• {lbl} •" if a == cact else lbl, f"s|{cid}|ca|{a}", BLUE if a == cact else None)
+                 for a, lbl in ACTION_LABELS.items()])
+    if 'mute' in (act, cact):
         rows.append(_num_row(cid, 'mute_minutes', s, 'sec', "Susturma"))
+    rows.append([ibtn(f"🚫 Komut kapatma ({len(s.get('disabled_cmds') or [])}) ›", f"s|{cid}|p|cmds.0", BLUE)])
     rows.append(_back(cid))
     return text, rows
+
+# ═══════════════════════════ KOMUT KORUMASI ═══════════════════════════
+# 🤖 Komut spamı: yetkili olmayan üyenin başka botlara yazdığı (/komut@baskabot ya da bizde olmayan) komutlar silinir;
+#    CMD_GUARD_WINDOW sn içinde CMD_GUARD_LIMIT kez tekrarlayana ceza. Rapor (/report, /rapor, @admin) kötüye
+#    kullanımı: REPORT_ABUSE_WINDOW içinde REPORT_ABUSE_LIMIT'ten fazlası yok sayılır + ceza.
+# 🚫 Komut kapatma: gruba özel kapatılan üye komutlarını yetkili olmayanlar kullanamaz (mesaj silinir + işlem).
+CMD_GUARD_LIMIT, CMD_GUARD_WINDOW = 3, 60
+REPORT_ABUSE_LIMIT, REPORT_ABUSE_WINDOW = 3, 600
+_cmd_hits: dict = {}
+_CMD_SIBLINGS: dict = {}  # komut adı → aynı handler'ın tüm adları (register_handlers doldurur)
+
+def note_bot_commands(app):
+    """Botun kayıtlı tüm komut adları (İngilizce eş adlar dahil); kardeş adlar birlikte tutulur (/lang = /dil)."""
+    for hs in app.handlers.values():
+        for h in hs:
+            if isinstance(h, CommandHandler):
+                for c in h.commands:
+                    _CMD_SIBLINGS[c] = frozenset(_CMD_SIBLINGS.get(c, frozenset()) | h.commands)
+
+def disableable_cmds() -> list:
+    """Gruba özel kapatılabilen üye komutları (Türkçe asıl adlarıyla)."""
+    out = [ALIAS_TO_TR.get(c, c) for c, _ in GROUP_USER_COMMANDS] + ['not']
+    return list(dict.fromkeys(out))
+
+def norm_cmd_name(raw: str) -> str:
+    """'/Report@bot' → 'rapor'; 'lang' → 'dil' (kapatılabilen bir kardeş adı varsa o)."""
+    name = (raw or '').strip().lstrip('/').split('@')[0].lower()
+    canon = ALIAS_TO_TR.get(name, name)
+    if canon in disableable_cmds():
+        return canon
+    sib = {ALIAS_TO_TR.get(c, c) for c in _CMD_SIBLINGS.get(name, ())}
+    return next((c for c in disableable_cmds() if c in sib), canon)
+
+def _cmd_hit(kind: str, chat_id: str, uid: int, window: int) -> int:
+    """Son `window` saniyedeki deneme sayısı (bu deneme dahil)."""
+    now = time.time()
+    key = (kind, chat_id, uid)
+    hits = [t for t in _cmd_hits.get(key, ()) if now - t < window]
+    hits.append(now)
+    _cmd_hits[key] = hits
+    if len(_cmd_hits) > 5000:
+        for k in [k for k, v in _cmd_hits.items() if now - v[-1] > REPORT_ABUSE_WINDOW]:
+            _cmd_hits.pop(k, None)
+    return len(hits)
+
+def _our_usernames(context) -> set:
+    names = set()
+    for b in [*RUNNING_BOTS.values(), getattr(context, 'bot', None)]:
+        try:
+            names.add((getattr(b, 'username', None) or '').lower())
+        except RuntimeError:  # henüz başlatılmamış bot
+            pass
+    return names - {''}
+
+async def _cmd_notice(msg, chat_id: str, text: str, context, seconds: int = 10):
+    try:
+        sent = await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, **thread_kw(msg, chat_id))
+        if getattr(context, 'job_queue', None):
+            context.job_queue.run_once(_delete_message_job, seconds, data={'chat_id': chat_id, 'message_id': sent.message_id})
+    except Exception as e:
+        logger.debug(f"Komut koruması bildirimi gönderilemedi: {e}")
+
+async def _cmd_delete(msg):
+    try:
+        await msg.delete()
+    except Exception as e:
+        logger.debug(f"Komut mesajı silinemedi: {e}")
+
+async def command_guard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Komutlardan ve @admin'den önce çalışır: kapalı komut, başka bota komut, rapor kötüye kullanımı."""
+    msg = update.message
+    if not msg or not msg.text or msg.chat.type not in ('group', 'supergroup'):
+        return
+    chat_id = str(msg.chat_id)
+    channel = get_channel_settings(chat_id)
+    if not channel:
+        return
+    s = channel['settings']
+    disabled = set(s.get('disabled_cmds') or [])
+    if not disabled and not s.get('cmd_guard'):
+        return
+    text = msg.text
+    if text.startswith('/'):
+        head = text.split()[0][1:]
+        name, _, target = head.partition('@')
+        name, target = name.lower(), target.lower()
+        if not re.fullmatch(r'[a-z0-9_]{1,32}', name):
+            return  # "/usr/bin" gibi düz metin komut sayılmaz
+        ours = (not target or target in _our_usernames(context)) and (not _CMD_SIBLINGS or name in _CMD_SIBLINGS)
+    else:
+        if not re.match(r'(?i)@admins?\b', text) or not msg.reply_to_message:
+            return
+        name, ours = 'rapor', True
+    canon = norm_cmd_name(name) if ours else name
+    if not ours and not s.get('cmd_guard'):
+        return
+    if await is_exempt_message(chat_id, msg, channel):
+        return
+    if msg.sender_chat:  # "kanal olarak" yazan: kişiye ceza verilemez
+        if not ours or canon in disabled:
+            await _sender_chat_violation(msg, chat_id, "Komut koruması")
+            raise ApplicationHandlerStop
+        return
+    user = msg.from_user
+    if ours and canon in disabled:
+        await _cmd_delete(msg)
+        action = s.get('disabled_cmd_action') if s.get('disabled_cmd_action') in ACTION_LABELS else 'delete'
+        if action == 'delete':
+            await _cmd_notice(msg, chat_id, f"🚫 {mention(user)}, bu komut bu grupta kapalı.", context)
+        else:
+            await enforce_action(chat_id, msg, channel, 'cmd', f"bu grupta kapalı komut (/{canon})", context.bot_data,
+                                 action=action)
+        raise ApplicationHandlerStop
+    if not s.get('cmd_guard'):
+        return
+    action = s.get('cmd_guard_action') if s.get('cmd_guard_action') in ACTION_LABELS else 'warn'
+    if not ours:
+        await _cmd_delete(msg)
+        n = _cmd_hit('bot', chat_id, user.id, CMD_GUARD_WINDOW)
+        if n >= CMD_GUARD_LIMIT:
+            _cmd_hits.pop(('bot', chat_id, user.id), None)  # bir sonraki ceza için yeniden sayılır
+            if action == 'delete':
+                await _cmd_notice(msg, chat_id, f"🤖 {mention(user)}, başka botların komutlarını tekrar tekrar "
+                                                f"gönderme; bu grupta silinir.", context)
+            await enforce_action(chat_id, msg, channel, 'cmd', "komut spamı (başka botların komutları)",
+                                 context.bot_data, action=action)
+        elif n == 1:
+            await _cmd_notice(msg, chat_id, f"🤖 {mention(user)}, bu grupta başka botların komutları silinir.", context)
+        raise ApplicationHandlerStop
+    if canon == 'rapor':
+        n = _cmd_hit('report', chat_id, user.id, REPORT_ABUSE_WINDOW)
+        if n <= REPORT_ABUSE_LIMIT:
+            return
+        await _cmd_delete(msg)
+        if n == REPORT_ABUSE_LIMIT + 1:
+            await _cmd_notice(msg, chat_id, f"🚩 {mention(user)}, çok fazla rapor gönderdin; "
+                                            f"raporların bir süre yok sayılacak.", context)
+            await enforce_action(chat_id, msg, channel, 'cmd', "rapor sisteminin kötüye kullanımı", context.bot_data,
+                                 action=action)
+        raise ApplicationHandlerStop
+
+def render_cmds_page(cid: str, s: dict, title: str, sub: str):
+    cmds = disableable_cmds()
+    off = set(s.get('disabled_cmds') or [])
+    act = s.get('disabled_cmd_action') if s.get('disabled_cmd_action') in ACTION_LABELS else 'delete'
+    pg, pages, part = _paged(cmds, int(sub) if (sub or '0').isdigit() else 0)
+    page_id = f"cmds.{pg}"
+    text = (f"🚫 <b>Komut kapatma</b> — {title}\n\n"
+            "Kapattığın komutları üyeler bu grupta kullanamaz: mesaj silinir ve seçilen işlem uygulanır "
+            "(\"Sil\" seçiliyse kısa bir \"bu komut bu grupta kapalı\" uyarısı gösterilir). Yetkililer kapalı "
+            "komutları kullanmaya devam eder. Sadece kurucu / yardımcı kurucu değiştirir.\n\n"
+            f"Kapalı komut sayısı: <b>{len(off & set(cmds))}</b>\n"
+            "Hızlı kullanım: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>")
+    rows = []
+    for i in range(0, len(part), 2):
+        rows.append([ibtn(f"{'🚫' if c in off else '✅'} /{c}", f"s|{cid}|dc|{c}|{pg}", RED if c in off else GREEN)
+                     for c in part[i:i + 2]])
+    rows += _nav_rows(cid, 'cmds', pg, pages)
+    rows.append([ibtn("👇 Kapalı komut kullanılınca", f"s|{cid}|p|{page_id}")])
+    rows.append([ibtn(f"• {lbl} •" if a == act else lbl, f"s|{cid}|da|{a}|{pg}", BLUE if a == act else None)
+                 for a, lbl in ACTION_LABELS.items()])
+    if act == 'mute':
+        rows.append(_num_row(cid, 'mute_minutes', s, page_id, "Susturma"))
+    rows.append(_back(cid, 'sec'))
+    return text, rows
+
+async def cmd_komutkapat(update: Update, context):
+    """/komutkapat <komut> · /komutac <komut> · /komutkapat (liste) — sadece kurucu / yardımcı kurucu."""
+    msg = update.effective_message
+    chat_id = _get_effective_chat_id(update, context)
+    channel = get_channel_settings(chat_id) if chat_id else None
+    if not channel:
+        await msg.reply_text("Önce /kanal ile seç!")
+        return
+    if user_level(chat_id, update.effective_user.id) < LVL_YARDIMCI:
+        await deny(update, level=LVL_YARDIMCI)
+        return
+    if not await require(update, chat_id, 'can_manage_settings'):
+        return
+    s = channel['settings']
+    off = [c for c in s.get('disabled_cmds') or [] if c in disableable_cmds()]
+    enable = canon_cmd(msg) == 'komutac'
+    if not context.args:
+        lines = "\n".join(f"{'🚫' if c in off else '✅'} /{c}" for c in disableable_cmds())
+        await msg.reply_text(f"🚫 <b>Komut kapatma</b>\n\n{lines}\n\n"
+                             "Kullanım: <code>/komutkapat komut</code> · <code>/komutac komut</code>\n"
+                             "Kapalı komutları yetkililer kullanmaya devam eder.", parse_mode=ParseMode.HTML)
+        return
+    name = norm_cmd_name(context.args[0])
+    if name not in disableable_cmds():
+        await msg.reply_text(f"⚠️ /{html.escape(name[:30])} kapatılabilen komutlardan değil.\nKapatılabilenler: "
+                             + ", ".join(f"/{c}" for c in disableable_cmds()), parse_mode=ParseMode.HTML)
+        return
+    if enable:
+        if name not in off:
+            await msg.reply_text(f"✅ /{name} zaten açık.")
+            return
+        off.remove(name)
+    else:
+        if name in off:
+            await msg.reply_text(f"🚫 /{name} zaten kapalı.")
+            return
+        off.append(name)
+    s['disabled_cmds'] = off
+    save_channel_settings(chat_id, channel)
+    await msg.reply_text(f"✅ /{name} bu grupta üyelere açıldı." if enable
+                         else f"🚫 /{name} bu grupta üyelere kapatıldı (yetkililer kullanabilir).")
+    await send_log(chat_id, f"🚫 Komut {'açıldı' if enable else 'kapatıldı'}: /{name} | {mention(update.effective_user)}",
+                   ParseMode.HTML)
 
 async def cmd_antiforward(update: Update, context):
     chat_id = _get_effective_chat_id(update, context)
@@ -6075,8 +6326,8 @@ TOGGLE_KEYS = {v[1] for v in PROTECTIONS.values()} | {
     'edit_notify', 'reports_enabled', 'recovery_autorestore', 'welcome_clean', 'welcome_batch', 'welcome_dm',
     'goodbye_enabled', 'fsub_enabled', 'tag_active_only', 'shared_blacklist', 'cas_enabled', 'name_track', 'vote_mute',
     'admin_audit', 'admin_limit_on', 'del_log', 'rules_gate', 'info_guard', 'pii_guard', 'pii_phone', 'pii_email',
-    'pii_iban', 'pii_crypto', 'pii_dm'}
-YARDIMCI_KEYS = {'info_guard'}  # sadece kurucu / yardımcı kurucu (kişiye özel yetki verilse de)
+    'pii_iban', 'pii_crypto', 'pii_dm', 'cmd_guard'}
+YARDIMCI_KEYS = {'info_guard', 'cmd_guard'}  # sadece kurucu / yardımcı kurucu (kişiye özel yetki verilse de)
 NIGHT_RESTRICTIONS = [('block_messages', "Mesaj"), ('block_media', "Foto/Video"), ('block_voice', "Ses/Video not"),
                       ('block_sticker', "Sticker/GIF"), ('block_links', "Link önizleme"), ('block_files', "Dosya/Müzik")]
 PAGE_SIZE = 8
@@ -6266,6 +6517,9 @@ async def render_settings(cid: str, page: str = 'main'):
     elif base == 'sec':
         text, rows = render_sec_page(cid, s, title)
 
+    elif base == 'cmds':
+        text, rows = render_cmds_page(cid, s, title, sub)
+
     elif base == 'warn':
         wa = s.get('warn_action', 'ban')
         text = (f"⚠️ <b>Uyarılar</b> — {title}\n\n\"Uyar\" cezalı korumalar ve /warn uyarı verir; limit dolunca "
@@ -6394,7 +6648,8 @@ async def _settings_change(cid: str, channel: dict, op: str, args: list, query, 
     if op in ('t', 'n') and args and args[0] in KURUCU_KEYS and user_level(cid, uid) < LVL_KURUCU:
         await query.answer("Bu ayarı sadece grubun kurucusu değiştirebilir.", show_alert=True)
         return None
-    if ((op == 't' and args and args[0] in YARDIMCI_KEYS) or op == 'is') and user_level(cid, uid) < LVL_YARDIMCI:
+    if ((op == 't' and args and args[0] in YARDIMCI_KEYS) or op in ('is', 'ca', 'da', 'dc')) \
+            and user_level(cid, uid) < LVL_YARDIMCI:
         await query.answer("Bu ayarı sadece kurucu ve yardımcı kurucu değiştirebilir.", show_alert=True)
         return None
     if op == 't' and args:
@@ -6428,6 +6683,28 @@ async def _settings_change(cid: str, channel: dict, op: str, args: list, query, 
         save_channel_settings(cid, channel)
         await send_log(cid, f"⚙️ Kişisel bilgi koruması cezası → {ACTION_LABELS[args[0]]} | {by}", ParseMode.HTML)
         return 'sec', f"Ceza: {ACTION_LABELS[args[0]]}"
+    if op == 'ca' and args and args[0] in ACTION_LABELS:
+        s['cmd_guard_action'] = args[0]
+        save_channel_settings(cid, channel)
+        await send_log(cid, f"⚙️ Komut spamı koruması cezası → {ACTION_LABELS[args[0]]} | {by}", ParseMode.HTML)
+        return 'sec', f"Ceza: {ACTION_LABELS[args[0]]}"
+    if op in ('da', 'dc') and args:
+        page = f"cmds.{args[1] if len(args) > 1 and args[1].isdigit() else 0}"
+        if op == 'da':
+            if args[0] not in ACTION_LABELS:
+                return page, "Geçersiz ayar"
+            s['disabled_cmd_action'] = args[0]
+            save_channel_settings(cid, channel)
+            await send_log(cid, f"⚙️ Kapalı komut işlemi → {ACTION_LABELS[args[0]]} | {by}", ParseMode.HTML)
+            return page, f"İşlem: {ACTION_LABELS[args[0]]}"
+        if args[0] not in disableable_cmds():
+            return page, "Geçersiz ayar"
+        off = [c for c in s.get('disabled_cmds') or [] if c != args[0]]
+        closed = len(off) == len(s.get('disabled_cmds') or [])
+        s['disabled_cmds'] = off + [args[0]] if closed else off
+        save_channel_settings(cid, channel)
+        await send_log(cid, f"🚫 Komut {'kapatıldı' if closed else 'açıldı'}: /{args[0]} | {by}", ParseMode.HTML)
+        return page, f"🚫 /{args[0]} kapatıldı" if closed else f"✅ /{args[0]} açıldı"
     if op == 'is':
         ok = await info_snapshot(cid)
         if ok:
@@ -8735,6 +9012,8 @@ async def new_member_handler(update: Update, context):
 
     for user in update.message.new_chat_members:
         if not user.is_bot:
+            if _join_src(chat_id, user.id) != 'cm':
+                _join_note(chat_id, user.id, 'msg')
             upsert_user(chat_id, user)
             async with _db_lock:
                 with get_db() as conn:
@@ -8772,6 +9051,8 @@ async def new_member_handler(update: Update, context):
                 and not _consume_join_pass(chat_id, user.id):
             await send_captcha(chat_id, user.id, username, context, user=user)
             continue
+        if _join_src(chat_id, user.id) == 'cm':
+            continue  # kural onayı katılım güncellemesinden (chat_member) zaten soruldu
         if await rules_gate_needed(chat_id, user, channel) and await send_rules_gate(chat_id, user, channel):
             continue  # hoş geldin, kurallar kabul edilince gönderilir
 
@@ -10742,6 +11023,7 @@ async def cmd_grupbilgi(update: Update, context):
     if settings.get('rules_gate'): active.append("Kural Onayı")
     if settings.get('info_guard'): active.append("Grup Bilgisi Koruması")
     if settings.get('pii_guard'): active.append("Kişisel Bilgi Koruması")
+    if settings.get('cmd_guard'): active.append("Komut Koruması")
     active_str = ", ".join(active) if active else "Yok"
     text = (
         f"📊 {title}\n"
@@ -10916,6 +11198,7 @@ async def help_command(update: Update, context):
         "/antiraid_ac · /medyaac — Kilitleri ac\n"
         "/nightmod · /wordban · /wordlist · /whitelist · /linkizin · /yeniuye\n"
         "/setwarnlimit · /setwarnaction · /captchasure\n"
+        "/komutkapat <komut> · /komutac <komut> — Üye komutunu bu grupta kapat / aç (sadece kurucu / yardımcı kurucu)\n"
         "/medyaengel · /paketengel — Medya/paket engeli\n"
         "/admin (/addadmin) · /basadmin @kullanici [etiket] — Rütbe ver\n"
         "/remove @kullanici — Rütbeyi al\n"
@@ -14406,7 +14689,15 @@ def web_schema() -> list:
             _f('pii_phone', 'bool', "📞 Telefon numarası"), _f('pii_email', 'bool', "📧 E-posta adresi"),
             _f('pii_iban', 'bool', "🏦 IBAN"), _f('pii_crypto', 'bool', "🪙 Kripto cüzdan adresi"),
             _f('pii_dm', 'bool', "💬 \"Özelden yaz\" çağrıları"),
-            _f('pii_action', 'select', "Kişisel bilgi cezası", options=acts)]},
+            _f('pii_action', 'select', "Kişisel bilgi cezası", options=acts),
+            _f('cmd_guard', 'bool', "🤖 Komut spamı koruması", 'yardimci',
+               hint="Üyelerin başka botlara yazdığı komutlar silinir; sık tekrarlayana ve çok fazla rapor gönderene "
+                    "ceza uygulanır. Sadece kurucu / yardımcı kurucu değiştirir."),
+            _f('cmd_guard_action', 'select', "Komut spamı cezası", 'yardimci', options=acts),
+            _f('disabled_cmds', 'list', "🚫 Kapalı komutlar", 'yardimci',
+               hint=f"Her satıra bir komut (örn. rapor, zar). Üyeler kullanamaz, yetkililer kullanabilir. "
+                    f"Kapatılabilenler: {', '.join(disableable_cmds())}"),
+            _f('disabled_cmd_action', 'select', "Kapalı komut kullanılınca", 'yardimci', options=acts)]},
         {'id': 'lang', 'title': "🌍 Dil / Language", 'fields': [
             _f('lang', 'select', "Botun bu gruptaki dili", options=[[k, v] for k, v in available_langs().items()],
                hint="Botun mesajları, butonları ve uyarıları bu dilde olur. Senin yazdığın içerik değişmez.")]},
@@ -14473,6 +14764,14 @@ def _validate_field(f: dict, value, s: dict):
     if t == 'list':
         items = [x.strip() for x in str(value or '').split('\n') if x.strip()][:500]
         out = []
+        if f['key'] == 'disabled_cmds':
+            for it in str(value or '').replace(',', '\n').split():
+                name = norm_cmd_name(it)
+                if name not in disableable_cmds():
+                    return None, f"Kapatılamayan komut: {it[:30]}"
+                if name not in out:
+                    out.append(name)
+            return out, None
         for it in items:
             if len(it) > 100:
                 return None, f"Çok uzun: {it[:20]}…"
@@ -17200,6 +17499,9 @@ async def chat_member_cache_handler(update: Update, context):
             and getattr(cm.chat, 'type', None) != 'channel' and get_channel_settings(chat_id)):
         # katılma mesajı gizli olsa da (ya da davet linki/onaylı istekle girse de) kişi tanınsın: /admin @kisi çalışır
         queue_user(chat_id, new.user)
+        if cm.old_chat_member.status in ('left', 'kicked') and (
+                new.status == 'member' or (new.status == 'restricted' and getattr(new, 'is_member', False))):
+            await rules_gate_on_member_update(chat_id, new.user)
     if (new.status == 'administrator' and cm.old_chat_member.status != 'administrator' and not new.user.is_bot
             and get_channel_settings(chat_id) and not user_level(chat_id, new.user.id)):
         role = await auto_assign_role(chat_id, new.user.id, new)
@@ -17442,6 +17744,9 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(MessageHandler(filters.ChatType.GROUPS & (
         filters.StatusUpdate.NEW_CHAT_TITLE | filters.StatusUpdate.NEW_CHAT_PHOTO | filters.StatusUpdate.DELETE_CHAT_PHOTO
         | filters.StatusUpdate.PINNED_MESSAGE), info_guard_handler), group=-17)
+    # Komut koruması + gruba özel kapalı komutlar: komut handler'larından ve @admin'den önce
+    app.add_handler(MessageHandler(filters.UpdateType.MESSAGE & filters.ChatType.GROUPS
+                                   & filters.Regex(r'(?i)^(/|@admins?\b)'), command_guard_handler), group=-19)
     app.add_handler(MessageHandler(filters.UpdateType.MESSAGE & filters.ChatType.GROUPS, message_cache_handler), group=97)
     app.add_handler(MessageHandler(filters.ALL, anti_forward_handler), group=-10)
     app.add_handler(MessageHandler(filters.ALL, anti_media_flood_handler), group=-9)
@@ -17620,6 +17925,7 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('notlar', cmd_notes))
     app.add_handler(CommandHandler('notsil', cmd_delete_note))
     app.add_handler(CommandHandler(['report', 'rapor'], cmd_report))
+    app.add_handler(CommandHandler(['komutkapat', 'komutac'], cmd_komutkapat))
     app.add_handler(CommandHandler('filter', cmd_filter))
     app.add_handler(CommandHandler('kurulum', cmd_kurulum))
     app.add_handler(CallbackQueryHandler(setup_callback, pattern=r'^ks\|'))
@@ -17661,6 +17967,7 @@ def register_handlers(app, main_bot: bool = True):
         app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, clone_input_handler),
                         group=-60)
     add_command_aliases(app)  # /tag, /giveaway, /broadcast … (Türkçe adlar da çalışır)
+    note_bot_commands(app)  # komut koruması: hangi komutlar bizim
     # Eski/bozuk buton verisi (ör. önceki sürümden kalan butonlar) çökme yerine kibar uyarı versin
     for handlers in app.handlers.values():
         for h in handlers:
@@ -18181,6 +18488,74 @@ a77f997a9	flood (⟨0⟩ mesaj/⟨1⟩ sn)
 794910b1f	Yasaklı kelime
 8fb66aa89	yasaklı kelime
 4e5efb06d	tekrar spam
+881f4a7b9	📜 Hoş geldin ⟨0⟩! Gruba yazabilmek için kuralları okuyup kabul etmelisin:
+932c8c539	📜 Hoş geldin ⟨0⟩! Grubun kurallarına uymayı kabul ediyor musun?
+d11dd3db7	✅ Kuralları okudum, kabul ediyorum
+d6b7e92ea	📜 Kural onayı bekleniyor: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Bu buton geçersiz.
+9c148e8f9	Bu buton sana ait değil; kuralları sadece yeni katılan kişi onaylayabilir.
+7f0e2a142	Grup bulunamadı.
+9d4cfb23f	Kısıtlaman kaldırılamadı; lütfen yöneticilere haber ver.
+925b57ed1	✅ Teşekkürler! Artık yazabilirsin.
+65d432938	✅ Kurallar kabul edildi: ⟨0⟩ | ⟨1⟩
+440a0b88c	anonim yönetici
+52b5bc87d	grup adını
+39913ac6c	grup fotoğrafını
+66a230ead	sabit mesajı
+62ff3a80d	🏷 Grup bilgisi koruması: ⟨0⟩ ⟨1⟩ değiştirdi → eski hâline döndürüldü | ⟨2⟩
+a91a23aac	🏷 Grup bilgisi koruması: ⟨0⟩ ⟨1⟩ değiştirdi → geri alınamadı (botun grup bilgisi ve sabitleme yetkisi olmalı) | ⟨2⟩
+517c3659d	📝 Grup açıklaması değiştirilmiş; eski hâline döndürüldü. Değişikliği kurucu yaptıysa panelde 🛂 Üye ve grup güvenliği → 📸 Şu anki hâli kaydet'e bas.
+e6529ed9a	telefon numarası
+b9f1af256	e-posta adresi
+8f8cbef64	kripto cüzdan adresi
+bf4118840	özelden yazma çağrısı
+f0840bba1	📞 Telefon
+c0c435e96	📧 E-posta
+2356a67fd	🏦 IBAN
+ace48f755	🪙 Kripto cüzdan
+5e78fdc15	💬 "Özelden yaz"
+1fbf29f4d	123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz
+e0669071a	Kişisel bilgi
+74a706b28	🛂 ⟨0⟩, mesajında ⟨1⟩ olduğu için silindi. Güvenliğin için kişisel bilgilerini grupta paylaşma.
+0b6ac9fc5	kişisel bilgi / dolandırıcılık kalıbı (⟨0⟩)
+1c979a8ff	henüz yok
+e386f2a7c	🛂 <b>Üye ve grup güvenliği</b> — ⟨0⟩
+d3c7dee60	📜 <b>Kural onayı:</b> yeni üye, grubun kurallarını butonla kabul edene kadar yazamaz (captcha açıksa captcha'dan sonra sorulur). Bir kez kabul eden, gruba tekrar katılınca sorulmaz.
+67f8d8ae3	🏷 <b>Grup bilgisi koruması:</b> kurucu dışında biri grup adını, fotoğrafını veya sabit mesajı değiştirirse eski hâline döndürülür; açıklama 10 dakikada bir kontrol edilir. Kurucunun değişiklikleri otomatik kaydedilir; açıklamayı kurucu değiştirdiyse 📸 ile kaydet. Sadece kurucu / yardımcı kurucu değiştirir.
+092c6482f	Son kayıt: ⟨0⟩
+e26ff3006	🔐 <b>Kişisel bilgi ve dolandırıcılık kalıpları:</b> üyelerin telefon numarası, e-posta, IBAN, kripto cüzdan adresi veya "özelden yaz" çağrısı içeren mesajları silinir ve seçilen ceza uygulanır.
+5dce9c972	🤖 <b>Komut spamı koruması:</b> üyelerin başka botlara yazdığı komutlar silinir; ⟨0⟩ sn içinde ⟨1⟩ kez tekrarlayana seçilen ceza uygulanır. ⟨2⟩ dakikada ⟨3⟩ rapordan fazlası yok sayılır ve aynı ceza uygulanır. Sadece kurucu / yardımcı kurucu değiştirir.
+4ccb73609	📜 Kural onayı
+614de7399	🏷 Grup bilgisi koruması
+c6b97674b	📸 Şu anki hâli kaydet
+3052b371c	🔐 Kişisel bilgi koruması
+39cb36b03	👇 Kişisel bilgi cezası
+8299dd6da	🤖 Komut spamı koruması
+e6c02779f	👇 Komut spamı cezası
+8fc0cad4c	🚫 Komut kapatma (⟨0⟩) ›
+afbd89c3f	Komut koruması
+e17cd1749	🚫 ⟨0⟩, bu komut bu grupta kapalı.
+16c681ed1	bu grupta kapalı komut (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, başka botların komutlarını tekrar tekrar gönderme; bu grupta silinir.
+3519e7bcc	komut spamı (başka botların komutları)
+a64baef4c	🤖 ⟨0⟩, bu grupta başka botların komutları silinir.
+7dd5bf468	🚩 ⟨0⟩, çok fazla rapor gönderdin; raporların bir süre yok sayılacak.
+81879c932	rapor sisteminin kötüye kullanımı
+f6d2e9197	🚫 <b>Komut kapatma</b> — ⟨0⟩
+054caaae3	Kapattığın komutları üyeler bu grupta kullanamaz: mesaj silinir ve seçilen işlem uygulanır ("Sil" seçiliyse kısa bir "bu komut bu grupta kapalı" uyarısı gösterilir). Yetkililer kapalı komutları kullanmaya devam eder. Sadece kurucu / yardımcı kurucu değiştirir.
+0bb5c2cf8	Kapalı komut sayısı: <b>⟨0⟩</b>
+d5b266a81	Hızlı kullanım: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Kapalı komut kullanılınca
+c22b8f825	🚫 <b>Komut kapatma</b>
+76a397d40	Kullanım: <code>/komutkapat komut</code> · <code>/komutac komut</code>
+bd149a1f2	Kapalı komutları yetkililer kullanmaya devam eder.
+8c7a4527b	⚠️ /⟨0⟩ kapatılabilen komutlardan değil.
+4bd6b629c	Kapatılabilenler: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ zaten açık.
+c04beaefc	🚫 /⟨0⟩ zaten kapalı.
+c1b5afc45	✅ /⟨0⟩ bu grupta üyelere açıldı.
+36b26ef8c	🚫 /⟨0⟩ bu grupta üyelere kapatıldı (yetkililer kullanabilir).
+4509732b3	🚫 Komut ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Anti-forward şu an: ⟨0⟩
 6d6d358e6	Kullanım: /antiforward on|off
 117ba2454	AÇIK
@@ -18503,11 +18878,21 @@ f5c96387f	🛟 Kurtarma
 1bd24917c	✖️ Kapat
 e38a49a6f	Kanal Koruma Ayarlari
 f81ca3a77	Bu ayarı sadece grubun kurucusu değiştirebilir.
+499b40121	Bu ayarı sadece kurucu ve yardımcı kurucu değiştirebilir.
 4081e665c	Geçersiz ayar
 ce432606a	✅ Açıldı
 ca037fcc4	❌ Kapatıldı
 a006b158d	⚙️ ⟨0⟩ cezası → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Ceza: ⟨0⟩
+829773348	⚙️ Kişisel bilgi koruması cezası → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Komut spamı koruması cezası → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Kapalı komut işlemi → ⟨0⟩ | ⟨1⟩
+d66461de6	İşlem: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ kapatıldı
+1366de2b8	✅ /⟨0⟩ açıldı
+a69466222	📸 Grup bilgisi (ad, açıklama, fotoğraf, sabit mesaj) kaydedildi | ⟨0⟩
+87f3326f9	📸 Kaydedildi
+49c866e1e	Kaydedilemedi (bot admin mi?)
 286a11648	Limit cezası: ⟨0⟩
 c32110889	Liste değişmiş, yenilendi
 cf6b53ca2	🗑 ⟨0⟩ silindi: ⟨1⟩ | ⟨2⟩
@@ -18525,7 +18910,6 @@ e413c4b9e	Kurallar silindi
 0f514bbde	✅ Raid kilidi panelden açıldı | ⟨0⟩
 8e6a20f22	🔓 Kilit açıldı
 f5014f259	Kilit açılamadı (bot yetkisi?)
-7f0e2a142	Grup bulunamadı.
 f41c17d41	Bu paneli kullanmak için grupta yönetici olmalısın.
 8213d6575	<i>Vazgeçmek için: iptal</i>
 1465f36fd	Cevabını açılan mesaja yanıt olarak yaz.
@@ -18603,10 +18987,8 @@ a0ec7c7bd	➖ Bu grubu ağdan çıkar
 db918b20f	Bu grup bir ağda değil. Yönettiğin grupları kendi ağına eklersen banlar tüm gruplara yayılır ve ayarlarını tek tıkla kopyalarsın. (Kurucu / yardımcı kurucu gerekir.)
 e44c5b572	➕ Bu grubu ağıma ekle
 fe6b211f8	⟨0⟩ (⟨1⟩ yönetici)
-1c979a8ff	henüz yok
 9f41d74fa	🛟 <b>Admin kurtarma</b> — ⟨0⟩
 62477adfc	Admin listesi 6 saatte bir kaydedilir. Biri kısa sürede 3+ adminin yetkisini alırsa yöneticilere ve güvenilir kişilere kurtarma butonlu uyarı gider. Güvenilir kişiler bota özelden <code>/kurtar</code> yazarak adminleri geri yükleyebilir.
-092c6482f	Son kayıt: ⟨0⟩
 ba8991412	Güvenilir kişiler (⟨0⟩/3) — kaldırmak için dokun:
 5729ee3a9	➕ Güvenilir kişi ekle
 72e9b014a	Otomatik geri yükle
@@ -18633,8 +19015,6 @@ f9a34a2ad	Ban eşitleme ⟨0⟩
 eacfa093c	⟨0⟩ gruba kopyalandı
 c39c747b1	Kurtarma ayarlarını sadece kurucu değiştirebilir.
 95e917987	Kaldırıldı
-87f3326f9	📸 Kaydedildi
-49c866e1e	Kaydedilemedi (bot admin mi?)
 b13ed05bb	♻️ ⟨0⟩ admin geri yüklendi⟨1⟩
 8670a3a46	, ⟨0⟩ başarısız
 c3b595125	Güvenilir kişiyi sadece kurucu ekleyebilir.
@@ -19058,6 +19438,10 @@ e6695a6db	⟨0⟩ spam muaf listesine eklendi.
 9e5f1a353	Ozel grup
 e9312bd1b	Captcha
 688f939e9	Kelime Filtresi
+9d784908d	Kural Onayı
+1340d231a	Grup Bilgisi Koruması
+1bd1325c6	Kişisel Bilgi Koruması
+1c138f426	Komut Koruması
 cbabb7d8b	Yok
 28b8f5479	👥 Uye: ⟨0⟩
 ceb987630	👮 Admin: ⟨0⟩
@@ -19169,6 +19553,7 @@ d21608b5a	/antispam · /antilink · /antiforward · /antimedia · /antiraid · /
 886d570db	/antiraid_ac · /medyaac — Kilitleri ac
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /linkizin · /yeniuye
 443a00692	/setwarnlimit · /setwarnaction · /captchasure
+5888aec1a	/komutkapat <komut> · /komutac <komut> — Üye komutunu bu grupta kapat / aç (sadece kurucu / yardımcı kurucu)
 3d2493394	/medyaengel · /paketengel — Medya/paket engeli
 20abda0cf	/admin (/addadmin) · /basadmin @kullanici [etiket] — Rütbe ver
 3c7389596	/remove @kullanici — Rütbeyi al
@@ -19766,6 +20151,21 @@ f7e588100	🌐 CAS spam listesi
 4a02f552b	✏️ İsim değişikliği takibi
 32a52c44c	🗳 Oylamalı susturma
 9b96d57aa	Oylama susturma süresi
+d321f95bf	🛂 Üye ve grup güvenliği
+496842aa2	Yeni üye, grubun kurallarını butonla kabul edene kadar yazamaz. Bir kez kabul eden tekrar sorulmaz.
+11daa849d	Kurucu dışında birinin değiştirdiği grup adı, fotoğrafı, sabit mesajı ve açıklaması eski hâline döndürülür. Sadece kurucu / yardımcı kurucu değiştirir.
+bca49e9f7	🔐 Kişisel bilgi ve dolandırıcılık kalıpları
+f82c0d7d4	Üyelerin telefon, e-posta, IBAN, kripto cüzdan adresi veya "özelden yaz" çağrısı içeren mesajları silinir.
+b49a7535a	📞 Telefon numarası
+ae97acaeb	📧 E-posta adresi
+bf9420e5b	🪙 Kripto cüzdan adresi
+83cc05280	💬 "Özelden yaz" çağrıları
+60ee0d4b1	Kişisel bilgi cezası
+1089f4de7	Üyelerin başka botlara yazdığı komutlar silinir; sık tekrarlayana ve çok fazla rapor gönderene ceza uygulanır. Sadece kurucu / yardımcı kurucu değiştirir.
+7b002b274	Komut spamı cezası
+2d1965747	🚫 Kapalı komutlar
+8add0446e	Her satıra bir komut (örn. rapor, zar). Üyeler kullanamaz, yetkililer kullanabilir. Kapatılabilenler: ⟨0⟩
+2646100b5	Kapalı komut kullanılınca
 d51893a35	🌍 Dil / Language
 8d6c8a4a5	Botun bu gruptaki dili
 45ac69c17	Botun mesajları, butonları ve uyarıları bu dilde olur. Senin yazdığın içerik değişmez.
@@ -19785,6 +20185,7 @@ c4395cbb9	Güvenilir kişiler (en fazla 3)
 fe85b70c6	#yeşil
 485f81ade	#kırmızı
 9cfcbc726	Geçersiz seçim
+21140c9c2	Kapatılamayan komut: ⟨0⟩
 4094a1250	Çok uzun: ⟨0⟩…
 3994c99a9	Geçersiz ID: ⟨0⟩ (sadece sayı)
 5055a2323	En fazla ⟨0⟩ kişi
@@ -20417,6 +20818,72 @@ a77f997a9	إغراق (⟨0⟩ رسالة/⟨1⟩ ث)
 794910b1f	كلمة محظورة
 8fb66aa89	كلمة محظورة
 4e5efb06d	سبام متكرر
+881f4a7b9	📜 أهلًا بك ⟨0⟩! لتتمكن من الكتابة في المجموعة عليك قراءة القواعد والموافقة عليها:
+932c8c539	📜 أهلًا بك ⟨0⟩! هل توافق على الالتزام بقواعد المجموعة؟
+d11dd3db7	✅ قرأت القواعد وأوافق عليها
+d6b7e92ea	📜 بانتظار الموافقة على القواعد: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	هذا الزر غير صالح.
+9c148e8f9	هذا الزر ليس لك؛ لا يمكن الموافقة على القواعد إلا للعضو المنضم حديثًا.
+7f0e2a142	المجموعة غير موجودة.
+9d4cfb23f	تعذّر رفع القيود عنك؛ يرجى إبلاغ المشرفين.
+925b57ed1	✅ شكرًا! يمكنك الكتابة الآن.
+65d432938	✅ تمت الموافقة على القواعد: ⟨0⟩ | ⟨1⟩
+440a0b88c	مشرف مجهول
+52b5bc87d	اسم المجموعة
+39913ac6c	صورة المجموعة
+66a230ead	الرسالة المثبتة
+62ff3a80d	🏷 حماية معلومات المجموعة: ⟨0⟩ غيّر ⟨1⟩ → أُعيد إلى حالته السابقة | ⟨2⟩
+a91a23aac	🏷 حماية معلومات المجموعة: ⟨0⟩ غيّر ⟨1⟩ → تعذّر التراجع (يحتاج البوت صلاحية تغيير معلومات المجموعة والتثبيت) | ⟨2⟩
+517c3659d	📝 تم تغيير وصف المجموعة وأُعيد إلى حالته السابقة. إذا كان المؤسس هو من غيّره، فاضغط في اللوحة على 🛂 أمان الأعضاء والمجموعة ← 📸 حفظ الحالة الحالية.
+e6529ed9a	رقم هاتف
+b9f1af256	عنوان بريد إلكتروني
+8f8cbef64	عنوان محفظة عملات رقمية
+bf4118840	دعوة "راسلني على الخاص"
+f0840bba1	📞 الهاتف
+c0c435e96	📧 البريد الإلكتروني
+ace48f755	🪙 محفظة العملات الرقمية
+5e78fdc15	💬 "راسلني على الخاص"
+e0669071a	معلومات شخصية
+74a706b28	🛂 ⟨0⟩، حُذفت رسالتك لأنها تحتوي على ⟨1⟩. حفاظًا على أمانك لا تشارك معلوماتك الشخصية في المجموعة.
+0b6ac9fc5	معلومات شخصية / نمط احتيال (⟨0⟩)
+1c979a8ff	لا شيء بعد
+e386f2a7c	🛂 <b>أمان الأعضاء والمجموعة</b> — ⟨0⟩
+d3c7dee60	📜 <b>الموافقة على القواعد:</b> لا يستطيع العضو الجديد الكتابة حتى يوافق على قواعد المجموعة بزر (إن كانت الكابتشا مفعّلة فبعدها). من وافق مرة لا يُسأل مجددًا عند عودته.
+67f8d8ae3	🏷 <b>حماية معلومات المجموعة:</b> إذا غيّر أحد غير المؤسس اسم المجموعة أو صورتها أو الرسالة المثبتة، تُعاد إلى حالتها السابقة؛ ويُفحص الوصف كل 10 دقائق. تُحفظ تغييرات المؤسس تلقائيًا؛ وإن غيّر المؤسس الوصف فاحفظه بـ 📸. لا يغيّر هذا الإعداد إلا المؤسس / المؤسس المشارك.
+092c6482f	آخر لقطة: ⟨0⟩
+e26ff3006	🔐 <b>المعلومات الشخصية وأنماط الاحتيال:</b> تُحذف رسائل الأعضاء التي تحتوي على رقم هاتف أو بريد إلكتروني أو IBAN أو عنوان محفظة رقمية أو دعوة "راسلني على الخاص" وتُطبَّق العقوبة المختارة.
+5dce9c972	🤖 <b>الحماية من سبام الأوامر:</b> تُحذف الأوامر التي يرسلها الأعضاء إلى بوتات أخرى؛ ومن يكرر ذلك ⟨1⟩ مرات خلال ⟨0⟩ ثانية تُطبَّق عليه العقوبة المختارة. ما يزيد على ⟨3⟩ بلاغات خلال ⟨2⟩ دقيقة يُتجاهل وتُطبَّق العقوبة نفسها. لا يغيّر هذا الإعداد إلا المؤسس / المؤسس المشارك.
+4ccb73609	📜 الموافقة على القواعد
+614de7399	🏷 حماية معلومات المجموعة
+c6b97674b	📸 حفظ الحالة الحالية
+3052b371c	🔐 حماية المعلومات الشخصية
+39cb36b03	👇 عقوبة المعلومات الشخصية
+8299dd6da	🤖 الحماية من سبام الأوامر
+e6c02779f	👇 عقوبة سبام الأوامر
+8fc0cad4c	🚫 تعطيل الأوامر (⟨0⟩) ›
+afbd89c3f	حماية الأوامر
+e17cd1749	🚫 ⟨0⟩، هذا الأمر معطّل في هذه المجموعة.
+16c681ed1	أمر معطّل في هذه المجموعة (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩، لا ترسل أوامر البوتات الأخرى مرارًا؛ فهي تُحذف في هذه المجموعة.
+3519e7bcc	سبام أوامر (أوامر بوتات أخرى)
+a64baef4c	🤖 ⟨0⟩، تُحذف أوامر البوتات الأخرى في هذه المجموعة.
+7dd5bf468	🚩 ⟨0⟩، أرسلت بلاغات كثيرة جدًا؛ سيتم تجاهل بلاغاتك لبعض الوقت.
+81879c932	إساءة استخدام نظام البلاغات
+f6d2e9197	🚫 <b>تعطيل الأوامر</b> — ⟨0⟩
+054caaae3	لا يستطيع الأعضاء استخدام الأوامر التي تعطّلها في هذه المجموعة: تُحذف الرسالة ويُطبَّق الإجراء المختار (إذا اخترت "حذف" يظهر تنبيه قصير "هذا الأمر معطّل في هذه المجموعة"). يستمر المشرفون في استخدام الأوامر المعطّلة. لا يغيّر هذا الإعداد إلا المؤسس / المؤسس المشارك.
+0bb5c2cf8	عدد الأوامر المعطّلة: <b>⟨0⟩</b>
+d5b266a81	استخدام سريع: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 عند استخدام أمر معطّل
+c22b8f825	🚫 <b>تعطيل الأوامر</b>
+76a397d40	الاستخدام: <code>/komutkapat الأمر</code> · <code>/komutac الأمر</code>
+bd149a1f2	يستمر المشرفون في استخدام الأوامر المعطّلة.
+8c7a4527b	⚠️ /⟨0⟩ ليس من الأوامر القابلة للتعطيل.
+4bd6b629c	القابلة للتعطيل: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ مفعّل بالفعل.
+c04beaefc	🚫 /⟨0⟩ معطّل بالفعل.
+c1b5afc45	✅ تم تفعيل /⟨0⟩ للأعضاء في هذه المجموعة.
+36b26ef8c	🚫 تم تعطيل /⟨0⟩ للأعضاء في هذه المجموعة (يمكن للمشرفين استخدامه).
+4509732b3	🚫 الأمر ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	منع التحويل الآن: ⟨0⟩
 6d6d358e6	الاستخدام: /antiforward on|off
 117ba2454	مفعّل
@@ -20732,11 +21199,21 @@ f5c96387f	🛟 الاستعادة
 1bd24917c	✖️ إغلاق
 e38a49a6f	إعدادات حماية القناة
 f81ca3a77	يمكن لمؤسس المجموعة فقط تغيير هذا الإعداد.
+499b40121	لا يمكن تغيير هذا الإعداد إلا للمؤسس والمؤسس المشارك.
 4081e665c	إعداد غير صالح
 ce432606a	✅ فُعّل
 ca037fcc4	❌ عُطّل
 a006b158d	⚙️ عقوبة ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	العقوبة: ⟨0⟩
+829773348	⚙️ عقوبة حماية المعلومات الشخصية ← ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ عقوبة الحماية من سبام الأوامر ← ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ إجراء الأمر المعطّل ← ⟨0⟩ | ⟨1⟩
+d66461de6	الإجراء: ⟨0⟩
+5e8ff7f01	🚫 تم تعطيل /⟨0⟩
+1366de2b8	✅ تم تفعيل /⟨0⟩
+a69466222	📸 حُفظت معلومات المجموعة (الاسم، الوصف، الصورة، الرسالة المثبتة) | ⟨0⟩
+87f3326f9	📸 تم الحفظ
+49c866e1e	تعذر الحفظ (هل البوت مشرف؟)
 286a11648	عقوبة الحد: ⟨0⟩
 c32110889	تغيّرت القائمة، تم التحديث
 cf6b53ca2	🗑 حُذف ⟨0⟩: ⟨1⟩ | ⟨2⟩
@@ -20754,7 +21231,6 @@ e413c4b9e	حُذفت القوانين
 0f514bbde	✅ رُفع قفل الهجوم من اللوحة | ⟨0⟩
 8e6a20f22	🔓 فُتحت
 f5014f259	تعذر الفتح (صلاحيات البوت؟)
-7f0e2a142	المجموعة غير موجودة.
 f41c17d41	يجب أن تكون مشرفًا في المجموعة لاستخدام هذه اللوحة.
 8213d6575	<i>للإلغاء: cancel</i>
 1465f36fd	اكتب إجابتك ردًا على الرسالة التي ظهرت.
@@ -20832,10 +21308,8 @@ a0ec7c7bd	➖ إزالة هذه المجموعة من الشبكة
 db918b20f	هذه المجموعة ليست ضمن شبكة. إذا أضفت مجموعاتك إلى شبكتك، ينتشر الحظر إليها كلها ويمكنك نسخ الإعدادات بضغطة. (يلزم مؤسس / مؤسس مشارك.)
 e44c5b572	➕ إضافة هذه المجموعة إلى شبكتي
 fe6b211f8	⟨0⟩ (⟨1⟩ مشرفين)
-1c979a8ff	لا شيء بعد
 9f41d74fa	🛟 <b>استعادة المشرفين</b> — ⟨0⟩
 62477adfc	تُحفظ قائمة المشرفين كل 6 ساعات. إذا أزال أحدهم صلاحيات 3 مشرفين أو أكثر في وقت قصير، يتلقى المشرفون والأشخاص الموثوقون تنبيهًا بزر استعادة. يمكن للموثوقين استعادة المشرفين بإرسال <code>/recover</code> للبوت في الخاص.
-092c6482f	آخر لقطة: ⟨0⟩
 ba8991412	الأشخاص الموثوقون (⟨0⟩/3) — اضغط للإزالة:
 5729ee3a9	➕ إضافة شخص موثوق
 72e9b014a	الاستعادة تلقائيًا
@@ -20862,8 +21336,6 @@ f9a34a2ad	مزامنة الحظر ⟨0⟩
 eacfa093c	نُسخت إلى ⟨0⟩ مجموعات
 c39c747b1	يمكن للمؤسس فقط تغيير إعدادات الاستعادة.
 95e917987	أُزيل
-87f3326f9	📸 تم الحفظ
-49c866e1e	تعذر الحفظ (هل البوت مشرف؟)
 b13ed05bb	♻️ استُعيد ⟨0⟩ مشرفين⟨1⟩
 8670a3a46	، فشل ⟨0⟩
 c3b595125	يمكن للمؤسس فقط إضافة أشخاص موثوقين.
@@ -20964,6 +21436,7 @@ a96302489	لا يُرسل الآن.
 b0b0b34ae	📢 <b>أحدث الإعلانات</b>
 b6eaec96e	↪️ رسالة معاد توجيهها
 a2148c2a7	🗳 استطلاع
+a68f06db1	(وسائط)
 771c7f3fb	👆 ⟨0⟩ نقرة⟨1⟩
 8139aea8f	(⟨0⟩ شخص)
 71fc8c6a3	❌ إلغاء #⟨0⟩
@@ -21275,6 +21748,10 @@ e6695a6db	أُضيف ⟨0⟩ إلى قائمة الإعفاء من السبام.
 9e5f1a353	مجموعة خاصة
 e9312bd1b	الكابتشا
 688f939e9	فلتر الكلمات
+9d784908d	الموافقة على القواعد
+1340d231a	حماية معلومات المجموعة
+1bd1325c6	حماية المعلومات الشخصية
+1c138f426	حماية الأوامر
 cbabb7d8b	لا شيء
 28b8f5479	👥 الأعضاء: ⟨0⟩
 ceb987630	👮 المشرفون: ⟨0⟩
@@ -21385,6 +21862,7 @@ bfe1425f8	/forcesub @channel — يجب الانضمام للقناة للكتا
 886d570db	/unlockdown · /unlockmedia — رفع الأقفال
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <الأمر> · /komutac <الأمر> — تعطيل / تفعيل أمر للأعضاء في هذه المجموعة (للمؤسس / المؤسس المشارك فقط)
 3d2493394	/blockmedia · /blockpack — حظر الوسائط/الحزم
 20abda0cf	/admin (/addadmin) · /senioradmin @user [وسم] — منح رتبة
 3c7389596	/remove @user — سحب رتبة
@@ -21958,6 +22436,21 @@ f7e588100	🌐 قائمة CAS للسبام
 4a02f552b	✏️ تتبّع تغيير الاسم
 32a52c44c	🗳 التصويت للكتم
 9b96d57aa	مدة الكتم بالتصويت
+d321f95bf	🛂 أمان الأعضاء والمجموعة
+496842aa2	لا يستطيع العضو الجديد الكتابة حتى يوافق على قواعد المجموعة بزر. من وافق مرة لا يُسأل مجددًا.
+11daa849d	إذا غيّر أحد غير المؤسس اسم المجموعة أو صورتها أو الرسالة المثبتة أو الوصف، تُعاد إلى حالتها السابقة. لا يغيّر هذا الإعداد إلا المؤسس / المؤسس المشارك.
+bca49e9f7	🔐 المعلومات الشخصية وأنماط الاحتيال
+f82c0d7d4	تُحذف رسائل الأعضاء التي تحتوي على هاتف أو بريد إلكتروني أو IBAN أو عنوان محفظة رقمية أو دعوة "راسلني على الخاص".
+b49a7535a	📞 رقم الهاتف
+ae97acaeb	📧 عنوان البريد الإلكتروني
+bf9420e5b	🪙 عنوان محفظة العملات الرقمية
+83cc05280	💬 دعوات "راسلني على الخاص"
+60ee0d4b1	عقوبة المعلومات الشخصية
+1089f4de7	تُحذف الأوامر التي يرسلها الأعضاء إلى بوتات أخرى؛ ويُعاقَب من يكرر ذلك كثيرًا ومن يرسل بلاغات كثيرة جدًا. لا يغيّر هذا الإعداد إلا المؤسس / المؤسس المشارك.
+7b002b274	عقوبة سبام الأوامر
+2d1965747	🚫 الأوامر المعطّلة
+8add0446e	أمر واحد في كل سطر (مثل rapor، zar). لا يستطيع الأعضاء استخدامها، ويستطيع المشرفون. القابلة للتعطيل: ⟨0⟩
+2646100b5	عند استخدام أمر معطّل
 d51893a35	🌍 اللغة
 8d6c8a4a5	لغة البوت في هذه المجموعة
 45ac69c17	ستكون رسائل البوت وأزراره وتنبيهاته بهذه اللغة. المحتوى الذي كتبته لا يتغير.
@@ -21976,6 +22469,7 @@ c4395cbb9	الأشخاص الموثوقون (3 كحد أقصى)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	اختيار غير صالح
+21140c9c2	أمر لا يمكن تعطيله: ⟨0⟩
 4094a1250	طويل جدًا: ⟨0⟩…
 3994c99a9	معرّف غير صالح: ⟨0⟩ (أرقام فقط)
 5055a2323	⟨0⟩ أشخاص كحد أقصى
@@ -22308,6 +22802,9 @@ f666e1d93	🗄 نسخة احتياطية لقاعدة البيانات · ⟨0�
 9cfd9973e	للاستعادة ضع ملف .db من الأرشيف في مجلد البوت باسم bot_data.db.
 391c8e6d0	🗄 أُخذت النسخة لكنها لا تتسع في تيليجرام (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 جارٍ أخذ نسخة احتياطية...
+35db56b39	⚠️ <b>تلفت قاعدة البيانات</b> (database disk image is malformed).
+6889d6242	سيُعاد تشغيل البوت خلال 5 ثوانٍ؛ عند التشغيل سيُنحّى الملف التالف وتُستعاد البيانات.
+6ffdbe5e2	بدأ البوت للتو، لذلك لم تتم إعادة التشغيل التلقائية. أعد تشغيل البوت يدويًا.
 103ec5f85	المحادثة: ⟨0⟩
 0f97d9633	⚠️ خطأ في البوت
 15781d4a0	⚠️ هذا الزر قديم أو غير صالح. افتح القائمة مجددًا.
@@ -22323,6 +22820,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 بدأ ULUS
 82459fdce	قاعدة البيانات: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	المجموعات/القنوات المسجلة: <b>⟨0⟩</b>
+05229d023	🛠 <b>كانت قاعدة البيانات تالفة وتم إصلاحها.</b> الملف التالف: <code>⟨0⟩</code>
+8a235e6be	الجداول المستعادة: ⟨0⟩ · المأخوذة من النسخة الاحتياطية: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ تعذّرت استعادته: ⟨0⟩
 6c20c0dd0	⚠️ فُتحت قاعدة البيانات فارغة واستُعيدت من آخر نسخة: <code>⟨0⟩</code>
 0e4276ce2	⚠️ لا توجد محادثات مسجلة. إن انخفض هذا الرقم عند إعادة تشغيل البوت، فربما حُذف ملف قاعدة البيانات أو يعمل البوت من مجلد آخر.
 3831f1221	تعذر الوصول إلى الخادم
@@ -22569,6 +23069,71 @@ a77f997a9	flood (⟨0⟩ mesaj/⟨1⟩ san)
 794910b1f	Qadağan söz
 8fb66aa89	qadağan söz
 4e5efb06d	təkrarlanan spam
+881f4a7b9	📜 Xoş gəldin ⟨0⟩! Qrupa yaza bilmək üçün qaydaları oxuyub qəbul etməlisən:
+932c8c539	📜 Xoş gəldin ⟨0⟩! Qrupun qaydalarına əməl etməyi qəbul edirsən?
+d11dd3db7	✅ Qaydaları oxudum, qəbul edirəm
+d6b7e92ea	📜 Qaydaların qəbulu gözlənilir: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Bu düymə etibarsızdır.
+9c148e8f9	Bu düymə sənə aid deyil; qaydaları yalnız yeni qoşulan şəxs təsdiqləyə bilər.
+7f0e2a142	Qrup tapılmadı.
+9d4cfb23f	Məhdudiyyətin götürülə bilmədi; zəhmət olmasa adminlərə xəbər ver.
+925b57ed1	✅ Təşəkkürlər! Artıq yaza bilərsən.
+65d432938	✅ Qaydalar qəbul edildi: ⟨0⟩ | ⟨1⟩
+440a0b88c	anonim admin
+52b5bc87d	qrupun adını
+39913ac6c	qrupun şəklini
+66a230ead	sabitlənmiş mesajı
+62ff3a80d	🏷 Qrup məlumatı qoruması: ⟨0⟩ ⟨1⟩ dəyişdi → əvvəlki halına qaytarıldı | ⟨2⟩
+a91a23aac	🏷 Qrup məlumatı qoruması: ⟨0⟩ ⟨1⟩ dəyişdi → geri qaytarıla bilmədi (botun qrup məlumatını dəyişmə və sabitləmə icazəsi olmalıdır) | ⟨2⟩
+517c3659d	📝 Qrupun təsviri dəyişdirilib; əvvəlki halına qaytarıldı. Dəyişikliyi təsisçi edibsə, paneldə 🛂 Üzv və qrup təhlükəsizliyi → 📸 Hazırkı vəziyyəti saxla düyməsinə bas.
+e6529ed9a	telefon nömrəsi
+b9f1af256	e-poçt ünvanı
+8f8cbef64	kripto pul kisəsi ünvanı
+bf4118840	"şəxsiyə yaz" çağırışı
+c0c435e96	📧 E-poçt
+ace48f755	🪙 Kripto pul kisəsi
+5e78fdc15	💬 "Şəxsiyə yaz"
+e0669071a	Şəxsi məlumat
+74a706b28	🛂 ⟨0⟩, mesajında ⟨1⟩ olduğu üçün silindi. Təhlükəsizliyin üçün şəxsi məlumatlarını qrupda paylaşma.
+0b6ac9fc5	şəxsi məlumat / fırıldaq nümunəsi (⟨0⟩)
+1c979a8ff	hələ yoxdur
+e386f2a7c	🛂 <b>Üzv və qrup təhlükəsizliyi</b> — ⟨0⟩
+d3c7dee60	📜 <b>Qaydaların qəbulu:</b> yeni üzv qrupun qaydalarını düymə ilə qəbul edənə qədər yaza bilməz (captcha açıqdırsa, captcha-dan sonra soruşulur). Bir dəfə qəbul edən qrupa yenidən qoşulanda soruşulmur.
+67f8d8ae3	🏷 <b>Qrup məlumatı qoruması:</b> təsisçidən başqa biri qrupun adını, şəklini və ya sabitlənmiş mesajı dəyişsə, əvvəlki halına qaytarılır; təsvir 10 dəqiqədən bir yoxlanılır. Təsisçinin dəyişiklikləri avtomatik saxlanılır; təsviri təsisçi dəyişibsə, 📸 ilə saxla. Yalnız təsisçi / həmtəsisçi dəyişə bilər.
+092c6482f	Son snapshot: ⟨0⟩
+e26ff3006	🔐 <b>Şəxsi məlumat və fırıldaq nümunələri:</b> üzvlərin telefon nömrəsi, e-poçt, IBAN, kripto pul kisəsi ünvanı və ya "şəxsiyə yaz" çağırışı olan mesajları silinir və seçilən cəza tətbiq olunur.
+5dce9c972	🤖 <b>Komanda spamı qoruması:</b> üzvlərin başqa botlara yazdığı komandalar silinir; ⟨0⟩ san ərzində ⟨1⟩ dəfə təkrarlayana seçilən cəza tətbiq olunur. ⟨2⟩ dəqiqədə ⟨3⟩ hesabatdan artığı nəzərə alınmır və eyni cəza tətbiq olunur. Yalnız təsisçi / həmtəsisçi dəyişə bilər.
+4ccb73609	📜 Qaydaların qəbulu
+614de7399	🏷 Qrup məlumatı qoruması
+c6b97674b	📸 Hazırkı vəziyyəti saxla
+3052b371c	🔐 Şəxsi məlumat qoruması
+39cb36b03	👇 Şəxsi məlumat cəzası
+8299dd6da	🤖 Komanda spamı qoruması
+e6c02779f	👇 Komanda spamı cəzası
+8fc0cad4c	🚫 Komandaları bağla (⟨0⟩) ›
+afbd89c3f	Komanda qoruması
+e17cd1749	🚫 ⟨0⟩, bu komanda bu qrupda bağlıdır.
+16c681ed1	bu qrupda bağlı komanda (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, başqa botların komandalarını təkrar-təkrar göndərmə; bu qrupda silinir.
+3519e7bcc	komanda spamı (başqa botların komandaları)
+a64baef4c	🤖 ⟨0⟩, bu qrupda başqa botların komandaları silinir.
+7dd5bf468	🚩 ⟨0⟩, çox sayda hesabat göndərdin; hesabatların bir müddət nəzərə alınmayacaq.
+81879c932	hesabat sisteminin sui-istifadəsi
+f6d2e9197	🚫 <b>Komandaları bağla</b> — ⟨0⟩
+054caaae3	Bağladığın komandaları üzvlər bu qrupda istifadə edə bilməz: mesaj silinir və seçilən əməliyyat tətbiq olunur ("Sil" seçilibsə, qısa "bu komanda bu qrupda bağlıdır" xəbərdarlığı göstərilir). Səlahiyyətlilər bağlı komandaları istifadə etməyə davam edir. Yalnız təsisçi / həmtəsisçi dəyişə bilər.
+0bb5c2cf8	Bağlı komanda sayı: <b>⟨0⟩</b>
+d5b266a81	Sürətli istifadə: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Bağlı komanda istifadə ediləndə
+c22b8f825	🚫 <b>Komandaları bağla</b>
+76a397d40	İstifadə: <code>/komutkapat komanda</code> · <code>/komutac komanda</code>
+bd149a1f2	Bağlı komandaları səlahiyyətlilər istifadə etməyə davam edir.
+8c7a4527b	⚠️ /⟨0⟩ bağlana bilən komandalardan deyil.
+4bd6b629c	Bağlana bilənlər: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ artıq açıqdır.
+c04beaefc	🚫 /⟨0⟩ artıq bağlıdır.
+c1b5afc45	✅ /⟨0⟩ bu qrupda üzvlər üçün açıldı.
+36b26ef8c	🚫 /⟨0⟩ bu qrupda üzvlər üçün bağlandı (səlahiyyətlilər istifadə edə bilər).
+4509732b3	🚫 Komanda ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Anti-yönləndirmə indi: ⟨0⟩
 6d6d358e6	İstifadə: /antiforward on|off
 117ba2454	AÇIQ
@@ -22873,10 +23438,20 @@ f5c96387f	🛟 Bərpa
 1bd24917c	✖️ Bağla
 e38a49a6f	Kanal qoruma ayarları
 f81ca3a77	Bu ayarı yalnız qrupun təsisçisi dəyişə bilər.
+499b40121	Bu ayarı yalnız təsisçi və həmtəsisçi dəyişə bilər.
 4081e665c	Yanlış ayar
 ca037fcc4	❌ Bağlandı
 a006b158d	⚙️ ⟨0⟩ cəzası → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Cəza: ⟨0⟩
+829773348	⚙️ Şəxsi məlumat qoruması cəzası → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Komanda spamı qoruması cəzası → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Bağlı komanda əməliyyatı → ⟨0⟩ | ⟨1⟩
+d66461de6	Əməliyyat: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ bağlandı
+1366de2b8	✅ /⟨0⟩ açıldı
+a69466222	📸 Qrup məlumatı (ad, təsvir, şəkil, sabitlənmiş mesaj) saxlanıldı | ⟨0⟩
+87f3326f9	📸 Yadda saxlanıldı
+49c866e1e	Yadda saxlamaq olmadı (bot admindirmi?)
 286a11648	Limit cəzası: ⟨0⟩
 c32110889	Siyahı dəyişdi, yeniləndi
 cf6b53ca2	🗑 ⟨0⟩ silindi: ⟨1⟩ | ⟨2⟩
@@ -22893,7 +23468,6 @@ e413c4b9e	Qaydalar silindi
 0f514bbde	✅ Reyd kilidi paneldən açıldı | ⟨0⟩
 8e6a20f22	🔓 Açıldı
 f5014f259	Açılmadı (botun icazələri?)
-7f0e2a142	Qrup tapılmadı.
 f41c17d41	Bu paneldən istifadə üçün qrupda admin olmalısan.
 8213d6575	<i>Ləğv etmək üçün: cancel</i>
 1465f36fd	Cavabını açılan mesaja cavab kimi yaz.
@@ -22971,10 +23545,8 @@ a0ec7c7bd	➖ Bu qrupu şəbəkədən çıxar
 db918b20f	Bu qrup şəbəkədə deyil. İdarə etdiyin qrupları şəbəkənə əlavə etsən, banlar hamısına yayılır və ayarları bir toxunuşla kopyalaya bilərsən. (Təsisçi / həmtəsisçi lazımdır.)
 e44c5b572	➕ Bu qrupu şəbəkəmə əlavə et
 fe6b211f8	⟨0⟩ (⟨1⟩ admin)
-1c979a8ff	hələ yoxdur
 9f41d74fa	🛟 <b>Admin bərpası</b> — ⟨0⟩
 62477adfc	Admin siyahısı hər 6 saatdan bir yadda saxlanılır. Kimsə qısa müddətdə 3+ adminin səlahiyyətini alarsa, adminlər və etibarlı şəxslər bərpa düyməli xəbərdarlıq alır. Etibarlı şəxslər bota şəxsi mesajla <code>/recover</code> göndərərək adminləri bərpa edə bilər.
-092c6482f	Son snapshot: ⟨0⟩
 ba8991412	Etibarlı şəxslər (⟨0⟩/3) — silmək üçün toxun:
 5729ee3a9	➕ Etibarlı şəxs əlavə et
 72e9b014a	Avtomatik bərpa et
@@ -23001,8 +23573,6 @@ f9a34a2ad	Ban sinxronizasiyası ⟨0⟩
 eacfa093c	⟨0⟩ qrupa köçürüldü
 c39c747b1	Bərpa ayarlarını yalnız təsisçi dəyişə bilər.
 95e917987	Silindi
-87f3326f9	📸 Yadda saxlanıldı
-49c866e1e	Yadda saxlamaq olmadı (bot admindirmi?)
 b13ed05bb	♻️ ⟨0⟩ admin bərpa edildi⟨1⟩
 8670a3a46	, ⟨0⟩ alınmadı
 c3b595125	Etibarlı şəxsləri yalnız təsisçi əlavə edə bilər.
@@ -23101,6 +23671,7 @@ a96302489	Hazırda göndərilmir.
 b0b0b34ae	📢 <b>Son elanlar</b>
 b6eaec96e	↪️ yönləndirilən mesaj
 a2148c2a7	🗳 sorğu
+a68f06db1	(media)
 771c7f3fb	👆 ⟨0⟩ klik⟨1⟩
 8139aea8f	(⟨0⟩ nəfər)
 71fc8c6a3	❌ #⟨0⟩ ləğv et
@@ -23407,6 +23978,10 @@ c0c03c505	⟨0⟩ istisna siyahısından çıxarıldı.
 e6695a6db	⟨0⟩ spam istisna siyahısına əlavə edildi.
 9e5f1a353	Qapalı qrup
 688f939e9	Söz filtri
+9d784908d	Qaydaların Qəbulu
+1340d231a	Qrup Məlumatı Qoruması
+1bd1325c6	Şəxsi Məlumat Qoruması
+1c138f426	Komanda Qoruması
 cbabb7d8b	Yoxdur
 28b8f5479	👥 Üzvlər: ⟨0⟩
 ceb987630	👮 Adminlər: ⟨0⟩
@@ -23517,6 +24092,7 @@ bfe1425f8	/forcesub @channel — Yazmaq üçün istifadəçilər kanala qoşulma
 886d570db	/unlockdown · /unlockmedia — Kilidləri götür
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <komanda> · /komutac <komanda> — Üzv komandasını bu qrupda bağla / aç (yalnız təsisçi / həmtəsisçi)
 3d2493394	/blockmedia · /blockpack — Media/paketləri blokla
 20abda0cf	/admin (/addadmin) · /senioradmin @user [teq] — Rütbə ver
 3c7389596	/remove @user — Rütbəni götür
@@ -24076,6 +24652,21 @@ f7e588100	🌐 CAS spam siyahısı
 4a02f552b	✏️ Ad dəyişikliyinin izlənməsi
 32a52c44c	🗳 Səsvermə ilə susdurma
 9b96d57aa	Səsvermə ilə susdurma müddəti
+d321f95bf	🛂 Üzv və qrup təhlükəsizliyi
+496842aa2	Yeni üzv qrupun qaydalarını düymə ilə qəbul edənə qədər yaza bilməz. Bir dəfə qəbul edən bir daha soruşulmur.
+11daa849d	Təsisçidən başqa birinin dəyişdiyi qrup adı, şəkli, sabitlənmiş mesajı və təsviri əvvəlki halına qaytarılır. Yalnız təsisçi / həmtəsisçi dəyişə bilər.
+bca49e9f7	🔐 Şəxsi məlumat və fırıldaq nümunələri
+f82c0d7d4	Üzvlərin telefon, e-poçt, IBAN, kripto pul kisəsi ünvanı və ya "şəxsiyə yaz" çağırışı olan mesajları silinir.
+b49a7535a	📞 Telefon nömrəsi
+ae97acaeb	📧 E-poçt ünvanı
+bf9420e5b	🪙 Kripto pul kisəsi ünvanı
+83cc05280	💬 "Şəxsiyə yaz" çağırışları
+60ee0d4b1	Şəxsi məlumat cəzası
+1089f4de7	Üzvlərin başqa botlara yazdığı komandalar silinir; tez-tez təkrarlayana və çox hesabat göndərənə cəza tətbiq olunur. Yalnız təsisçi / həmtəsisçi dəyişə bilər.
+7b002b274	Komanda spamı cəzası
+2d1965747	🚫 Bağlı komandalar
+8add0446e	Hər sətirə bir komanda (məs. rapor, zar). Üzvlər istifadə edə bilməz, səlahiyyətlilər edə bilər. Bağlana bilənlər: ⟨0⟩
+2646100b5	Bağlı komanda istifadə ediləndə
 d51893a35	🌍 Dil
 8d6c8a4a5	Botun bu qrupdakı dili
 45ac69c17	Botun mesajları, düymələri və xəbərdarlıqları bu dildə olacaq. Sənin yazdığın məzmun dəyişmir.
@@ -24094,6 +24685,7 @@ c4395cbb9	Etibarlı şəxslər (ən çox 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Yanlış seçim
+21140c9c2	Bağlana bilməyən komanda: ⟨0⟩
 4094a1250	Çox uzundur: ⟨0⟩…
 3994c99a9	Yanlış ID: ⟨0⟩ (yalnız rəqəmlər)
 5055a2323	Ən çox ⟨0⟩ nəfər
@@ -24414,6 +25006,9 @@ f666e1d93	🗄 Verilənlər bazasının ehtiyat nüsxəsi · ⟨0⟩ MB (sıxıl
 9cfd9973e	Bərpa etmək üçün zip-dəki .db faylını bot qovluğuna bot_data.db adı ilə qoy.
 391c8e6d0	🗄 Ehtiyat nüsxə alındı, amma Telegram-a sığmır (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 Ehtiyat nüsxə alınır...
+35db56b39	⚠️ <b>Verilənlər bazası korlandı</b> (database disk image is malformed).
+6889d6242	Bot 5 san ərzində yenidən başladılır; açılışda korlanmış fayl kənara qoyulacaq və məlumatlar bərpa ediləcək.
+6ffdbe5e2	Bot indicə açıldı, avtomatik yenidən başlatma edilmədi. Botu əl ilə yenidən başladın.
 103ec5f85	Çat: ⟨0⟩
 0f97d9633	⚠️ Bot xətası
 15781d4a0	⚠️ Bu düymə köhnəlib və ya yanlışdır. Menyunu yenidən aç.
@@ -24429,6 +25024,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS işə düşdü
 82459fdce	Verilənlər bazası: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	Qeydiyyatda olan qruplar/kanallar: <b>⟨0⟩</b>
+05229d023	🛠 <b>Verilənlər bazası korlanmışdı, bərpa edildi.</b> Korlanmış fayl: <code>⟨0⟩</code>
+8a235e6be	Bərpa edilən cədvəl: ⟨0⟩ · ehtiyat nüsxədən alınan: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Bərpa edilə bilməyən: ⟨0⟩
 6c20c0dd0	⚠️ Verilənlər bazası boş açıldı və son ehtiyat nüsxədən bərpa edildi: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Qeydiyyatda çat yoxdur. Bot yenidən başlayanda bu say azalırsa, verilənlər bazası faylı silinmiş ola bilər və ya bot başqa qovluqdan işləyir.
 3831f1221	Serverə qoşulmaq olmadı
@@ -24681,6 +25279,71 @@ a77f997a9	Flood (⟨0⟩ Nachrichten/⟨1⟩ Sek.)
 794910b1f	Verbotenes Wort
 8fb66aa89	verbotenes Wort
 4e5efb06d	wiederholter Spam
+881f4a7b9	📜 Willkommen ⟨0⟩! Um in der Gruppe schreiben zu können, musst du die Regeln lesen und akzeptieren:
+932c8c539	📜 Willkommen ⟨0⟩! Bist du einverstanden, die Gruppenregeln einzuhalten?
+d11dd3db7	✅ Ich habe die Regeln gelesen und akzeptiere sie
+d6b7e92ea	📜 Warte auf Regelbestätigung: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Dieser Button ist ungültig.
+9c148e8f9	Dieser Button ist nicht für dich; nur die neu beigetretene Person kann die Regeln akzeptieren.
+7f0e2a142	Gruppe nicht gefunden.
+9d4cfb23f	Deine Einschränkung konnte nicht aufgehoben werden; bitte sag den Admins Bescheid.
+925b57ed1	✅ Danke! Jetzt kannst du schreiben.
+65d432938	✅ Regeln akzeptiert: ⟨0⟩ | ⟨1⟩
+440a0b88c	anonymer Admin
+52b5bc87d	den Gruppennamen
+39913ac6c	das Gruppenfoto
+66a230ead	die angeheftete Nachricht
+62ff3a80d	🏷 Gruppeninfo-Schutz: ⟨0⟩ hat ⟨1⟩ geändert → wiederhergestellt | ⟨2⟩
+a91a23aac	🏷 Gruppeninfo-Schutz: ⟨0⟩ hat ⟨1⟩ geändert → konnte nicht rückgängig gemacht werden (der Bot braucht die Rechte zum Ändern der Gruppeninfo und zum Anheften) | ⟨2⟩
+517c3659d	📝 Die Gruppenbeschreibung wurde geändert; sie wurde wiederhergestellt. Falls der Gründer die Änderung gemacht hat, tippe im Panel auf 🛂 Mitglieder- und Gruppensicherheit → 📸 Aktuellen Zustand speichern.
+e6529ed9a	eine Telefonnummer
+b9f1af256	eine E-Mail-Adresse
+8f8cbef64	eine Krypto-Wallet-Adresse
+bf4118840	eine „Schreib mir privat“-Aufforderung
+c0c435e96	📧 E-Mail
+ace48f755	🪙 Krypto-Wallet
+5e78fdc15	💬 „Schreib mir privat“
+e0669071a	Persönliche Daten
+74a706b28	🛂 ⟨0⟩, deine Nachricht wurde gelöscht, weil sie ⟨1⟩ enthielt. Teile zu deiner Sicherheit keine persönlichen Daten in der Gruppe.
+0b6ac9fc5	persönliche Daten / Betrugsmuster (⟨0⟩)
+1c979a8ff	noch keine
+e386f2a7c	🛂 <b>Mitglieder- und Gruppensicherheit</b> — ⟨0⟩
+d3c7dee60	📜 <b>Regelbestätigung:</b> ein neues Mitglied kann erst schreiben, wenn es die Gruppenregeln per Button akzeptiert (ist das Captcha an, wird danach gefragt). Wer einmal akzeptiert hat, wird beim erneuten Beitritt nicht wieder gefragt.
+67f8d8ae3	🏷 <b>Gruppeninfo-Schutz:</b> ändert jemand außer dem Gründer den Gruppennamen, das Foto oder die angeheftete Nachricht, wird alles wiederhergestellt; die Beschreibung wird alle 10 Minuten geprüft. Änderungen des Gründers werden automatisch gespeichert; hat der Gründer die Beschreibung geändert, speichere sie mit 📸. Nur der Gründer / Mitgründer kann das ändern.
+092c6482f	Letzter Snapshot: ⟨0⟩
+e26ff3006	🔐 <b>Persönliche Daten und Betrugsmuster:</b> Nachrichten von Mitgliedern mit Telefonnummer, E-Mail, IBAN, Krypto-Wallet-Adresse oder einer „Schreib mir privat“-Aufforderung werden gelöscht und die gewählte Strafe wird verhängt.
+5dce9c972	🤖 <b>Befehlsspam-Schutz:</b> Befehle, die Mitglieder an andere Bots schicken, werden gelöscht; wer das ⟨1⟩-mal innerhalb von ⟨0⟩ s wiederholt, erhält die gewählte Strafe. Mehr als ⟨3⟩ Meldungen in ⟨2⟩ Minuten werden ignoriert und dieselbe Strafe wird verhängt. Nur der Gründer / Mitgründer kann das ändern.
+4ccb73609	📜 Regelbestätigung
+614de7399	🏷 Gruppeninfo-Schutz
+c6b97674b	📸 Aktuellen Zustand speichern
+3052b371c	🔐 Schutz persönlicher Daten
+39cb36b03	👇 Strafe für persönliche Daten
+8299dd6da	🤖 Befehlsspam-Schutz
+e6c02779f	👇 Strafe für Befehlsspam
+8fc0cad4c	🚫 Befehle sperren (⟨0⟩) ›
+afbd89c3f	Befehlsschutz
+e17cd1749	🚫 ⟨0⟩, dieser Befehl ist in dieser Gruppe gesperrt.
+16c681ed1	in dieser Gruppe gesperrter Befehl (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, schick nicht immer wieder Befehle anderer Bots; in dieser Gruppe werden sie gelöscht.
+3519e7bcc	Befehlsspam (Befehle anderer Bots)
+a64baef4c	🤖 ⟨0⟩, in dieser Gruppe werden Befehle anderer Bots gelöscht.
+7dd5bf468	🚩 ⟨0⟩, du hast zu viele Meldungen geschickt; deine Meldungen werden eine Weile ignoriert.
+81879c932	Missbrauch des Meldesystems
+f6d2e9197	🚫 <b>Befehle sperren</b> — ⟨0⟩
+054caaae3	Befehle, die du sperrst, können Mitglieder in dieser Gruppe nicht nutzen: die Nachricht wird gelöscht und die gewählte Aktion ausgeführt (ist „Löschen“ gewählt, erscheint ein kurzer Hinweis „dieser Befehl ist in dieser Gruppe gesperrt“). Das Team kann gesperrte Befehle weiter nutzen. Nur der Gründer / Mitgründer kann das ändern.
+0bb5c2cf8	Gesperrte Befehle: <b>⟨0⟩</b>
+d5b266a81	Schnell: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Wenn ein gesperrter Befehl genutzt wird
+c22b8f825	🚫 <b>Befehle sperren</b>
+76a397d40	Nutzung: <code>/komutkapat Befehl</code> · <code>/komutac Befehl</code>
+bd149a1f2	Das Team kann gesperrte Befehle weiter nutzen.
+8c7a4527b	⚠️ /⟨0⟩ gehört nicht zu den sperrbaren Befehlen.
+4bd6b629c	Sperrbar: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ ist bereits freigegeben.
+c04beaefc	🚫 /⟨0⟩ ist bereits gesperrt.
+c1b5afc45	✅ /⟨0⟩ ist in dieser Gruppe für Mitglieder freigegeben.
+36b26ef8c	🚫 /⟨0⟩ ist in dieser Gruppe für Mitglieder gesperrt (das Team kann ihn nutzen).
+4509732b3	🚫 Befehl ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Anti-Weiterleitung ist jetzt: ⟨0⟩
 6d6d358e6	Verwendung: /antiforward on|off
 117ba2454	AN
@@ -24988,11 +25651,21 @@ f5c96387f	🛟 Wiederherstellung
 1bd24917c	✖️ Schließen
 e38a49a6f	Kanalschutz-Einstellungen
 f81ca3a77	Nur der Gründer der Gruppe kann diese Einstellung ändern.
+499b40121	Nur der Gründer und der Mitgründer können diese Einstellung ändern.
 4081e665c	Ungültige Einstellung
 ce432606a	✅ Eingeschaltet
 ca037fcc4	❌ Ausgeschaltet
 a006b158d	⚙️ Strafe für ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Strafe: ⟨0⟩
+829773348	⚙️ Strafe des Schutzes persönlicher Daten → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Strafe des Befehlsspam-Schutzes → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Aktion bei gesperrtem Befehl → ⟨0⟩ | ⟨1⟩
+d66461de6	Aktion: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ gesperrt
+1366de2b8	✅ /⟨0⟩ freigegeben
+a69466222	📸 Gruppeninfo (Name, Beschreibung, Foto, angeheftete Nachricht) gespeichert | ⟨0⟩
+87f3326f9	📸 Gespeichert
+49c866e1e	Speichern nicht möglich (ist der Bot Admin?)
 286a11648	Strafe bei Limit: ⟨0⟩
 c32110889	Die Liste hat sich geändert, aktualisiert
 cf6b53ca2	🗑 ⟨0⟩ gelöscht: ⟨1⟩ | ⟨2⟩
@@ -25010,7 +25683,6 @@ e413c4b9e	Regeln gelöscht
 0f514bbde	✅ Raid-Sperre über das Panel aufgehoben | ⟨0⟩
 8e6a20f22	🔓 Entsperrt
 f5014f259	Entsperren nicht möglich (Rechte des Bots?)
-7f0e2a142	Gruppe nicht gefunden.
 f41c17d41	Für dieses Panel musst du Admin der Gruppe sein.
 8213d6575	<i>Abbrechen: cancel</i>
 1465f36fd	Schreib deine Antwort als Antwort auf die geöffnete Nachricht.
@@ -25088,10 +25760,8 @@ a0ec7c7bd	➖ Diese Gruppe aus dem Netzwerk entfernen
 db918b20f	Diese Gruppe ist in keinem Netzwerk. Fügst du die Gruppen, die du verwaltest, deinem Netzwerk hinzu, gelten Banns in allen und du kannst Einstellungen mit einem Tipp kopieren. (Gründer / Mitgründer erforderlich.)
 e44c5b572	➕ Diese Gruppe meinem Netzwerk hinzufügen
 fe6b211f8	⟨0⟩ (⟨1⟩ Admins)
-1c979a8ff	noch keine
 9f41d74fa	🛟 <b>Admin-Wiederherstellung</b> — ⟨0⟩
 62477adfc	Die Admin-Liste wird alle 6 Stunden gespeichert. Entzieht jemand in kurzer Zeit 3+ Admins die Rechte, erhalten Admins und Vertrauenspersonen eine Warnung mit einem Wiederherstellungs-Button. Vertrauenspersonen können die Admins wiederherstellen, indem sie dem Bot privat <code>/recover</code> senden.
-092c6482f	Letzter Snapshot: ⟨0⟩
 ba8991412	Vertrauenspersonen (⟨0⟩/3) — zum Entfernen antippen:
 5729ee3a9	➕ Vertrauensperson hinzufügen
 72e9b014a	Automatisch wiederherstellen
@@ -25118,8 +25788,6 @@ f9a34a2ad	Bann-Abgleich ⟨0⟩
 eacfa093c	In ⟨0⟩ Gruppen kopiert
 c39c747b1	Nur der Gründer kann die Wiederherstellungseinstellungen ändern.
 95e917987	Entfernt
-87f3326f9	📸 Gespeichert
-49c866e1e	Speichern nicht möglich (ist der Bot Admin?)
 b13ed05bb	♻️ ⟨0⟩ Admins wiederhergestellt⟨1⟩
 8670a3a46	, ⟨0⟩ fehlgeschlagen
 c3b595125	Nur der Gründer kann Vertrauenspersonen hinzufügen.
@@ -25220,6 +25888,7 @@ a96302489	Wird gerade nicht gesendet.
 b0b0b34ae	📢 <b>Letzte Ankündigungen</b>
 b6eaec96e	↪️ weitergeleitete Nachricht
 a2148c2a7	🗳 Umfrage
+a68f06db1	(Medien)
 771c7f3fb	👆 ⟨0⟩ Klicks⟨1⟩
 8139aea8f	(⟨0⟩ Personen)
 71fc8c6a3	❌ #⟨0⟩ abbrechen
@@ -25529,6 +26198,10 @@ c0c03c505	⟨0⟩ aus der Ausnahmeliste entfernt.
 e6695a6db	⟨0⟩ zur Spam-Ausnahmeliste hinzugefügt.
 9e5f1a353	Private Gruppe
 688f939e9	Wortfilter
+9d784908d	Regelbestätigung
+1340d231a	Gruppeninfo-Schutz
+1bd1325c6	Schutz Persönlicher Daten
+1c138f426	Befehlsschutz
 cbabb7d8b	Keine
 28b8f5479	👥 Mitglieder: ⟨0⟩
 ceb987630	👮 Admins: ⟨0⟩
@@ -25639,6 +26312,7 @@ bfe1425f8	/forcesub @channel — Nutzer müssen dem Kanal beitreten, um zu schre
 886d570db	/unlockdown · /unlockmedia — Sperren aufheben
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <Befehl> · /komutac <Befehl> — Mitgliederbefehl in dieser Gruppe sperren / freigeben (nur Gründer / Mitgründer)
 3d2493394	/blockmedia · /blockpack — Medien/Pakete sperren
 20abda0cf	/admin (/addadmin) · /senioradmin @user [Titel] — Rang vergeben
 3c7389596	/remove @user — Rang entziehen
@@ -26207,6 +26881,21 @@ f7e588100	🌐 CAS-Spamliste
 4a02f552b	✏️ Verfolgung von Namensänderungen
 32a52c44c	🗳 Stummschalt-Abstimmung
 9b96d57aa	Dauer der Stummschalt-Abstimmung
+d321f95bf	🛂 Mitglieder- und Gruppensicherheit
+496842aa2	Ein neues Mitglied kann erst schreiben, wenn es die Gruppenregeln per Button akzeptiert. Wer einmal akzeptiert hat, wird nicht wieder gefragt.
+11daa849d	Ändert jemand außer dem Gründer den Gruppennamen, das Foto, die angeheftete Nachricht oder die Beschreibung, wird alles wiederhergestellt. Nur der Gründer / Mitgründer kann das ändern.
+bca49e9f7	🔐 Persönliche Daten und Betrugsmuster
+f82c0d7d4	Nachrichten von Mitgliedern mit Telefon, E-Mail, IBAN, Krypto-Wallet-Adresse oder einer „Schreib mir privat“-Aufforderung werden gelöscht.
+b49a7535a	📞 Telefonnummer
+ae97acaeb	📧 E-Mail-Adresse
+bf9420e5b	🪙 Krypto-Wallet-Adresse
+83cc05280	💬 „Schreib mir privat“-Aufforderungen
+60ee0d4b1	Strafe für persönliche Daten
+1089f4de7	Befehle, die Mitglieder an andere Bots schicken, werden gelöscht; wer das oft wiederholt oder zu viele Meldungen schickt, wird bestraft. Nur der Gründer / Mitgründer kann das ändern.
+7b002b274	Strafe für Befehlsspam
+2d1965747	🚫 Gesperrte Befehle
+8add0446e	Ein Befehl pro Zeile (z. B. rapor, zar). Mitglieder können sie nicht nutzen, das Team schon. Sperrbar: ⟨0⟩
+2646100b5	Wenn ein gesperrter Befehl genutzt wird
 d51893a35	🌍 Sprache
 8d6c8a4a5	Die Sprache des Bots in dieser Gruppe
 45ac69c17	Nachrichten, Buttons und Hinweise des Bots erscheinen in dieser Sprache. Von dir geschriebene Inhalte ändern sich nicht.
@@ -26225,6 +26914,7 @@ c4395cbb9	Vertrauenspersonen (höchstens 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Ungültige Auswahl
+21140c9c2	Nicht sperrbarer Befehl: ⟨0⟩
 4094a1250	Zu lang: ⟨0⟩…
 3994c99a9	Ungültige ID: ⟨0⟩ (nur Ziffern)
 5055a2323	Höchstens ⟨0⟩ Personen
@@ -26553,6 +27243,9 @@ f666e1d93	🗄 Datenbank-Backup · ⟨0⟩ MB (komprimiert ⟨1⟩ MB)
 9cfd9973e	Zum Wiederherstellen lege die .db-Datei aus dem Zip als bot_data.db in den Bot-Ordner.
 391c8e6d0	🗄 Backup erstellt, passt aber nicht in Telegram (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 Backup wird erstellt...
+35db56b39	⚠️ <b>Die Datenbank ist beschädigt</b> (database disk image is malformed).
+6889d6242	Der Bot startet in 5 s neu; beim Start wird die beschädigte Datei beiseitegelegt und die Daten werden wiederhergestellt.
+6ffdbe5e2	Der Bot wurde gerade erst gestartet, daher kein automatischer Neustart. Starte den Bot manuell neu.
 103ec5f85	Chat: ⟨0⟩
 0f97d9633	⚠️ Bot-Fehler
 15781d4a0	⚠️ Dieser Button ist veraltet oder ungültig. Öffne das Menü erneut.
@@ -26568,6 +27261,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS gestartet
 82459fdce	Datenbank: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	Registrierte Gruppen/Kanäle: <b>⟨0⟩</b>
+05229d023	🛠 <b>Die Datenbank war beschädigt und wurde repariert.</b> Beschädigte Datei: <code>⟨0⟩</code>
+8a235e6be	Wiederhergestellte Tabellen: ⟨0⟩ · aus der Sicherung: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Nicht wiederherstellbar: ⟨0⟩
 6c20c0dd0	⚠️ Die Datenbank war beim Öffnen leer und wurde aus dem letzten Backup wiederhergestellt: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Keine registrierten Chats. Sinkt diese Zahl beim Neustart des Bots, wurde die Datenbankdatei evtl. gelöscht oder der Bot läuft aus einem anderen Ordner.
 3831f1221	Server nicht erreichbar
@@ -26817,6 +27513,72 @@ a77f997a9	flood (⟨0⟩ messages/⟨1⟩ s)
 794910b1f	Banned word
 8fb66aa89	banned word
 4e5efb06d	repeated spam
+881f4a7b9	📜 Welcome ⟨0⟩! To write in the group, you need to read and accept the rules:
+932c8c539	📜 Welcome ⟨0⟩! Do you agree to follow the group rules?
+d11dd3db7	✅ I have read the rules and I accept them
+d6b7e92ea	📜 Waiting for rules acceptance: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	This button is invalid.
+9c148e8f9	This button is not for you; only the newly joined person can accept the rules.
+7f0e2a142	Group not found.
+9d4cfb23f	Your restriction could not be lifted; please tell the admins.
+925b57ed1	✅ Thanks! You can write now.
+65d432938	✅ Rules accepted: ⟨0⟩ | ⟨1⟩
+440a0b88c	anonymous admin
+52b5bc87d	the group name
+39913ac6c	the group photo
+66a230ead	the pinned message
+62ff3a80d	🏷 Group info protection: ⟨0⟩ changed ⟨1⟩ → restored | ⟨2⟩
+a91a23aac	🏷 Group info protection: ⟨0⟩ changed ⟨1⟩ → could not be reverted (the bot needs the change group info and pin messages rights) | ⟨2⟩
+517c3659d	📝 The group description was changed; it has been restored. If the founder made the change, press 🛂 Member and group security → 📸 Save current state in the panel.
+e6529ed9a	a phone number
+b9f1af256	an email address
+8f8cbef64	a crypto wallet address
+bf4118840	a "DM me" call
+f0840bba1	📞 Phone
+c0c435e96	📧 Email
+ace48f755	🪙 Crypto wallet
+5e78fdc15	💬 "DM me"
+e0669071a	Personal info
+74a706b28	🛂 ⟨0⟩, your message was deleted because it contained ⟨1⟩. For your safety, don't share personal information in the group.
+0b6ac9fc5	personal info / scam pattern (⟨0⟩)
+1c979a8ff	none yet
+e386f2a7c	🛂 <b>Member and group security</b> — ⟨0⟩
+d3c7dee60	📜 <b>Rules acceptance:</b> a new member can't write until they accept the group rules with a button (if captcha is on, it is asked after the captcha). Someone who accepted once isn't asked again when rejoining.
+67f8d8ae3	🏷 <b>Group info protection:</b> if anyone other than the founder changes the group name, photo or pinned message, it is restored; the description is checked every 10 minutes. The founder's changes are saved automatically; if the founder changed the description, save it with 📸. Only the founder / co-founder can change this.
+092c6482f	Last snapshot: ⟨0⟩
+e26ff3006	🔐 <b>Personal info and scam patterns:</b> members' messages containing a phone number, email, IBAN, crypto wallet address or a "DM me" call are deleted and the chosen penalty is applied.
+5dce9c972	🤖 <b>Command spam protection:</b> commands members send to other bots are deleted; whoever repeats it ⟨1⟩ times within ⟨0⟩ s gets the chosen penalty. More than ⟨3⟩ reports in ⟨2⟩ minutes are ignored and the same penalty is applied. Only the founder / co-founder can change this.
+4ccb73609	📜 Rules acceptance
+614de7399	🏷 Group info protection
+c6b97674b	📸 Save current state
+3052b371c	🔐 Personal info protection
+39cb36b03	👇 Personal info penalty
+8299dd6da	🤖 Command spam protection
+e6c02779f	👇 Command spam penalty
+8fc0cad4c	🚫 Disable commands (⟨0⟩) ›
+afbd89c3f	Command protection
+e17cd1749	🚫 ⟨0⟩, this command is disabled in this group.
+16c681ed1	command disabled in this group (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, don't keep sending other bots' commands; they are deleted in this group.
+3519e7bcc	command spam (other bots' commands)
+a64baef4c	🤖 ⟨0⟩, other bots' commands are deleted in this group.
+7dd5bf468	🚩 ⟨0⟩, you sent too many reports; your reports will be ignored for a while.
+81879c932	abuse of the report system
+f6d2e9197	🚫 <b>Disable commands</b> — ⟨0⟩
+054caaae3	Members can't use the commands you disable in this group: the message is deleted and the chosen action is applied (if "Delete" is selected, a short "this command is disabled in this group" notice is shown). Staff can keep using disabled commands. Only the founder / co-founder can change this.
+0bb5c2cf8	Disabled commands: <b>⟨0⟩</b>
+d5b266a81	Quick use: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 When a disabled command is used
+c22b8f825	🚫 <b>Disable commands</b>
+76a397d40	Usage: <code>/komutkapat command</code> · <code>/komutac command</code>
+bd149a1f2	Staff can keep using disabled commands.
+8c7a4527b	⚠️ /⟨0⟩ is not one of the commands that can be disabled.
+4bd6b629c	Can be disabled: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ is already enabled.
+c04beaefc	🚫 /⟨0⟩ is already disabled.
+c1b5afc45	✅ /⟨0⟩ is now enabled for members in this group.
+36b26ef8c	🚫 /⟨0⟩ is now disabled for members in this group (staff can still use it).
+4509732b3	🚫 Command ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Anti-forward is now: ⟨0⟩
 6d6d358e6	Usage: /antiforward on|off
 117ba2454	ON
@@ -27120,11 +27882,21 @@ f5c96387f	🛟 Recovery
 1bd24917c	✖️ Close
 e38a49a6f	Channel Protection Settings
 f81ca3a77	Only the group's founder can change this setting.
+499b40121	Only the founder and co-founder can change this setting.
 4081e665c	Invalid setting
 ce432606a	✅ Turned on
 ca037fcc4	❌ Turned off
 a006b158d	⚙️ ⟨0⟩ penalty → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Penalty: ⟨0⟩
+829773348	⚙️ Personal info protection penalty → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Command spam protection penalty → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Disabled command action → ⟨0⟩ | ⟨1⟩
+d66461de6	Action: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ disabled
+1366de2b8	✅ /⟨0⟩ enabled
+a69466222	📸 Group info (name, description, photo, pinned message) saved | ⟨0⟩
+87f3326f9	📸 Saved
+49c866e1e	Couldn't save (is the bot an admin?)
 286a11648	Limit penalty: ⟨0⟩
 c32110889	The list changed, refreshed
 cf6b53ca2	🗑 ⟨0⟩ deleted: ⟨1⟩ | ⟨2⟩
@@ -27142,7 +27914,6 @@ e413c4b9e	Rules deleted
 0f514bbde	✅ Raid lock lifted from the panel | ⟨0⟩
 8e6a20f22	🔓 Unlocked
 f5014f259	Couldn't unlock (bot permissions?)
-7f0e2a142	Group not found.
 f41c17d41	You must be an admin in the group to use this panel.
 8213d6575	<i>To cancel: cancel</i>
 1465f36fd	Write your answer as a reply to the message that opened.
@@ -27220,10 +27991,8 @@ a0ec7c7bd	➖ Remove this group from the network
 db918b20f	This group isn't in a network. If you add the groups you manage to your network, bans spread to all of them and you can copy settings with one tap. (Founder / co-founder required.)
 e44c5b572	➕ Add this group to my network
 fe6b211f8	⟨0⟩ (⟨1⟩ admins)
-1c979a8ff	none yet
 9f41d74fa	🛟 <b>Admin recovery</b> — ⟨0⟩
 62477adfc	The admin list is saved every 6 hours. If someone removes the rights of 3+ admins in a short time, admins and trusted people get an alert with a recovery button. Trusted people can restore the admins by sending <code>/recover</code> to the bot privately.
-092c6482f	Last snapshot: ⟨0⟩
 ba8991412	Trusted people (⟨0⟩/3) — tap to remove:
 5729ee3a9	➕ Add trusted person
 72e9b014a	Restore automatically
@@ -27250,8 +28019,6 @@ f9a34a2ad	Ban sync ⟨0⟩
 eacfa093c	Copied to ⟨0⟩ groups
 c39c747b1	Only the founder can change the recovery settings.
 95e917987	Removed
-87f3326f9	📸 Saved
-49c866e1e	Couldn't save (is the bot an admin?)
 b13ed05bb	♻️ ⟨0⟩ admins restored⟨1⟩
 8670a3a46	, ⟨0⟩ failed
 c3b595125	Only the founder can add trusted people.
@@ -27352,6 +28119,7 @@ a96302489	Not being sent right now.
 b0b0b34ae	📢 <b>Recent announcements</b>
 b6eaec96e	↪️ forwarded message
 a2148c2a7	🗳 poll
+a68f06db1	(media)
 771c7f3fb	👆 ⟨0⟩ clicks⟨1⟩
 8139aea8f	(⟨0⟩ people)
 71fc8c6a3	❌ Cancel #⟨0⟩
@@ -27656,6 +28424,10 @@ c0c03c505	⟨0⟩ removed from the exemption list.
 e6695a6db	⟨0⟩ added to the spam exemption list.
 9e5f1a353	Private group
 688f939e9	Word Filter
+9d784908d	Rules Acceptance
+1340d231a	Group Info Protection
+1bd1325c6	Personal Info Protection
+1c138f426	Command Protection
 cbabb7d8b	None
 28b8f5479	👥 Members: ⟨0⟩
 ceb987630	👮 Admins: ⟨0⟩
@@ -27766,6 +28538,7 @@ bfe1425f8	/forcesub @channel — Users must join the channel to write (turn off:
 886d570db	/unlockdown · /unlockmedia — Lift locks
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <command> · /komutac <command> — Disable / enable a member command in this group (founder / co-founder only)
 3d2493394	/blockmedia · /blockpack — Block media/packs
 20abda0cf	/admin (/addadmin) · /senioradmin @user [tag] — Give a rank
 3c7389596	/remove @user — Remove a rank
@@ -28330,6 +29103,21 @@ f7e588100	🌐 CAS spam list
 4a02f552b	✏️ Name change tracking
 32a52c44c	🗳 Vote mute
 9b96d57aa	Vote mute duration
+d321f95bf	🛂 Member and group security
+496842aa2	A new member can't write until they accept the group rules with a button. Someone who accepted once isn't asked again.
+11daa849d	If anyone other than the founder changes the group name, photo, pinned message or description, it is restored. Only the founder / co-founder can change this.
+bca49e9f7	🔐 Personal info and scam patterns
+f82c0d7d4	Members' messages containing a phone number, email, IBAN, crypto wallet address or a "DM me" call are deleted.
+b49a7535a	📞 Phone number
+ae97acaeb	📧 Email address
+bf9420e5b	🪙 Crypto wallet address
+83cc05280	💬 "DM me" calls
+60ee0d4b1	Personal info penalty
+1089f4de7	Commands members send to other bots are deleted; frequent repeaters and those sending too many reports are penalized. Only the founder / co-founder can change this.
+7b002b274	Command spam penalty
+2d1965747	🚫 Disabled commands
+8add0446e	One command per line (e.g. rapor, zar). Members can't use them, staff can. Can be disabled: ⟨0⟩
+2646100b5	When a disabled command is used
 d51893a35	🌍 Language
 8d6c8a4a5	The bot's language in this group
 45ac69c17	The bot's messages, buttons and alerts will be in this language. Content you wrote doesn't change.
@@ -28348,6 +29136,7 @@ c4395cbb9	Trusted people (at most 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Invalid choice
+21140c9c2	Command that can't be disabled: ⟨0⟩
 4094a1250	Too long: ⟨0⟩…
 3994c99a9	Invalid ID: ⟨0⟩ (numbers only)
 5055a2323	At most ⟨0⟩ people
@@ -28676,6 +29465,9 @@ f666e1d93	🗄 Database backup · ⟨0⟩ MB (compressed ⟨1⟩ MB)
 9cfd9973e	To restore, put the .db file from the zip into the bot folder named bot_data.db.
 391c8e6d0	🗄 Backup taken but it doesn't fit in Telegram (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 Taking a backup...
+35db56b39	⚠️ <b>The database got corrupted</b> (database disk image is malformed).
+6889d6242	The bot is restarting in 5 s; on startup the corrupted file will be set aside and the data recovered.
+6ffdbe5e2	The bot started just now, so no automatic restart was done. Please restart the bot manually.
 103ec5f85	Chat: ⟨0⟩
 0f97d9633	⚠️ Bot error
 15781d4a0	⚠️ This button is outdated or invalid. Open the menu again.
@@ -28691,6 +29483,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS started
 82459fdce	Database: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	Registered groups/channels: <b>⟨0⟩</b>
+05229d023	🛠 <b>The database was corrupted and has been repaired.</b> Corrupted file: <code>⟨0⟩</code>
+8a235e6be	Recovered tables: ⟨0⟩ · restored from backup: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Could not be recovered: ⟨0⟩
 6c20c0dd0	⚠️ The database opened empty and was restored from the last backup: <code>⟨0⟩</code>
 0e4276ce2	⚠️ No registered chats. If this number drops when the bot restarts, the database file may have been deleted or the bot is running from a different folder.
 3831f1221	Couldn't reach the server
@@ -28788,10 +29583,7 @@ a4439e0c5	<a href="tg://user?id=⟨0⟩">⟨1⟩</a>
 cd8533168	• ⟨0⟩: <code>⟨1⟩</code> — ⟨2⟩
 4e4068d8f	bot_data_⟨0⟩.db
 176712105	⟨0⟩<pre>⟨1⟩</pre>
-05229d023	🛠 <b>Veritabanı bozuktu, onarıldı.</b> Bozuk dosya: <code>⟨0⟩</code>
-8a235e6be	Kurtarılan tablo: ⟨0⟩ · yedekten alınan: ⟨1⟩⟨2⟩⟨3⟩
 25e151e9c	(<code>⟨0⟩</code>)
-9bd6ab5aa	⚠️ Kurtarılamayan: ⟨0⟩
 '''
 
 I18N_ES = r'''
@@ -28988,6 +29780,72 @@ a77f997a9	flood (⟨0⟩ mensajes/⟨1⟩ s)
 794910b1f	Palabra prohibida
 8fb66aa89	palabra prohibida
 4e5efb06d	spam repetido
+881f4a7b9	📜 ¡Bienvenido, ⟨0⟩! Para escribir en el grupo tienes que leer y aceptar las reglas:
+932c8c539	📜 ¡Bienvenido, ⟨0⟩! ¿Aceptas cumplir las reglas del grupo?
+d11dd3db7	✅ He leído las reglas y las acepto
+d6b7e92ea	📜 Esperando la aceptación de las reglas: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Este botón no es válido.
+9c148e8f9	Este botón no es para ti; solo la persona recién llegada puede aceptar las reglas.
+7f0e2a142	Grupo no encontrado.
+9d4cfb23f	No se pudo quitar tu restricción; avisa a los administradores.
+925b57ed1	✅ ¡Gracias! Ya puedes escribir.
+65d432938	✅ Reglas aceptadas: ⟨0⟩ | ⟨1⟩
+440a0b88c	administrador anónimo
+52b5bc87d	el nombre del grupo
+39913ac6c	la foto del grupo
+66a230ead	el mensaje fijado
+62ff3a80d	🏷 Protección de la info del grupo: ⟨0⟩ cambió ⟨1⟩ → restaurado | ⟨2⟩
+a91a23aac	🏷 Protección de la info del grupo: ⟨0⟩ cambió ⟨1⟩ → no se pudo revertir (el bot necesita permisos para cambiar la info del grupo y fijar mensajes) | ⟨2⟩
+517c3659d	📝 La descripción del grupo fue cambiada; se ha restaurado. Si el cambio lo hizo el fundador, pulsa en el panel 🛂 Seguridad de miembros y grupo → 📸 Guardar estado actual.
+e6529ed9a	un número de teléfono
+b9f1af256	una dirección de correo
+8f8cbef64	una dirección de monedero cripto
+bf4118840	una invitación a "escríbeme por privado"
+f0840bba1	📞 Teléfono
+c0c435e96	📧 Correo
+ace48f755	🪙 Monedero cripto
+5e78fdc15	💬 "Escríbeme por privado"
+e0669071a	Datos personales
+74a706b28	🛂 ⟨0⟩, tu mensaje se borró porque contenía ⟨1⟩. Por tu seguridad, no compartas datos personales en el grupo.
+0b6ac9fc5	datos personales / patrón de estafa (⟨0⟩)
+1c979a8ff	ninguno todavía
+e386f2a7c	🛂 <b>Seguridad de miembros y grupo</b> — ⟨0⟩
+d3c7dee60	📜 <b>Aceptación de reglas:</b> un miembro nuevo no puede escribir hasta aceptar las reglas del grupo con un botón (si el captcha está activo, se pregunta después del captcha). Quien las aceptó una vez no vuelve a ser preguntado al reingresar.
+67f8d8ae3	🏷 <b>Protección de la info del grupo:</b> si alguien que no sea el fundador cambia el nombre, la foto o el mensaje fijado del grupo, se restaura; la descripción se revisa cada 10 minutos. Los cambios del fundador se guardan automáticamente; si el fundador cambió la descripción, guárdala con 📸. Solo el fundador / cofundador puede cambiar esto.
+092c6482f	Última copia: ⟨0⟩
+e26ff3006	🔐 <b>Datos personales y patrones de estafa:</b> se borran los mensajes de miembros que contengan un número de teléfono, correo, IBAN, dirección de monedero cripto o una invitación a "escríbeme por privado", y se aplica la sanción elegida.
+5dce9c972	🤖 <b>Protección contra spam de comandos:</b> se borran los comandos que los miembros envían a otros bots; a quien lo repita ⟨1⟩ veces en ⟨0⟩ s se le aplica la sanción elegida. Más de ⟨3⟩ reportes en ⟨2⟩ minutos se ignoran y se aplica la misma sanción. Solo el fundador / cofundador puede cambiar esto.
+4ccb73609	📜 Aceptación de reglas
+614de7399	🏷 Protección de la info del grupo
+c6b97674b	📸 Guardar estado actual
+3052b371c	🔐 Protección de datos personales
+39cb36b03	👇 Sanción por datos personales
+8299dd6da	🤖 Protección contra spam de comandos
+e6c02779f	👇 Sanción por spam de comandos
+8fc0cad4c	🚫 Desactivar comandos (⟨0⟩) ›
+afbd89c3f	Protección de comandos
+e17cd1749	🚫 ⟨0⟩, este comando está desactivado en este grupo.
+16c681ed1	comando desactivado en este grupo (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, no envíes una y otra vez comandos de otros bots; en este grupo se borran.
+3519e7bcc	spam de comandos (comandos de otros bots)
+a64baef4c	🤖 ⟨0⟩, en este grupo se borran los comandos de otros bots.
+7dd5bf468	🚩 ⟨0⟩, enviaste demasiados reportes; tus reportes se ignorarán durante un tiempo.
+81879c932	abuso del sistema de reportes
+f6d2e9197	🚫 <b>Desactivar comandos</b> — ⟨0⟩
+054caaae3	Los miembros no pueden usar en este grupo los comandos que desactives: el mensaje se borra y se aplica la acción elegida (si está elegido "Borrar", se muestra un breve aviso "este comando está desactivado en este grupo"). El equipo puede seguir usando los comandos desactivados. Solo el fundador / cofundador puede cambiar esto.
+0bb5c2cf8	Comandos desactivados: <b>⟨0⟩</b>
+d5b266a81	Uso rápido: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Al usar un comando desactivado
+c22b8f825	🚫 <b>Desactivar comandos</b>
+76a397d40	Uso: <code>/komutkapat comando</code> · <code>/komutac comando</code>
+bd149a1f2	El equipo puede seguir usando los comandos desactivados.
+8c7a4527b	⚠️ /⟨0⟩ no es uno de los comandos que se pueden desactivar.
+4bd6b629c	Se pueden desactivar: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ ya está activado.
+c04beaefc	🚫 /⟨0⟩ ya está desactivado.
+c1b5afc45	✅ /⟨0⟩ activado para los miembros de este grupo.
+36b26ef8c	🚫 /⟨0⟩ desactivado para los miembros de este grupo (el equipo puede usarlo).
+4509732b3	🚫 Comando ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Antirreenvío ahora: ⟨0⟩
 6d6d358e6	Uso: /antiforward on|off
 117ba2454	ACTIVADO
@@ -29300,11 +30158,21 @@ f5c96387f	🛟 Recuperación
 1bd24917c	✖️ Cerrar
 e38a49a6f	Ajustes de protección del canal
 f81ca3a77	Solo el fundador del grupo puede cambiar este ajuste.
+499b40121	Solo el fundador y el cofundador pueden cambiar este ajuste.
 4081e665c	Ajuste no válido
 ce432606a	✅ Activado
 ca037fcc4	❌ Desactivado
 a006b158d	⚙️ Sanción de ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Sanción: ⟨0⟩
+829773348	⚙️ Sanción de protección de datos personales → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Sanción de protección contra spam de comandos → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Acción para comando desactivado → ⟨0⟩ | ⟨1⟩
+d66461de6	Acción: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ desactivado
+1366de2b8	✅ /⟨0⟩ activado
+a69466222	📸 Info del grupo (nombre, descripción, foto, mensaje fijado) guardada | ⟨0⟩
+87f3326f9	📸 Guardado
+49c866e1e	No se pudo guardar (¿el bot es admin?)
 286a11648	Sanción por límite: ⟨0⟩
 c32110889	La lista cambió, actualizada
 cf6b53ca2	🗑 ⟨0⟩ borrado: ⟨1⟩ | ⟨2⟩
@@ -29322,7 +30190,6 @@ e413c4b9e	Reglas borradas
 0f514bbde	✅ Bloqueo antirraid levantado desde el panel | ⟨0⟩
 8e6a20f22	🔓 Desbloqueado
 f5014f259	No se pudo desbloquear (¿permisos del bot?)
-7f0e2a142	Grupo no encontrado.
 f41c17d41	Debes ser admin del grupo para usar este panel.
 8213d6575	<i>Para cancelar: cancel</i>
 1465f36fd	Escribe tu respuesta respondiendo al mensaje que se abrió.
@@ -29400,10 +30267,8 @@ a0ec7c7bd	➖ Quitar este grupo de la red
 db918b20f	Este grupo no está en una red. Si añades los grupos que administras a tu red, los baneos se extienden a todos y puedes copiar ajustes con un toque. (Se requiere fundador / cofundador.)
 e44c5b572	➕ Añadir este grupo a mi red
 fe6b211f8	⟨0⟩ (⟨1⟩ admins)
-1c979a8ff	ninguno todavía
 9f41d74fa	🛟 <b>Recuperación de admins</b> — ⟨0⟩
 62477adfc	La lista de admins se guarda cada 6 horas. Si alguien quita los permisos a 3+ admins en poco tiempo, los admins y las personas de confianza reciben una alerta con un botón de recuperación. Las personas de confianza pueden restaurar a los admins enviando <code>/recover</code> al bot en privado.
-092c6482f	Última copia: ⟨0⟩
 ba8991412	Personas de confianza (⟨0⟩/3) — toca para quitar:
 5729ee3a9	➕ Añadir persona de confianza
 72e9b014a	Restaurar automáticamente
@@ -29430,8 +30295,6 @@ f9a34a2ad	Sincronización de baneos ⟨0⟩
 eacfa093c	Copiado a ⟨0⟩ grupos
 c39c747b1	Solo el fundador puede cambiar los ajustes de recuperación.
 95e917987	Quitado
-87f3326f9	📸 Guardado
-49c866e1e	No se pudo guardar (¿el bot es admin?)
 b13ed05bb	♻️ ⟨0⟩ admins restaurados⟨1⟩
 8670a3a46	, ⟨0⟩ fallaron
 c3b595125	Solo el fundador puede añadir personas de confianza.
@@ -29532,6 +30395,7 @@ a96302489	No se está enviando ahora.
 b0b0b34ae	📢 <b>Anuncios recientes</b>
 b6eaec96e	↪️ mensaje reenviado
 a2148c2a7	🗳 encuesta
+a68f06db1	(multimedia)
 771c7f3fb	👆 ⟨0⟩ clics⟨1⟩
 8139aea8f	(⟨0⟩ personas)
 71fc8c6a3	❌ Cancelar #⟨0⟩
@@ -29841,6 +30705,10 @@ c0c03c505	⟨0⟩ quitado de la lista de exentos.
 e6695a6db	⟨0⟩ añadido a la lista de exentos de spam.
 9e5f1a353	Grupo privado
 688f939e9	Filtro de palabras
+9d784908d	Aceptación de Reglas
+1340d231a	Protección de la Info del Grupo
+1bd1325c6	Protección de Datos Personales
+1c138f426	Protección de Comandos
 cbabb7d8b	Ninguno
 28b8f5479	👥 Miembros: ⟨0⟩
 ceb987630	👮 Admins: ⟨0⟩
@@ -29951,6 +30819,7 @@ bfe1425f8	/forcesub @channel — Hay que unirse al canal para escribir (desactiv
 886d570db	/unlockdown · /unlockmedia — Quitar bloqueos
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <comando> · /komutac <comando> — Desactiva / activa un comando de miembros en este grupo (solo fundador / cofundador)
 3d2493394	/blockmedia · /blockpack — Bloquear multimedia/paquetes
 20abda0cf	/admin (/addadmin) · /senioradmin @user [etiqueta] — Dar un rango
 3c7389596	/remove @user — Quitar un rango
@@ -30521,6 +31390,21 @@ f7e588100	🌐 Lista de spam CAS
 4a02f552b	✏️ Seguimiento de cambios de nombre
 32a52c44c	🗳 Votación de silencio
 9b96d57aa	Duración del silencio por votación
+d321f95bf	🛂 Seguridad de miembros y grupo
+496842aa2	Un miembro nuevo no puede escribir hasta aceptar las reglas del grupo con un botón. Quien las aceptó una vez no vuelve a ser preguntado.
+11daa849d	Si alguien que no sea el fundador cambia el nombre, la foto, el mensaje fijado o la descripción del grupo, se restaura. Solo el fundador / cofundador puede cambiar esto.
+bca49e9f7	🔐 Datos personales y patrones de estafa
+f82c0d7d4	Se borran los mensajes de miembros que contengan teléfono, correo, IBAN, dirección de monedero cripto o una invitación a "escríbeme por privado".
+b49a7535a	📞 Número de teléfono
+ae97acaeb	📧 Dirección de correo
+bf9420e5b	🪙 Dirección de monedero cripto
+83cc05280	💬 Invitaciones a "escríbeme por privado"
+60ee0d4b1	Sanción por datos personales
+1089f4de7	Se borran los comandos que los miembros envían a otros bots; quien los repite a menudo o envía demasiados reportes recibe una sanción. Solo el fundador / cofundador puede cambiar esto.
+7b002b274	Sanción por spam de comandos
+2d1965747	🚫 Comandos desactivados
+8add0446e	Un comando por línea (p. ej. rapor, zar). Los miembros no pueden usarlos, el equipo sí. Se pueden desactivar: ⟨0⟩
+2646100b5	Al usar un comando desactivado
 d51893a35	🌍 Idioma
 8d6c8a4a5	Idioma del bot en este grupo
 45ac69c17	Los mensajes, botones y avisos del bot estarán en este idioma. El contenido que escribiste no cambia.
@@ -30539,6 +31423,7 @@ c4395cbb9	Personas de confianza (máximo 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Opción no válida
+21140c9c2	Comando que no se puede desactivar: ⟨0⟩
 4094a1250	Demasiado largo: ⟨0⟩…
 3994c99a9	ID no válido: ⟨0⟩ (solo números)
 5055a2323	Como máximo ⟨0⟩ personas
@@ -30868,6 +31753,9 @@ f666e1d93	🗄 Copia de la base de datos · ⟨0⟩ MB (comprimida ⟨1⟩ MB)
 9cfd9973e	Para restaurar, pon el archivo .db del zip en la carpeta del bot con el nombre bot_data.db.
 391c8e6d0	🗄 Copia hecha, pero no cabe en Telegram (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 Haciendo la copia...
+35db56b39	⚠️ <b>La base de datos se dañó</b> (database disk image is malformed).
+6889d6242	El bot se reinicia en 5 s; al arrancar, el archivo dañado se apartará y se recuperarán los datos.
+6ffdbe5e2	El bot acaba de arrancar, así que no se hizo un reinicio automático. Reinicia el bot manualmente.
 103ec5f85	Chat: ⟨0⟩
 0f97d9633	⚠️ Error del bot
 15781d4a0	⚠️ Este botón está desactualizado o no es válido. Abre el menú de nuevo.
@@ -30883,6 +31771,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS iniciado
 82459fdce	Base de datos: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	Grupos/canales registrados: <b>⟨0⟩</b>
+05229d023	🛠 <b>La base de datos estaba dañada y se ha reparado.</b> Archivo dañado: <code>⟨0⟩</code>
+8a235e6be	Tablas recuperadas: ⟨0⟩ · restauradas de la copia: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ No se pudo recuperar: ⟨0⟩
 6c20c0dd0	⚠️ La base de datos se abrió vacía y se restauró desde la última copia: <code>⟨0⟩</code>
 0e4276ce2	⚠️ No hay chats registrados. Si este número baja al reiniciar el bot, puede que se haya borrado el archivo de la base de datos o que el bot se ejecute desde otra carpeta.
 3831f1221	No se pudo conectar con el servidor
@@ -31136,6 +32027,72 @@ a77f997a9	فلود (⟨0⟩ پیام/⟨1⟩ ث)
 794910b1f	کلمه ممنوع
 8fb66aa89	کلمه ممنوع
 4e5efb06d	اسپم تکراری
+881f4a7b9	📜 خوش آمدی ⟨0⟩! برای نوشتن در گروه باید قوانین را بخوانی و بپذیری:
+932c8c539	📜 خوش آمدی ⟨0⟩! آیا می‌پذیری که قوانین گروه را رعایت کنی؟
+d11dd3db7	✅ قوانین را خواندم و می‌پذیرم
+d6b7e92ea	📜 در انتظار پذیرش قوانین: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	این دکمه نامعتبر است.
+9c148e8f9	این دکمه برای تو نیست؛ فقط عضو تازه‌وارد می‌تواند قوانین را بپذیرد.
+7f0e2a142	گروه پیدا نشد.
+9d4cfb23f	محدودیتت برداشته نشد؛ لطفاً به مدیران خبر بده.
+925b57ed1	✅ ممنون! حالا می‌توانی بنویسی.
+65d432938	✅ قوانین پذیرفته شد: ⟨0⟩ | ⟨1⟩
+440a0b88c	مدیر ناشناس
+52b5bc87d	نام گروه
+39913ac6c	عکس گروه
+66a230ead	پیام سنجاق‌شده
+62ff3a80d	🏷 محافظت از اطلاعات گروه: ⟨0⟩ ⟨1⟩ را تغییر داد → به حالت قبل برگشت | ⟨2⟩
+a91a23aac	🏷 محافظت از اطلاعات گروه: ⟨0⟩ ⟨1⟩ را تغییر داد → برگرداندن ممکن نشد (ربات باید اجازهٔ تغییر اطلاعات گروه و سنجاق کردن داشته باشد) | ⟨2⟩
+517c3659d	📝 توضیحات گروه تغییر کرده بود و به حالت قبل برگشت. اگر مؤسس آن را تغییر داده، در پنل روی 🛂 امنیت اعضا و گروه ← 📸 ذخیرهٔ وضعیت فعلی بزن.
+e6529ed9a	شمارهٔ تلفن
+b9f1af256	نشانی ایمیل
+8f8cbef64	نشانی کیف پول رمزارز
+bf4118840	دعوت «پیوی پیام بده»
+f0840bba1	📞 تلفن
+c0c435e96	📧 ایمیل
+ace48f755	🪙 کیف پول رمزارز
+5e78fdc15	💬 «پیوی پیام بده»
+e0669071a	اطلاعات شخصی
+74a706b28	🛂 ⟨0⟩، پیامت حذف شد چون ⟨1⟩ داشت. برای امنیت خودت اطلاعات شخصی‌ات را در گروه به اشتراک نگذار.
+0b6ac9fc5	اطلاعات شخصی / الگوی کلاهبرداری (⟨0⟩)
+1c979a8ff	هنوز هیچ
+e386f2a7c	🛂 <b>امنیت اعضا و گروه</b> — ⟨0⟩
+d3c7dee60	📜 <b>پذیرش قوانین:</b> عضو جدید تا وقتی قوانین گروه را با دکمه نپذیرد نمی‌تواند بنویسد (اگر کپچا روشن باشد، بعد از کپچا پرسیده می‌شود). کسی که یک بار پذیرفته، هنگام پیوستن دوباره پرسیده نمی‌شود.
+67f8d8ae3	🏷 <b>محافظت از اطلاعات گروه:</b> اگر کسی جز مؤسس نام، عکس یا پیام سنجاق‌شدهٔ گروه را تغییر دهد، به حالت قبل برمی‌گردد؛ توضیحات هر 10 دقیقه بررسی می‌شود. تغییرات مؤسس خودکار ذخیره می‌شود؛ اگر مؤسس توضیحات را تغییر داده، با 📸 ذخیره کن. فقط مؤسس / هم‌مؤسس می‌تواند تغییر دهد.
+092c6482f	آخرین اسنپ‌شات: ⟨0⟩
+e26ff3006	🔐 <b>اطلاعات شخصی و الگوهای کلاهبرداری:</b> پیام‌های اعضا که شمارهٔ تلفن، ایمیل، IBAN، نشانی کیف پول رمزارز یا دعوت «پیوی پیام بده» دارند حذف می‌شوند و جریمهٔ انتخاب‌شده اعمال می‌شود.
+5dce9c972	🤖 <b>محافظت در برابر اسپم دستور:</b> دستورهایی که اعضا برای ربات‌های دیگر می‌فرستند حذف می‌شوند؛ هر کس ⟨1⟩ بار در ⟨0⟩ ثانیه تکرار کند جریمهٔ انتخاب‌شده می‌گیرد. بیش از ⟨3⟩ گزارش در ⟨2⟩ دقیقه نادیده گرفته می‌شود و همان جریمه اعمال می‌شود. فقط مؤسس / هم‌مؤسس می‌تواند تغییر دهد.
+4ccb73609	📜 پذیرش قوانین
+614de7399	🏷 محافظت از اطلاعات گروه
+c6b97674b	📸 ذخیرهٔ وضعیت فعلی
+3052b371c	🔐 محافظت از اطلاعات شخصی
+39cb36b03	👇 جریمهٔ اطلاعات شخصی
+8299dd6da	🤖 محافظت در برابر اسپم دستور
+e6c02779f	👇 جریمهٔ اسپم دستور
+8fc0cad4c	🚫 غیرفعال کردن دستورها (⟨0⟩) ›
+afbd89c3f	محافظت از دستورها
+e17cd1749	🚫 ⟨0⟩، این دستور در این گروه غیرفعال است.
+16c681ed1	دستور غیرفعال در این گروه (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩، دستورهای ربات‌های دیگر را پشت سر هم نفرست؛ در این گروه حذف می‌شوند.
+3519e7bcc	اسپم دستور (دستورهای ربات‌های دیگر)
+a64baef4c	🤖 ⟨0⟩، در این گروه دستورهای ربات‌های دیگر حذف می‌شوند.
+7dd5bf468	🚩 ⟨0⟩، گزارش‌های خیلی زیادی فرستادی؛ گزارش‌هایت مدتی نادیده گرفته می‌شوند.
+81879c932	سوءاستفاده از سیستم گزارش
+f6d2e9197	🚫 <b>غیرفعال کردن دستورها</b> — ⟨0⟩
+054caaae3	اعضا نمی‌توانند دستورهایی را که غیرفعال می‌کنی در این گروه به کار ببرند: پیام حذف می‌شود و اقدام انتخاب‌شده اعمال می‌شود (اگر «حذف» انتخاب شده باشد، هشدار کوتاه «این دستور در این گروه غیرفعال است» نشان داده می‌شود). مدیران همچنان می‌توانند از دستورهای غیرفعال استفاده کنند. فقط مؤسس / هم‌مؤسس می‌تواند تغییر دهد.
+0bb5c2cf8	تعداد دستورهای غیرفعال: <b>⟨0⟩</b>
+d5b266a81	استفادهٔ سریع: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 هنگام استفاده از دستور غیرفعال
+c22b8f825	🚫 <b>غیرفعال کردن دستورها</b>
+76a397d40	استفاده: <code>/komutkapat دستور</code> · <code>/komutac دستور</code>
+bd149a1f2	مدیران همچنان می‌توانند از دستورهای غیرفعال استفاده کنند.
+8c7a4527b	⚠️ /⟨0⟩ جزو دستورهای قابل غیرفعال‌سازی نیست.
+4bd6b629c	قابل غیرفعال‌سازی: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ از قبل فعال است.
+c04beaefc	🚫 /⟨0⟩ از قبل غیرفعال است.
+c1b5afc45	✅ /⟨0⟩ در این گروه برای اعضا فعال شد.
+36b26ef8c	🚫 /⟨0⟩ در این گروه برای اعضا غیرفعال شد (مدیران می‌توانند استفاده کنند).
+4509732b3	🚫 دستور ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	ضد فوروارد اکنون: ⟨0⟩
 6d6d358e6	استفاده: /antiforward on|off
 117ba2454	روشن
@@ -31451,11 +32408,21 @@ f5c96387f	🛟 بازیابی
 1bd24917c	✖️ بستن
 e38a49a6f	تنظیمات محافظت کانال
 f81ca3a77	فقط مؤسس گروه می‌تواند این تنظیم را تغییر دهد.
+499b40121	فقط مؤسس و هم‌مؤسس می‌توانند این تنظیم را تغییر دهند.
 4081e665c	تنظیم نامعتبر
 ce432606a	✅ روشن شد
 ca037fcc4	❌ خاموش شد
 a006b158d	⚙️ جریمه ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	جریمه: ⟨0⟩
+829773348	⚙️ جریمهٔ محافظت از اطلاعات شخصی ← ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ جریمهٔ محافظت در برابر اسپم دستور ← ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ اقدام برای دستور غیرفعال ← ⟨0⟩ | ⟨1⟩
+d66461de6	اقدام: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ غیرفعال شد
+1366de2b8	✅ /⟨0⟩ فعال شد
+a69466222	📸 اطلاعات گروه (نام، توضیحات، عکس، پیام سنجاق‌شده) ذخیره شد | ⟨0⟩
+87f3326f9	📸 ذخیره شد
+49c866e1e	ذخیره نشد (ربات ادمین است؟)
 286a11648	جریمه محدودیت: ⟨0⟩
 c32110889	فهرست تغییر کرد، به‌روزرسانی شد
 cf6b53ca2	🗑 ⟨0⟩ حذف شد: ⟨1⟩ | ⟨2⟩
@@ -31473,7 +32440,6 @@ e413c4b9e	قوانین حذف شد
 0f514bbde	✅ قفل ضدحمله از پنل برداشته شد | ⟨0⟩
 8e6a20f22	🔓 باز شد
 f5014f259	باز نشد (دسترسی‌های ربات؟)
-7f0e2a142	گروه پیدا نشد.
 f41c17d41	برای استفاده از این پنل باید ادمین گروه باشید.
 8213d6575	<i>برای لغو: cancel</i>
 1465f36fd	پاسخ خود را به‌صورت ریپلای روی پیام بازشده بنویسید.
@@ -31551,10 +32517,8 @@ a0ec7c7bd	➖ حذف این گروه از شبکه
 db918b20f	این گروه در شبکه‌ای نیست. اگر گروه‌هایتان را به شبکه اضافه کنید، بن‌ها به همه آن‌ها گسترش می‌یابد و تنظیمات را با یک ضربه کپی می‌کنید. (مؤسس / هم‌مؤسس لازم است.)
 e44c5b572	➕ افزودن این گروه به شبکه من
 fe6b211f8	⟨0⟩ (⟨1⟩ ادمین)
-1c979a8ff	هنوز هیچ
 9f41d74fa	🛟 <b>بازیابی ادمین‌ها</b> — ⟨0⟩
 62477adfc	فهرست ادمین‌ها هر ۶ ساعت ذخیره می‌شود. اگر کسی در مدت کوتاهی دسترسی ۳+ ادمین را بگیرد، ادمین‌ها و افراد مورد اعتماد هشداری با دکمه بازیابی دریافت می‌کنند. افراد مورد اعتماد می‌توانند با ارسال <code>/recover</code> در خصوصی ربات، ادمین‌ها را بازگردانند.
-092c6482f	آخرین اسنپ‌شات: ⟨0⟩
 ba8991412	افراد مورد اعتماد (⟨0⟩/3) — برای حذف بزنید:
 5729ee3a9	➕ افزودن فرد مورد اعتماد
 72e9b014a	بازیابی خودکار
@@ -31581,8 +32545,6 @@ f9a34a2ad	همگام‌سازی بن ⟨0⟩
 eacfa093c	در ⟨0⟩ گروه کپی شد
 c39c747b1	فقط مؤسس می‌تواند تنظیمات بازیابی را تغییر دهد.
 95e917987	حذف شد
-87f3326f9	📸 ذخیره شد
-49c866e1e	ذخیره نشد (ربات ادمین است؟)
 b13ed05bb	♻️ ⟨0⟩ ادمین بازگردانده شد⟨1⟩
 8670a3a46	، ⟨0⟩ ناموفق
 c3b595125	فقط مؤسس می‌تواند فرد مورد اعتماد اضافه کند.
@@ -31683,6 +32645,7 @@ a96302489	الان در حال ارسال نیست.
 b0b0b34ae	📢 <b>اعلان‌های اخیر</b>
 b6eaec96e	↪️ پیام فورواردشده
 a2148c2a7	🗳 نظرسنجی
+a68f06db1	(رسانه)
 771c7f3fb	👆 ⟨0⟩ کلیک⟨1⟩
 8139aea8f	(⟨0⟩ نفر)
 71fc8c6a3	❌ لغو #⟨0⟩
@@ -31994,6 +32957,10 @@ e6695a6db	⟨0⟩ به فهرست معافیت اسپم اضافه شد.
 9e5f1a353	گروه خصوصی
 e9312bd1b	کپچا
 688f939e9	فیلتر کلمات
+9d784908d	پذیرش قوانین
+1340d231a	محافظت از اطلاعات گروه
+1bd1325c6	محافظت از اطلاعات شخصی
+1c138f426	محافظت از دستورها
 cbabb7d8b	هیچ
 28b8f5479	👥 اعضا: ⟨0⟩
 ceb987630	👮 ادمین‌ها: ⟨0⟩
@@ -32104,6 +33071,7 @@ bfe1425f8	/forcesub @channel — برای نوشتن باید عضو کانال 
 886d570db	/unlockdown · /unlockmedia — برداشتن قفل‌ها
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <دستور> · /komutac <دستور> — غیرفعال / فعال کردن دستور اعضا در این گروه (فقط مؤسس / هم‌مؤسس)
 3d2493394	/blockmedia · /blockpack — مسدود کردن رسانه/بسته
 20abda0cf	/admin (/addadmin) · /senioradmin @user [برچسب] — دادن رتبه
 3c7389596	/remove @user — گرفتن رتبه
@@ -32677,6 +33645,21 @@ f7e588100	🌐 فهرست اسپم CAS
 4a02f552b	✏️ ردیابی تغییر نام
 32a52c44c	🗳 رأی‌گیری سکوت
 9b96d57aa	مدت سکوت رأی‌گیری
+d321f95bf	🛂 امنیت اعضا و گروه
+496842aa2	عضو جدید تا وقتی قوانین گروه را با دکمه نپذیرد نمی‌تواند بنویسد. کسی که یک بار پذیرفته دوباره پرسیده نمی‌شود.
+11daa849d	اگر کسی جز مؤسس نام، عکس، پیام سنجاق‌شده یا توضیحات گروه را تغییر دهد، به حالت قبل برمی‌گردد. فقط مؤسس / هم‌مؤسس می‌تواند تغییر دهد.
+bca49e9f7	🔐 اطلاعات شخصی و الگوهای کلاهبرداری
+f82c0d7d4	پیام‌های اعضا که تلفن، ایمیل، IBAN، نشانی کیف پول رمزارز یا دعوت «پیوی پیام بده» دارند حذف می‌شوند.
+b49a7535a	📞 شمارهٔ تلفن
+ae97acaeb	📧 نشانی ایمیل
+bf9420e5b	🪙 نشانی کیف پول رمزارز
+83cc05280	💬 دعوت‌های «پیوی پیام بده»
+60ee0d4b1	جریمهٔ اطلاعات شخصی
+1089f4de7	دستورهایی که اعضا برای ربات‌های دیگر می‌فرستند حذف می‌شوند؛ کسانی که زیاد تکرار کنند یا گزارش‌های خیلی زیادی بفرستند جریمه می‌شوند. فقط مؤسس / هم‌مؤسس می‌تواند تغییر دهد.
+7b002b274	جریمهٔ اسپم دستور
+2d1965747	🚫 دستورهای غیرفعال
+8add0446e	در هر خط یک دستور (مثلاً rapor، zar). اعضا نمی‌توانند استفاده کنند، مدیران می‌توانند. قابل غیرفعال‌سازی: ⟨0⟩
+2646100b5	هنگام استفاده از دستور غیرفعال
 d51893a35	🌍 زبان
 8d6c8a4a5	زبان ربات در این گروه
 45ac69c17	پیام‌ها، دکمه‌ها و هشدارهای ربات به این زبان خواهد بود. محتوایی که نوشته‌اید تغییر نمی‌کند.
@@ -32695,6 +33678,7 @@ c4395cbb9	افراد مورد اعتماد (حداکثر ۳)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	انتخاب نامعتبر
+21140c9c2	دستوری که نمی‌شود غیرفعالش کرد: ⟨0⟩
 4094a1250	خیلی طولانی: ⟨0⟩…
 3994c99a9	آیدی نامعتبر: ⟨0⟩ (فقط عدد)
 5055a2323	حداکثر ⟨0⟩ نفر
@@ -33027,6 +34011,9 @@ f666e1d93	🗄 پشتیبان پایگاه داده · ⟨0⟩ MB (فشرده �
 9cfd9973e	برای بازیابی، فایل .db داخل زیپ را با نام bot_data.db در پوشه ربات قرار دهید.
 391c8e6d0	🗄 پشتیبان گرفته شد اما در تلگرام جا نمی‌شود (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 در حال پشتیبان‌گیری...
+35db56b39	⚠️ <b>پایگاه داده خراب شد</b> (database disk image is malformed).
+6889d6242	ربات تا 5 ثانیهٔ دیگر دوباره راه‌اندازی می‌شود؛ هنگام شروع، فایل خراب کنار گذاشته و داده‌ها بازیابی می‌شوند.
+6ffdbe5e2	ربات همین الان روشن شد، بنابراین راه‌اندازی مجدد خودکار انجام نشد. ربات را دستی دوباره راه‌اندازی کنید.
 103ec5f85	چت: ⟨0⟩
 0f97d9633	⚠️ خطای ربات
 15781d4a0	⚠️ این دکمه قدیمی یا نامعتبر است. منو را دوباره باز کنید.
@@ -33042,6 +34029,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS شروع شد
 82459fdce	پایگاه داده: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	گروه/کانال‌های ثبت‌شده: <b>⟨0⟩</b>
+05229d023	🛠 <b>پایگاه داده خراب بود و تعمیر شد.</b> فایل خراب: <code>⟨0⟩</code>
+8a235e6be	جدول‌های بازیابی‌شده: ⟨0⟩ · از پشتیبان: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ بازیابی‌نشده: ⟨0⟩
 6c20c0dd0	⚠️ پایگاه داده خالی باز شد و از آخرین پشتیبان بازیابی شد: <code>⟨0⟩</code>
 0e4276ce2	⚠️ چت ثبت‌شده‌ای نیست. اگر این عدد با راه‌اندازی مجدد ربات کم می‌شود، شاید فایل پایگاه داده حذف شده یا ربات از پوشه دیگری اجرا می‌شود.
 3831f1221	به سرور دسترسی نشد
@@ -33294,6 +34284,72 @@ a77f997a9	flood (⟨0⟩ messages/⟨1⟩ s)
 794910b1f	Mot interdit
 8fb66aa89	mot interdit
 4e5efb06d	spam répété
+881f4a7b9	📜 Bienvenue ⟨0⟩ ! Pour écrire dans le groupe, vous devez lire et accepter les règles :
+932c8c539	📜 Bienvenue ⟨0⟩ ! Acceptez-vous de respecter les règles du groupe ?
+d11dd3db7	✅ J'ai lu les règles et je les accepte
+d6b7e92ea	📜 En attente de l'acceptation des règles : ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Ce bouton n'est pas valide.
+9c148e8f9	Ce bouton n'est pas pour vous ; seule la personne qui vient d'arriver peut accepter les règles.
+7f0e2a142	Groupe introuvable.
+9d4cfb23f	Impossible de lever votre restriction ; merci de prévenir les administrateurs.
+925b57ed1	✅ Merci ! Vous pouvez écrire maintenant.
+65d432938	✅ Règles acceptées : ⟨0⟩ | ⟨1⟩
+440a0b88c	administrateur anonyme
+52b5bc87d	le nom du groupe
+39913ac6c	la photo du groupe
+66a230ead	le message épinglé
+62ff3a80d	🏷 Protection des infos du groupe : ⟨0⟩ a modifié ⟨1⟩ → restauré | ⟨2⟩
+a91a23aac	🏷 Protection des infos du groupe : ⟨0⟩ a modifié ⟨1⟩ → impossible d'annuler (le bot doit avoir les droits de modifier les infos du groupe et d'épingler) | ⟨2⟩
+517c3659d	📝 La description du groupe a été modifiée ; elle a été restaurée. Si le fondateur a fait la modification, appuyez dans le panneau sur 🛂 Sécurité des membres et du groupe → 📸 Enregistrer l'état actuel.
+e6529ed9a	un numéro de téléphone
+b9f1af256	une adresse e-mail
+8f8cbef64	une adresse de portefeuille crypto
+bf4118840	une invitation « écris-moi en privé »
+f0840bba1	📞 Téléphone
+c0c435e96	📧 E-mail
+ace48f755	🪙 Portefeuille crypto
+5e78fdc15	💬 « Écris-moi en privé »
+e0669071a	Données personnelles
+74a706b28	🛂 ⟨0⟩, votre message a été supprimé car il contenait ⟨1⟩. Pour votre sécurité, ne partagez pas vos données personnelles dans le groupe.
+0b6ac9fc5	données personnelles / schéma d'arnaque (⟨0⟩)
+1c979a8ff	aucun pour l’instant
+e386f2a7c	🛂 <b>Sécurité des membres et du groupe</b> — ⟨0⟩
+d3c7dee60	📜 <b>Acceptation des règles :</b> un nouveau membre ne peut pas écrire tant qu'il n'a pas accepté les règles du groupe avec un bouton (si le captcha est actif, c'est demandé après le captcha). Celui qui a accepté une fois n'est plus sollicité en revenant.
+67f8d8ae3	🏷 <b>Protection des infos du groupe :</b> si quelqu'un d'autre que le fondateur modifie le nom, la photo ou le message épinglé du groupe, tout est restauré ; la description est vérifiée toutes les 10 minutes. Les modifications du fondateur sont enregistrées automatiquement ; si le fondateur a modifié la description, enregistrez-la avec 📸. Seul le fondateur / cofondateur peut modifier ceci.
+092c6482f	Dernier instantané : ⟨0⟩
+e26ff3006	🔐 <b>Données personnelles et schémas d'arnaque :</b> les messages des membres contenant un numéro de téléphone, un e-mail, un IBAN, une adresse de portefeuille crypto ou une invitation « écris-moi en privé » sont supprimés et la sanction choisie est appliquée.
+5dce9c972	🤖 <b>Protection contre le spam de commandes :</b> les commandes que les membres envoient à d'autres bots sont supprimées ; celui qui recommence ⟨1⟩ fois en ⟨0⟩ s reçoit la sanction choisie. Au-delà de ⟨3⟩ signalements en ⟨2⟩ minutes, ils sont ignorés et la même sanction est appliquée. Seul le fondateur / cofondateur peut modifier ceci.
+4ccb73609	📜 Acceptation des règles
+614de7399	🏷 Protection des infos du groupe
+c6b97674b	📸 Enregistrer l'état actuel
+3052b371c	🔐 Protection des données personnelles
+39cb36b03	👇 Sanction données personnelles
+8299dd6da	🤖 Protection contre le spam de commandes
+e6c02779f	👇 Sanction spam de commandes
+8fc0cad4c	🚫 Désactiver des commandes (⟨0⟩) ›
+afbd89c3f	Protection des commandes
+e17cd1749	🚫 ⟨0⟩, cette commande est désactivée dans ce groupe.
+16c681ed1	commande désactivée dans ce groupe (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, n'envoyez pas sans cesse des commandes d'autres bots ; elles sont supprimées dans ce groupe.
+3519e7bcc	spam de commandes (commandes d'autres bots)
+a64baef4c	🤖 ⟨0⟩, les commandes d'autres bots sont supprimées dans ce groupe.
+7dd5bf468	🚩 ⟨0⟩, vous avez envoyé trop de signalements ; ils seront ignorés pendant un moment.
+81879c932	abus du système de signalement
+f6d2e9197	🚫 <b>Désactiver des commandes</b> — ⟨0⟩
+054caaae3	Les membres ne peuvent pas utiliser dans ce groupe les commandes que vous désactivez : le message est supprimé et l'action choisie est appliquée (si « Supprimer » est choisi, un court avis « cette commande est désactivée dans ce groupe » s'affiche). L'équipe peut continuer à utiliser les commandes désactivées. Seul le fondateur / cofondateur peut modifier ceci.
+0bb5c2cf8	Commandes désactivées : <b>⟨0⟩</b>
+d5b266a81	Utilisation rapide : <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Quand une commande désactivée est utilisée
+c22b8f825	🚫 <b>Désactiver des commandes</b>
+76a397d40	Utilisation : <code>/komutkapat commande</code> · <code>/komutac commande</code>
+bd149a1f2	L'équipe peut continuer à utiliser les commandes désactivées.
+8c7a4527b	⚠️ /⟨0⟩ ne fait pas partie des commandes désactivables.
+4bd6b629c	Désactivables : ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ est déjà activée.
+c04beaefc	🚫 /⟨0⟩ est déjà désactivée.
+c1b5afc45	✅ /⟨0⟩ est activée pour les membres de ce groupe.
+36b26ef8c	🚫 /⟨0⟩ est désactivée pour les membres de ce groupe (l'équipe peut l'utiliser).
+4509732b3	🚫 Commande ⟨0⟩ : /⟨1⟩ | ⟨2⟩
 c91e153a9	L’anti-transfert est maintenant : ⟨0⟩
 6d6d358e6	Utilisation : /antiforward on|off
 117ba2454	ACTIVÉ
@@ -33606,11 +34662,21 @@ f5c96387f	🛟 Récupération
 1bd24917c	✖️ Fermer
 e38a49a6f	Paramètres de protection du canal
 f81ca3a77	Seul le fondateur du groupe peut modifier ce paramètre.
+499b40121	Seuls le fondateur et le cofondateur peuvent modifier ce paramètre.
 4081e665c	Paramètre invalide
 ce432606a	✅ Activé
 ca037fcc4	❌ Désactivé
 a006b158d	⚙️ Sanction ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Sanction : ⟨0⟩
+829773348	⚙️ Sanction de la protection des données personnelles → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Sanction de la protection contre le spam de commandes → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Action pour commande désactivée → ⟨0⟩ | ⟨1⟩
+d66461de6	Action : ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ désactivée
+1366de2b8	✅ /⟨0⟩ activée
+a69466222	📸 Infos du groupe (nom, description, photo, message épinglé) enregistrées | ⟨0⟩
+87f3326f9	📸 Enregistré
+49c866e1e	Enregistrement impossible (le bot est-il admin ?)
 286a11648	Sanction à la limite : ⟨0⟩
 c32110889	La liste a changé, actualisée
 cf6b53ca2	🗑 ⟨0⟩ supprimé : ⟨1⟩ | ⟨2⟩
@@ -33628,7 +34694,6 @@ e413c4b9e	Règles supprimées
 0f514bbde	✅ Verrouillage anti-raid levé depuis le panneau | ⟨0⟩
 8e6a20f22	🔓 Déverrouillé
 f5014f259	Déverrouillage impossible (droits du bot ?)
-7f0e2a142	Groupe introuvable.
 f41c17d41	Vous devez être admin du groupe pour utiliser ce panneau.
 8213d6575	<i>Pour annuler : cancel</i>
 1465f36fd	Écrivez votre réponse en répondant au message qui s’est ouvert.
@@ -33706,10 +34771,8 @@ a0ec7c7bd	➖ Retirer ce groupe du réseau
 db918b20f	Ce groupe ne fait partie d’aucun réseau. Si vous ajoutez à votre réseau les groupes que vous gérez, les bannissements s’appliquent à tous et vous pouvez copier les paramètres d’un geste. (Fondateur / cofondateur requis.)
 e44c5b572	➕ Ajouter ce groupe à mon réseau
 fe6b211f8	⟨0⟩ (⟨1⟩ admins)
-1c979a8ff	aucun pour l’instant
 9f41d74fa	🛟 <b>Récupération des admins</b> — ⟨0⟩
 62477adfc	La liste des admins est enregistrée toutes les 6 heures. Si quelqu’un retire les droits de 3 admins ou plus en peu de temps, les admins et les personnes de confiance reçoivent une alerte avec un bouton de récupération. Les personnes de confiance peuvent rétablir les admins en envoyant <code>/recover</code> au bot en privé.
-092c6482f	Dernier instantané : ⟨0⟩
 ba8991412	Personnes de confiance (⟨0⟩/3) — touchez pour retirer :
 5729ee3a9	➕ Ajouter une personne de confiance
 72e9b014a	Restaurer automatiquement
@@ -33736,8 +34799,6 @@ f9a34a2ad	Synchronisation des bannissements ⟨0⟩
 eacfa093c	Copié dans ⟨0⟩ groupes
 c39c747b1	Seul le fondateur peut modifier les paramètres de récupération.
 95e917987	Retiré
-87f3326f9	📸 Enregistré
-49c866e1e	Enregistrement impossible (le bot est-il admin ?)
 b13ed05bb	♻️ ⟨0⟩ admins rétablis⟨1⟩
 8670a3a46	, ⟨0⟩ en échec
 c3b595125	Seul le fondateur peut ajouter des personnes de confiance.
@@ -33838,6 +34899,7 @@ a96302489	Rien n’est en cours d’envoi.
 b0b0b34ae	📢 <b>Annonces récentes</b>
 b6eaec96e	↪️ message transféré
 a2148c2a7	🗳 sondage
+a68f06db1	(média)
 771c7f3fb	👆 ⟨0⟩ clics⟨1⟩
 8139aea8f	(⟨0⟩ personnes)
 71fc8c6a3	❌ Annuler #⟨0⟩
@@ -34147,6 +35209,10 @@ c0c03c505	⟨0⟩ retiré de la liste d’exemption.
 e6695a6db	⟨0⟩ ajouté à la liste d’exemption anti-spam.
 9e5f1a353	Groupe privé
 688f939e9	Filtre de mots
+9d784908d	Acceptation des Règles
+1340d231a	Protection des Infos du Groupe
+1bd1325c6	Protection des Données Personnelles
+1c138f426	Protection des Commandes
 cbabb7d8b	Aucune
 28b8f5479	👥 Membres : ⟨0⟩
 ceb987630	👮 Admins : ⟨0⟩
@@ -34257,6 +35323,7 @@ bfe1425f8	/forcesub @channel — Les utilisateurs doivent rejoindre le canal pou
 886d570db	/unlockdown · /unlockmedia — Lever les verrouillages
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <commande> · /komutac <commande> — Désactive / active une commande des membres dans ce groupe (fondateur / cofondateur uniquement)
 3d2493394	/blockmedia · /blockpack — Bloquer médias/packs
 20abda0cf	/admin (/addadmin) · /senioradmin @user [titre] — Donner un rang
 3c7389596	/remove @user — Retirer un rang
@@ -34828,6 +35895,21 @@ f7e588100	🌐 Liste anti-spam CAS
 4a02f552b	✏️ Suivi des changements de nom
 32a52c44c	🗳 Vote de mise en sourdine
 9b96d57aa	Durée du vote de mise en sourdine
+d321f95bf	🛂 Sécurité des membres et du groupe
+496842aa2	Un nouveau membre ne peut pas écrire tant qu'il n'a pas accepté les règles du groupe avec un bouton. Celui qui a accepté une fois n'est plus sollicité.
+11daa849d	Si quelqu'un d'autre que le fondateur modifie le nom, la photo, le message épinglé ou la description du groupe, tout est restauré. Seul le fondateur / cofondateur peut modifier ceci.
+bca49e9f7	🔐 Données personnelles et schémas d'arnaque
+f82c0d7d4	Les messages des membres contenant un téléphone, un e-mail, un IBAN, une adresse de portefeuille crypto ou une invitation « écris-moi en privé » sont supprimés.
+b49a7535a	📞 Numéro de téléphone
+ae97acaeb	📧 Adresse e-mail
+bf9420e5b	🪙 Adresse de portefeuille crypto
+83cc05280	💬 Invitations « écris-moi en privé »
+60ee0d4b1	Sanction données personnelles
+1089f4de7	Les commandes que les membres envoient à d'autres bots sont supprimées ; ceux qui recommencent souvent ou envoient trop de signalements sont sanctionnés. Seul le fondateur / cofondateur peut modifier ceci.
+7b002b274	Sanction spam de commandes
+2d1965747	🚫 Commandes désactivées
+8add0446e	Une commande par ligne (ex. rapor, zar). Les membres ne peuvent pas les utiliser, l'équipe oui. Désactivables : ⟨0⟩
+2646100b5	Quand une commande désactivée est utilisée
 d51893a35	🌍 Langue
 8d6c8a4a5	La langue du bot dans ce groupe
 45ac69c17	Les messages, boutons et alertes du bot seront dans cette langue. Le contenu que vous avez écrit ne change pas.
@@ -34846,6 +35928,7 @@ c4395cbb9	Personnes de confiance (3 maximum)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Choix invalide
+21140c9c2	Commande non désactivable : ⟨0⟩
 4094a1250	Trop long : ⟨0⟩…
 3994c99a9	ID invalide : ⟨0⟩ (chiffres uniquement)
 5055a2323	⟨0⟩ personnes au maximum
@@ -35175,6 +36258,9 @@ f666e1d93	🗄 Sauvegarde de la base de données · ⟨0⟩ Mo (compressée ⟨1
 9cfd9973e	Pour restaurer, placez le fichier .db du zip dans le dossier du bot sous le nom bot_data.db.
 391c8e6d0	🗄 Sauvegarde effectuée mais trop volumineuse pour Telegram (⟨0⟩ Mo) : ⟨1⟩
 c3fcc95df	🗄 Sauvegarde en cours...
+35db56b39	⚠️ <b>La base de données est corrompue</b> (database disk image is malformed).
+6889d6242	Le bot redémarre dans 5 s ; au démarrage, le fichier corrompu sera mis de côté et les données récupérées.
+6ffdbe5e2	Le bot vient de démarrer, aucun redémarrage automatique n'a donc été fait. Redémarrez le bot manuellement.
 103ec5f85	Chat : ⟨0⟩
 0f97d9633	⚠️ Erreur du bot
 15781d4a0	⚠️ Ce bouton est obsolète ou invalide. Rouvrez le menu.
@@ -35190,6 +36276,9 @@ be0743f28	🔄 /reload : +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS a démarré
 82459fdce	Base de données : <code>⟨0⟩</code> (⟨1⟩ Ko)
 d2e59a824	Groupes/canaux enregistrés : <b>⟨0⟩</b>
+05229d023	🛠 <b>La base de données était corrompue et a été réparée.</b> Fichier corrompu : <code>⟨0⟩</code>
+8a235e6be	Tables récupérées : ⟨0⟩ · restaurées depuis la sauvegarde : ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Non récupérable : ⟨0⟩
 6c20c0dd0	⚠️ La base de données s’est ouverte vide et a été restaurée depuis la dernière sauvegarde : <code>⟨0⟩</code>
 0e4276ce2	⚠️ Aucun chat enregistré. Si ce nombre baisse au redémarrage du bot, le fichier de base de données a peut-être été supprimé ou le bot tourne depuis un autre dossier.
 3831f1221	Impossible de joindre le serveur
@@ -35443,6 +36532,72 @@ a77f997a9	फ़्लड (⟨0⟩ संदेश/⟨1⟩ से.)
 794910b1f	प्रतिबंधित शब्द
 8fb66aa89	प्रतिबंधित शब्द
 4e5efb06d	बार-बार स्पैम
+881f4a7b9	📜 स्वागत है ⟨0⟩! ग्रुप में लिखने के लिए तुम्हें नियम पढ़कर स्वीकार करने होंगे:
+932c8c539	📜 स्वागत है ⟨0⟩! क्या तुम ग्रुप के नियमों का पालन करने के लिए सहमत हो?
+d11dd3db7	✅ मैंने नियम पढ़ लिए हैं और स्वीकार करता हूँ
+d6b7e92ea	📜 नियम स्वीकृति की प्रतीक्षा: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	यह बटन अमान्य है।
+9c148e8f9	यह बटन तुम्हारे लिए नहीं है; नियम सिर्फ़ नया जुड़ा व्यक्ति स्वीकार कर सकता है।
+7f0e2a142	ग्रुप नहीं मिला।
+9d4cfb23f	तुम्हारी पाबंदी हटाई नहीं जा सकी; कृपया एडमिन को बताओ।
+925b57ed1	✅ धन्यवाद! अब तुम लिख सकते हो।
+65d432938	✅ नियम स्वीकार किए गए: ⟨0⟩ | ⟨1⟩
+440a0b88c	गुमनाम एडमिन
+52b5bc87d	ग्रुप का नाम
+39913ac6c	ग्रुप की फ़ोटो
+66a230ead	पिन किया गया संदेश
+62ff3a80d	🏷 ग्रुप जानकारी सुरक्षा: ⟨0⟩ ने ⟨1⟩ बदला → पहले जैसा कर दिया गया | ⟨2⟩
+a91a23aac	🏷 ग्रुप जानकारी सुरक्षा: ⟨0⟩ ने ⟨1⟩ बदला → वापस नहीं किया जा सका (बॉट के पास ग्रुप जानकारी बदलने और पिन करने का अधिकार होना चाहिए) | ⟨2⟩
+517c3659d	📝 ग्रुप का विवरण बदला गया था; उसे पहले जैसा कर दिया गया। अगर बदलाव संस्थापक ने किया था, तो पैनल में 🛂 सदस्य और ग्रुप सुरक्षा → 📸 मौजूदा स्थिति सहेजें दबाओ।
+e6529ed9a	फ़ोन नंबर
+b9f1af256	ईमेल पता
+8f8cbef64	क्रिप्टो वॉलेट पता
+bf4118840	"प्राइवेट में मैसेज करो" बुलावा
+f0840bba1	📞 फ़ोन
+c0c435e96	📧 ईमेल
+ace48f755	🪙 क्रिप्टो वॉलेट
+5e78fdc15	💬 "प्राइवेट में मैसेज करो"
+e0669071a	निजी जानकारी
+74a706b28	🛂 ⟨0⟩, तुम्हारा संदेश हटा दिया गया क्योंकि उसमें ⟨1⟩ था। अपनी सुरक्षा के लिए ग्रुप में निजी जानकारी साझा मत करो।
+0b6ac9fc5	निजी जानकारी / धोखाधड़ी पैटर्न (⟨0⟩)
+1c979a8ff	अभी कोई नहीं
+e386f2a7c	🛂 <b>सदस्य और ग्रुप सुरक्षा</b> — ⟨0⟩
+d3c7dee60	📜 <b>नियम स्वीकृति:</b> नया सदस्य तब तक नहीं लिख सकता जब तक वह बटन से ग्रुप के नियम स्वीकार न करे (कैप्चा चालू हो तो कैप्चा के बाद पूछा जाता है)। जिसने एक बार स्वीकार कर लिया, उससे दोबारा जुड़ने पर नहीं पूछा जाता।
+67f8d8ae3	🏷 <b>ग्रुप जानकारी सुरक्षा:</b> संस्थापक के अलावा कोई ग्रुप का नाम, फ़ोटो या पिन किया गया संदेश बदले तो उसे पहले जैसा कर दिया जाता है; विवरण हर 10 मिनट में जाँचा जाता है। संस्थापक के बदलाव अपने-आप सहेजे जाते हैं; अगर संस्थापक ने विवरण बदला है तो 📸 से सहेजो। सिर्फ़ संस्थापक / सह-संस्थापक बदल सकते हैं।
+092c6482f	आखिरी स्नैपशॉट: ⟨0⟩
+e26ff3006	🔐 <b>निजी जानकारी और धोखाधड़ी पैटर्न:</b> सदस्यों के ऐसे संदेश जिनमें फ़ोन नंबर, ईमेल, IBAN, क्रिप्टो वॉलेट पता या "प्राइवेट में मैसेज करो" बुलावा हो, हटा दिए जाते हैं और चुनी गई सज़ा लागू होती है।
+5dce9c972	🤖 <b>कमांड स्पैम सुरक्षा:</b> सदस्य दूसरे बॉट्स को जो कमांड भेजते हैं, वे हटा दिए जाते हैं; जो ⟨0⟩ सेकंड में ⟨1⟩ बार दोहराए, उसे चुनी गई सज़ा मिलती है। ⟨2⟩ मिनट में ⟨3⟩ से ज़्यादा रिपोर्ट अनदेखी की जाती हैं और वही सज़ा लागू होती है। सिर्फ़ संस्थापक / सह-संस्थापक बदल सकते हैं।
+4ccb73609	📜 नियम स्वीकृति
+614de7399	🏷 ग्रुप जानकारी सुरक्षा
+c6b97674b	📸 मौजूदा स्थिति सहेजें
+3052b371c	🔐 निजी जानकारी सुरक्षा
+39cb36b03	👇 निजी जानकारी की सज़ा
+8299dd6da	🤖 कमांड स्पैम सुरक्षा
+e6c02779f	👇 कमांड स्पैम की सज़ा
+8fc0cad4c	🚫 कमांड बंद करें (⟨0⟩) ›
+afbd89c3f	कमांड सुरक्षा
+e17cd1749	🚫 ⟨0⟩, यह कमांड इस ग्रुप में बंद है।
+16c681ed1	इस ग्रुप में बंद कमांड (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, दूसरे बॉट्स की कमांड बार-बार मत भेजो; इस ग्रुप में वे हटा दी जाती हैं।
+3519e7bcc	कमांड स्पैम (दूसरे बॉट्स की कमांड)
+a64baef4c	🤖 ⟨0⟩, इस ग्रुप में दूसरे बॉट्स की कमांड हटा दी जाती हैं।
+7dd5bf468	🚩 ⟨0⟩, तुमने बहुत ज़्यादा रिपोर्ट भेजीं; कुछ समय तक तुम्हारी रिपोर्ट अनदेखी की जाएँगी।
+81879c932	रिपोर्ट सिस्टम का दुरुपयोग
+f6d2e9197	🚫 <b>कमांड बंद करें</b> — ⟨0⟩
+054caaae3	जो कमांड तुम बंद करते हो, सदस्य इस ग्रुप में उनका इस्तेमाल नहीं कर सकते: संदेश हटा दिया जाता है और चुनी गई कार्रवाई लागू होती है ("हटाएँ" चुना हो तो छोटी सूचना "यह कमांड इस ग्रुप में बंद है" दिखती है)। स्टाफ़ बंद कमांड इस्तेमाल करता रह सकता है। सिर्फ़ संस्थापक / सह-संस्थापक बदल सकते हैं।
+0bb5c2cf8	बंद कमांड: <b>⟨0⟩</b>
+d5b266a81	जल्दी इस्तेमाल: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 बंद कमांड इस्तेमाल होने पर
+c22b8f825	🚫 <b>कमांड बंद करें</b>
+76a397d40	इस्तेमाल: <code>/komutkapat कमांड</code> · <code>/komutac कमांड</code>
+bd149a1f2	स्टाफ़ बंद कमांड इस्तेमाल करता रह सकता है।
+8c7a4527b	⚠️ /⟨0⟩ बंद की जा सकने वाली कमांड में नहीं है।
+4bd6b629c	बंद की जा सकती हैं: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ पहले से चालू है।
+c04beaefc	🚫 /⟨0⟩ पहले से बंद है।
+c1b5afc45	✅ /⟨0⟩ इस ग्रुप में सदस्यों के लिए चालू की गई।
+36b26ef8c	🚫 /⟨0⟩ इस ग्रुप में सदस्यों के लिए बंद की गई (स्टाफ़ इस्तेमाल कर सकता है)।
+4509732b3	🚫 कमांड ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	एंटी-फ़ॉरवर्ड अब: ⟨0⟩
 6d6d358e6	उपयोग: /antiforward on|off
 117ba2454	चालू
@@ -35758,11 +36913,21 @@ f5c96387f	🛟 रिकवरी
 1bd24917c	✖️ बंद करें
 e38a49a6f	चैनल सुरक्षा सेटिंग्स
 f81ca3a77	यह सेटिंग केवल ग्रुप का संस्थापक बदल सकता है।
+499b40121	यह सेटिंग सिर्फ़ संस्थापक और सह-संस्थापक बदल सकते हैं।
 4081e665c	अमान्य सेटिंग
 ce432606a	✅ चालू किया गया
 ca037fcc4	❌ बंद किया गया
 a006b158d	⚙️ ⟨0⟩ दंड → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	दंड: ⟨0⟩
+829773348	⚙️ निजी जानकारी सुरक्षा की सज़ा → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ कमांड स्पैम सुरक्षा की सज़ा → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ बंद कमांड पर कार्रवाई → ⟨0⟩ | ⟨1⟩
+d66461de6	कार्रवाई: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ बंद की गई
+1366de2b8	✅ /⟨0⟩ चालू की गई
+a69466222	📸 ग्रुप जानकारी (नाम, विवरण, फ़ोटो, पिन संदेश) सहेजी गई | ⟨0⟩
+87f3326f9	📸 सेव किया गया
+49c866e1e	सेव नहीं हो सका (क्या बॉट एडमिन है?)
 286a11648	सीमा पर दंड: ⟨0⟩
 c32110889	सूची बदल गई, रीफ़्रेश की गई
 cf6b53ca2	🗑 ⟨0⟩ हटाया गया: ⟨1⟩ | ⟨2⟩
@@ -35780,7 +36945,6 @@ e413c4b9e	नियम हटाए गए
 0f514bbde	✅ पैनल से रेड लॉक हटाया गया | ⟨0⟩
 8e6a20f22	🔓 अनलॉक किया गया
 f5014f259	अनलॉक नहीं हो सका (बॉट की अनुमतियाँ?)
-7f0e2a142	ग्रुप नहीं मिला।
 f41c17d41	इस पैनल का उपयोग करने के लिए आपको ग्रुप में एडमिन होना चाहिए।
 8213d6575	<i>रद्द करने के लिए: cancel</i>
 1465f36fd	खुले हुए संदेश के जवाब में अपना उत्तर लिखें।
@@ -35858,10 +37022,8 @@ a0ec7c7bd	➖ इस ग्रुप को नेटवर्क से हट�
 db918b20f	यह ग्रुप किसी नेटवर्क में नहीं है। अगर आप अपने प्रबंधित ग्रुप अपने नेटवर्क में जोड़ते हैं, तो बैन सभी में लागू होंगे और आप एक टैप में सेटिंग्स कॉपी कर सकेंगे। (संस्थापक / सह-संस्थापक होना ज़रूरी है।)
 e44c5b572	➕ इस ग्रुप को मेरे नेटवर्क में जोड़ें
 fe6b211f8	⟨0⟩ (⟨1⟩ एडमिन)
-1c979a8ff	अभी कोई नहीं
 9f41d74fa	🛟 <b>एडमिन रिकवरी</b> — ⟨0⟩
 62477adfc	एडमिन सूची हर 6 घंटे में सेव होती है। अगर कोई कम समय में 3+ एडमिन के अधिकार हटा देता है, तो एडमिन और भरोसेमंद लोगों को रिकवरी बटन वाली चेतावनी मिलती है। भरोसेमंद लोग बॉट को निजी में <code>/recover</code> भेजकर एडमिन बहाल कर सकते हैं।
-092c6482f	आखिरी स्नैपशॉट: ⟨0⟩
 ba8991412	भरोसेमंद लोग (⟨0⟩/3) — हटाने के लिए टैप करें:
 5729ee3a9	➕ भरोसेमंद व्यक्ति जोड़ें
 72e9b014a	अपने-आप बहाल करें
@@ -35888,8 +37050,6 @@ f9a34a2ad	बैन सिंक ⟨0⟩
 eacfa093c	⟨0⟩ ग्रुप में कॉपी किया गया
 c39c747b1	रिकवरी सेटिंग्स केवल संस्थापक बदल सकता है।
 95e917987	हटाया गया
-87f3326f9	📸 सेव किया गया
-49c866e1e	सेव नहीं हो सका (क्या बॉट एडमिन है?)
 b13ed05bb	♻️ ⟨0⟩ एडमिन बहाल किए गए⟨1⟩
 8670a3a46	, ⟨0⟩ विफल
 c3b595125	भरोसेमंद लोगों को केवल संस्थापक जोड़ सकता है।
@@ -35990,6 +37150,7 @@ a96302489	अभी कुछ नहीं भेजा जा रहा।
 b0b0b34ae	📢 <b>हाल की घोषणाएँ</b>
 b6eaec96e	↪️ फ़ॉरवर्ड किया गया संदेश
 a2148c2a7	🗳 पोल
+a68f06db1	(मीडिया)
 771c7f3fb	👆 ⟨0⟩ क्लिक⟨1⟩
 8139aea8f	(⟨0⟩ लोग)
 71fc8c6a3	❌ #⟨0⟩ रद्द करें
@@ -36301,6 +37462,10 @@ e6695a6db	⟨0⟩ को स्पैम छूट सूची में जो
 9e5f1a353	निजी ग्रुप
 e9312bd1b	कैप्चा
 688f939e9	शब्द फ़िल्टर
+9d784908d	नियम स्वीकृति
+1340d231a	ग्रुप जानकारी सुरक्षा
+1bd1325c6	निजी जानकारी सुरक्षा
+1c138f426	कमांड सुरक्षा
 cbabb7d8b	कोई नहीं
 28b8f5479	👥 सदस्य: ⟨0⟩
 ceb987630	👮 एडमिन: ⟨0⟩
@@ -36411,6 +37576,7 @@ bfe1425f8	/forcesub @channel — लिखने के लिए उपयो�
 886d570db	/unlockdown · /unlockmedia — लॉक हटाएं
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <कमांड> · /komutac <कमांड> — इस ग्रुप में सदस्य कमांड बंद / चालू करें (सिर्फ़ संस्थापक / सह-संस्थापक)
 3d2493394	/blockmedia · /blockpack — मीडिया/पैक ब्लॉक करें
 20abda0cf	/admin (/addadmin) · /senioradmin @user [टैग] — रैंक दें
 3c7389596	/remove @user — रैंक हटाएं
@@ -36984,6 +38150,21 @@ f7e588100	🌐 CAS स्पैम सूची
 4a02f552b	✏️ नाम बदलाव ट्रैकिंग
 32a52c44c	🗳 म्यूट वोट
 9b96d57aa	म्यूट वोट की अवधि
+d321f95bf	🛂 सदस्य और ग्रुप सुरक्षा
+496842aa2	नया सदस्य तब तक नहीं लिख सकता जब तक वह बटन से ग्रुप के नियम स्वीकार न करे। जिसने एक बार स्वीकार कर लिया, उससे दोबारा नहीं पूछा जाता।
+11daa849d	संस्थापक के अलावा कोई ग्रुप का नाम, फ़ोटो, पिन संदेश या विवरण बदले तो उसे पहले जैसा कर दिया जाता है। सिर्फ़ संस्थापक / सह-संस्थापक बदल सकते हैं।
+bca49e9f7	🔐 निजी जानकारी और धोखाधड़ी पैटर्न
+f82c0d7d4	सदस्यों के ऐसे संदेश जिनमें फ़ोन, ईमेल, IBAN, क्रिप्टो वॉलेट पता या "प्राइवेट में मैसेज करो" बुलावा हो, हटा दिए जाते हैं।
+b49a7535a	📞 फ़ोन नंबर
+ae97acaeb	📧 ईमेल पता
+bf9420e5b	🪙 क्रिप्टो वॉलेट पता
+83cc05280	💬 "प्राइवेट में मैसेज करो" बुलावे
+60ee0d4b1	निजी जानकारी की सज़ा
+1089f4de7	सदस्य दूसरे बॉट्स को जो कमांड भेजते हैं, वे हटा दी जाती हैं; बार-बार दोहराने वालों और बहुत ज़्यादा रिपोर्ट भेजने वालों को सज़ा मिलती है। सिर्फ़ संस्थापक / सह-संस्थापक बदल सकते हैं।
+7b002b274	कमांड स्पैम की सज़ा
+2d1965747	🚫 बंद कमांड
+8add0446e	हर लाइन में एक कमांड (जैसे rapor, zar)। सदस्य इस्तेमाल नहीं कर सकते, स्टाफ़ कर सकता है। बंद की जा सकती हैं: ⟨0⟩
+2646100b5	बंद कमांड इस्तेमाल होने पर
 d51893a35	🌍 भाषा
 8d6c8a4a5	इस ग्रुप में बॉट की भाषा
 45ac69c17	बॉट के संदेश, बटन और अलर्ट इस भाषा में होंगे। आपकी लिखी सामग्री नहीं बदलती।
@@ -37002,6 +38183,7 @@ c4395cbb9	भरोसेमंद लोग (अधिकतम 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	अमान्य विकल्प
+21140c9c2	ऐसी कमांड जो बंद नहीं की जा सकती: ⟨0⟩
 4094a1250	बहुत लंबा: ⟨0⟩…
 3994c99a9	अमान्य ID: ⟨0⟩ (केवल अंक)
 5055a2323	अधिकतम ⟨0⟩ लोग
@@ -37334,6 +38516,9 @@ f666e1d93	🗄 डेटाबेस बैकअप · ⟨0⟩ MB (संपी
 9cfd9973e	बहाल करने के लिए zip की .db फ़ाइल को bot_data.db नाम से बॉट फ़ोल्डर में रखें।
 391c8e6d0	🗄 बैकअप लिया गया लेकिन Telegram में नहीं आता (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 बैकअप लिया जा रहा है...
+35db56b39	⚠️ <b>डेटाबेस खराब हो गया</b> (database disk image is malformed).
+6889d6242	बॉट 5 सेकंड में फिर से शुरू हो रहा है; शुरू होते समय खराब फ़ाइल अलग रख दी जाएगी और डेटा वापस लाया जाएगा।
+6ffdbe5e2	बॉट अभी-अभी शुरू हुआ है, इसलिए अपने-आप रीस्टार्ट नहीं किया गया। बॉट को मैन्युअली रीस्टार्ट करें।
 103ec5f85	चैट: ⟨0⟩
 0f97d9633	⚠️ बॉट त्रुटि
 15781d4a0	⚠️ यह बटन पुराना या अमान्य है। मेनू फिर से खोलें।
@@ -37349,6 +38534,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS शुरू हुआ
 82459fdce	डेटाबेस: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	पंजीकृत ग्रुप/चैनल: <b>⟨0⟩</b>
+05229d023	🛠 <b>डेटाबेस खराब था, ठीक कर दिया गया।</b> खराब फ़ाइल: <code>⟨0⟩</code>
+8a235e6be	वापस लाई गई टेबल: ⟨0⟩ · बैकअप से ली गई: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ वापस नहीं लाई जा सकीं: ⟨0⟩
 6c20c0dd0	⚠️ डेटाबेस खाली खुला और आखिरी बैकअप से बहाल किया गया: <code>⟨0⟩</code>
 0e4276ce2	⚠️ कोई पंजीकृत चैट नहीं। अगर बॉट रीस्टार्ट होने पर यह संख्या घटती है, तो शायद डेटाबेस फ़ाइल हटा दी गई है या बॉट किसी दूसरे फ़ोल्डर से चल रहा है।
 3831f1221	सर्वर तक नहीं पहुँच सका
@@ -37601,6 +38789,72 @@ a77f997a9	flood (⟨0⟩ pesan/⟨1⟩ dtk)
 794910b1f	Kata terlarang
 8fb66aa89	kata terlarang
 4e5efb06d	spam berulang
+881f4a7b9	📜 Selamat datang ⟨0⟩! Agar bisa menulis di grup, kamu harus membaca dan menyetujui aturan:
+932c8c539	📜 Selamat datang ⟨0⟩! Apakah kamu setuju mematuhi aturan grup?
+d11dd3db7	✅ Saya sudah membaca aturan dan menyetujuinya
+d6b7e92ea	📜 Menunggu persetujuan aturan: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Tombol ini tidak valid.
+9c148e8f9	Tombol ini bukan untukmu; hanya orang yang baru bergabung yang bisa menyetujui aturan.
+7f0e2a142	Grup tidak ditemukan.
+9d4cfb23f	Pembatasanmu tidak bisa dicabut; tolong beri tahu admin.
+925b57ed1	✅ Terima kasih! Sekarang kamu bisa menulis.
+65d432938	✅ Aturan disetujui: ⟨0⟩ | ⟨1⟩
+440a0b88c	admin anonim
+52b5bc87d	nama grup
+39913ac6c	foto grup
+66a230ead	pesan yang disematkan
+62ff3a80d	🏷 Perlindungan info grup: ⟨0⟩ mengubah ⟨1⟩ → dikembalikan | ⟨2⟩
+a91a23aac	🏷 Perlindungan info grup: ⟨0⟩ mengubah ⟨1⟩ → tidak bisa dikembalikan (bot perlu izin mengubah info grup dan menyematkan pesan) | ⟨2⟩
+517c3659d	📝 Deskripsi grup telah diubah; sudah dikembalikan. Jika perubahan dibuat oleh pendiri, tekan 🛂 Keamanan anggota dan grup → 📸 Simpan kondisi saat ini di panel.
+e6529ed9a	nomor telepon
+b9f1af256	alamat email
+8f8cbef64	alamat dompet kripto
+bf4118840	ajakan "chat pribadi"
+f0840bba1	📞 Telepon
+c0c435e96	📧 Email
+ace48f755	🪙 Dompet kripto
+5e78fdc15	💬 "Chat pribadi"
+e0669071a	Info pribadi
+74a706b28	🛂 ⟨0⟩, pesanmu dihapus karena berisi ⟨1⟩. Demi keamananmu, jangan bagikan info pribadi di grup.
+0b6ac9fc5	info pribadi / pola penipuan (⟨0⟩)
+1c979a8ff	belum ada
+e386f2a7c	🛂 <b>Keamanan anggota dan grup</b> — ⟨0⟩
+d3c7dee60	📜 <b>Persetujuan aturan:</b> anggota baru tidak bisa menulis sampai menyetujui aturan grup lewat tombol (jika captcha aktif, ditanyakan setelah captcha). Yang sudah menyetujui sekali tidak ditanya lagi saat bergabung kembali.
+67f8d8ae3	🏷 <b>Perlindungan info grup:</b> jika selain pendiri ada yang mengubah nama, foto, atau pesan yang disematkan, semuanya dikembalikan; deskripsi diperiksa setiap 10 menit. Perubahan pendiri disimpan otomatis; jika pendiri mengubah deskripsi, simpan dengan 📸. Hanya pendiri / wakil pendiri yang bisa mengubah ini.
+092c6482f	Snapshot terakhir: ⟨0⟩
+e26ff3006	🔐 <b>Info pribadi dan pola penipuan:</b> pesan anggota yang berisi nomor telepon, email, IBAN, alamat dompet kripto, atau ajakan "chat pribadi" dihapus dan hukuman yang dipilih diterapkan.
+5dce9c972	🤖 <b>Perlindungan spam perintah:</b> perintah yang dikirim anggota ke bot lain dihapus; yang mengulanginya ⟨1⟩ kali dalam ⟨0⟩ detik mendapat hukuman yang dipilih. Lebih dari ⟨3⟩ laporan dalam ⟨2⟩ menit diabaikan dan hukuman yang sama diterapkan. Hanya pendiri / wakil pendiri yang bisa mengubah ini.
+4ccb73609	📜 Persetujuan aturan
+614de7399	🏷 Perlindungan info grup
+c6b97674b	📸 Simpan kondisi saat ini
+3052b371c	🔐 Perlindungan info pribadi
+39cb36b03	👇 Hukuman info pribadi
+8299dd6da	🤖 Perlindungan spam perintah
+e6c02779f	👇 Hukuman spam perintah
+8fc0cad4c	🚫 Nonaktifkan perintah (⟨0⟩) ›
+afbd89c3f	Perlindungan perintah
+e17cd1749	🚫 ⟨0⟩, perintah ini dinonaktifkan di grup ini.
+16c681ed1	perintah yang dinonaktifkan di grup ini (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, jangan terus mengirim perintah bot lain; di grup ini perintah itu dihapus.
+3519e7bcc	spam perintah (perintah bot lain)
+a64baef4c	🤖 ⟨0⟩, di grup ini perintah bot lain dihapus.
+7dd5bf468	🚩 ⟨0⟩, kamu mengirim terlalu banyak laporan; laporanmu akan diabaikan untuk sementara.
+81879c932	penyalahgunaan sistem laporan
+f6d2e9197	🚫 <b>Nonaktifkan perintah</b> — ⟨0⟩
+054caaae3	Anggota tidak bisa memakai perintah yang kamu nonaktifkan di grup ini: pesan dihapus dan tindakan yang dipilih diterapkan (jika "Hapus" dipilih, muncul peringatan singkat "perintah ini dinonaktifkan di grup ini"). Staf tetap bisa memakai perintah yang dinonaktifkan. Hanya pendiri / wakil pendiri yang bisa mengubah ini.
+0bb5c2cf8	Perintah nonaktif: <b>⟨0⟩</b>
+d5b266a81	Penggunaan cepat: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Saat perintah nonaktif dipakai
+c22b8f825	🚫 <b>Nonaktifkan perintah</b>
+76a397d40	Penggunaan: <code>/komutkapat perintah</code> · <code>/komutac perintah</code>
+bd149a1f2	Staf tetap bisa memakai perintah yang dinonaktifkan.
+8c7a4527b	⚠️ /⟨0⟩ bukan perintah yang bisa dinonaktifkan.
+4bd6b629c	Bisa dinonaktifkan: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ sudah aktif.
+c04beaefc	🚫 /⟨0⟩ sudah nonaktif.
+c1b5afc45	✅ /⟨0⟩ diaktifkan untuk anggota di grup ini.
+36b26ef8c	🚫 /⟨0⟩ dinonaktifkan untuk anggota di grup ini (staf tetap bisa memakai).
+4509732b3	🚫 Perintah ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Anti-terusan sekarang: ⟨0⟩
 6d6d358e6	Penggunaan: /antiforward on|off
 117ba2454	AKTIF
@@ -37909,11 +39163,21 @@ f5c96387f	🛟 Pemulihan
 1bd24917c	✖️ Tutup
 e38a49a6f	Pengaturan Perlindungan Saluran
 f81ca3a77	Hanya pendiri grup yang bisa mengubah pengaturan ini.
+499b40121	Hanya pendiri dan wakil pendiri yang bisa mengubah pengaturan ini.
 4081e665c	Pengaturan tidak valid
 ce432606a	✅ Diaktifkan
 ca037fcc4	❌ Dinonaktifkan
 a006b158d	⚙️ Hukuman ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Hukuman: ⟨0⟩
+829773348	⚙️ Hukuman perlindungan info pribadi → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Hukuman perlindungan spam perintah → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Tindakan untuk perintah nonaktif → ⟨0⟩ | ⟨1⟩
+d66461de6	Tindakan: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ dinonaktifkan
+1366de2b8	✅ /⟨0⟩ diaktifkan
+a69466222	📸 Info grup (nama, deskripsi, foto, pesan tersemat) disimpan | ⟨0⟩
+87f3326f9	📸 Tersimpan
+49c866e1e	Gagal menyimpan (apakah bot admin?)
 286a11648	Hukuman batas: ⟨0⟩
 c32110889	Daftar berubah, diperbarui
 cf6b53ca2	🗑 ⟨0⟩ dihapus: ⟨1⟩ | ⟨2⟩
@@ -37931,7 +39195,6 @@ e413c4b9e	Aturan dihapus
 0f514bbde	✅ Kunci anti-raid dibuka dari panel | ⟨0⟩
 8e6a20f22	🔓 Terbuka
 f5014f259	Gagal membuka (izin bot?)
-7f0e2a142	Grup tidak ditemukan.
 f41c17d41	Kamu harus admin di grup untuk memakai panel ini.
 8213d6575	<i>Untuk membatalkan: cancel</i>
 1465f36fd	Tulis jawabanmu sebagai balasan ke pesan yang terbuka.
@@ -38009,10 +39272,8 @@ a0ec7c7bd	➖ Keluarkan grup ini dari jaringan
 db918b20f	Grup ini tidak ada di jaringan. Jika grup yang kamu kelola dimasukkan ke jaringanmu, ban menyebar ke semuanya dan pengaturan bisa disalin sekali ketuk. (Perlu pendiri / wakil pendiri.)
 e44c5b572	➕ Tambahkan grup ini ke jaringanku
 fe6b211f8	⟨0⟩ (⟨1⟩ admin)
-1c979a8ff	belum ada
 9f41d74fa	🛟 <b>Pemulihan admin</b> — ⟨0⟩
 62477adfc	Daftar admin disimpan setiap 6 jam. Jika seseorang mencabut hak 3+ admin dalam waktu singkat, admin dan orang tepercaya menerima peringatan dengan tombol pemulihan. Orang tepercaya bisa memulihkan admin dengan mengirim <code>/recover</code> ke bot secara pribadi.
-092c6482f	Snapshot terakhir: ⟨0⟩
 ba8991412	Orang tepercaya (⟨0⟩/3) — ketuk untuk menghapus:
 5729ee3a9	➕ Tambah orang tepercaya
 72e9b014a	Pulihkan otomatis
@@ -38039,8 +39300,6 @@ f9a34a2ad	Sinkronisasi ban ⟨0⟩
 eacfa093c	Disalin ke ⟨0⟩ grup
 c39c747b1	Hanya pendiri yang bisa mengubah pengaturan pemulihan.
 95e917987	Dihapus
-87f3326f9	📸 Tersimpan
-49c866e1e	Gagal menyimpan (apakah bot admin?)
 b13ed05bb	♻️ ⟨0⟩ admin dipulihkan⟨1⟩
 8670a3a46	, ⟨0⟩ gagal
 c3b595125	Hanya pendiri yang bisa menambah orang tepercaya.
@@ -38140,6 +39399,7 @@ a96302489	Sedang tidak dikirim.
 b0b0b34ae	📢 <b>Pengumuman terbaru</b>
 b6eaec96e	↪️ pesan diteruskan
 a2148c2a7	🗳 polling
+a68f06db1	(media)
 771c7f3fb	👆 ⟨0⟩ klik⟨1⟩
 8139aea8f	(⟨0⟩ orang)
 71fc8c6a3	❌ Batalkan #⟨0⟩
@@ -38448,6 +39708,10 @@ c0c03c505	⟨0⟩ dihapus dari daftar pengecualian.
 e6695a6db	⟨0⟩ ditambahkan ke daftar pengecualian spam.
 9e5f1a353	Grup privat
 688f939e9	Filter Kata
+9d784908d	Persetujuan Aturan
+1340d231a	Perlindungan Info Grup
+1bd1325c6	Perlindungan Info Pribadi
+1c138f426	Perlindungan Perintah
 cbabb7d8b	Tidak ada
 28b8f5479	👥 Anggota: ⟨0⟩
 ceb987630	👮 Admin: ⟨0⟩
@@ -38558,6 +39822,7 @@ bfe1425f8	/forcesub @channel — Pengguna harus bergabung ke saluran untuk menul
 886d570db	/unlockdown · /unlockmedia — Buka kunci
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <perintah> · /komutac <perintah> — Nonaktifkan / aktifkan perintah anggota di grup ini (hanya pendiri / wakil pendiri)
 3d2493394	/blockmedia · /blockpack — Blokir media/paket
 20abda0cf	/admin (/addadmin) · /senioradmin @user [tag] — Beri pangkat
 3c7389596	/remove @user — Cabut pangkat
@@ -39128,6 +40393,21 @@ f7e588100	🌐 Daftar spam CAS
 4a02f552b	✏️ Pelacakan perubahan nama
 32a52c44c	🗳 Voting bisu
 9b96d57aa	Durasi voting bisu
+d321f95bf	🛂 Keamanan anggota dan grup
+496842aa2	Anggota baru tidak bisa menulis sampai menyetujui aturan grup lewat tombol. Yang sudah menyetujui sekali tidak ditanya lagi.
+11daa849d	Jika selain pendiri ada yang mengubah nama, foto, pesan yang disematkan, atau deskripsi grup, semuanya dikembalikan. Hanya pendiri / wakil pendiri yang bisa mengubah ini.
+bca49e9f7	🔐 Info pribadi dan pola penipuan
+f82c0d7d4	Pesan anggota yang berisi telepon, email, IBAN, alamat dompet kripto, atau ajakan "chat pribadi" dihapus.
+b49a7535a	📞 Nomor telepon
+ae97acaeb	📧 Alamat email
+bf9420e5b	🪙 Alamat dompet kripto
+83cc05280	💬 Ajakan "chat pribadi"
+60ee0d4b1	Hukuman info pribadi
+1089f4de7	Perintah yang dikirim anggota ke bot lain dihapus; yang sering mengulang atau mengirim terlalu banyak laporan dihukum. Hanya pendiri / wakil pendiri yang bisa mengubah ini.
+7b002b274	Hukuman spam perintah
+2d1965747	🚫 Perintah nonaktif
+8add0446e	Satu perintah per baris (mis. rapor, zar). Anggota tidak bisa memakainya, staf bisa. Bisa dinonaktifkan: ⟨0⟩
+2646100b5	Saat perintah nonaktif dipakai
 d51893a35	🌍 Bahasa
 8d6c8a4a5	Bahasa bot di grup ini
 45ac69c17	Pesan, tombol, dan peringatan bot akan dalam bahasa ini. Konten yang kamu tulis tidak berubah.
@@ -39146,6 +40426,7 @@ c4395cbb9	Orang tepercaya (maksimal 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Pilihan tidak valid
+21140c9c2	Perintah yang tidak bisa dinonaktifkan: ⟨0⟩
 4094a1250	Terlalu panjang: ⟨0⟩…
 3994c99a9	ID tidak valid: ⟨0⟩ (hanya angka)
 5055a2323	Maksimal ⟨0⟩ orang
@@ -39475,6 +40756,9 @@ f666e1d93	🗄 Cadangan database · ⟨0⟩ MB (terkompresi ⟨1⟩ MB)
 9cfd9973e	Untuk memulihkan, taruh file .db dari zip ke folder bot dengan nama bot_data.db.
 391c8e6d0	🗄 Cadangan dibuat tetapi terlalu besar untuk Telegram (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 Membuat cadangan...
+35db56b39	⚠️ <b>Database rusak</b> (database disk image is malformed).
+6889d6242	Bot dimulai ulang dalam 5 detik; saat mulai, file yang rusak akan disisihkan dan data dipulihkan.
+6ffdbe5e2	Bot baru saja dimulai, jadi tidak dilakukan mulai ulang otomatis. Mulai ulang bot secara manual.
 103ec5f85	Obrolan: ⟨0⟩
 0f97d9633	⚠️ Kesalahan bot
 15781d4a0	⚠️ Tombol ini sudah usang atau tidak valid. Buka menu lagi.
@@ -39490,6 +40774,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS dimulai
 82459fdce	Database: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	Grup/saluran terdaftar: <b>⟨0⟩</b>
+05229d023	🛠 <b>Database rusak dan sudah diperbaiki.</b> File rusak: <code>⟨0⟩</code>
+8a235e6be	Tabel yang dipulihkan: ⟨0⟩ · diambil dari cadangan: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Tidak bisa dipulihkan: ⟨0⟩
 6c20c0dd0	⚠️ Database terbuka kosong dan dipulihkan dari cadangan terakhir: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Tidak ada obrolan terdaftar. Jika angka ini turun saat bot dimulai ulang, file database mungkin terhapus atau bot berjalan dari folder lain.
 3831f1221	Tidak bisa menjangkau server
@@ -39742,6 +41029,72 @@ a77f997a9	flood (⟨0⟩ messaggi/⟨1⟩ s)
 794910b1f	Parola vietata
 8fb66aa89	parola vietata
 4e5efb06d	spam ripetuto
+881f4a7b9	📜 Benvenuto ⟨0⟩! Per scrivere nel gruppo devi leggere e accettare le regole:
+932c8c539	📜 Benvenuto ⟨0⟩! Accetti di rispettare le regole del gruppo?
+d11dd3db7	✅ Ho letto le regole e le accetto
+d6b7e92ea	📜 In attesa dell'accettazione delle regole: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Questo pulsante non è valido.
+9c148e8f9	Questo pulsante non è per te; solo la persona appena entrata può accettare le regole.
+7f0e2a142	Gruppo non trovato.
+9d4cfb23f	Impossibile rimuovere la tua restrizione; avvisa gli amministratori.
+925b57ed1	✅ Grazie! Ora puoi scrivere.
+65d432938	✅ Regole accettate: ⟨0⟩ | ⟨1⟩
+440a0b88c	amministratore anonimo
+52b5bc87d	il nome del gruppo
+39913ac6c	la foto del gruppo
+66a230ead	il messaggio fissato
+62ff3a80d	🏷 Protezione info del gruppo: ⟨0⟩ ha cambiato ⟨1⟩ → ripristinato | ⟨2⟩
+a91a23aac	🏷 Protezione info del gruppo: ⟨0⟩ ha cambiato ⟨1⟩ → impossibile annullare (il bot deve avere i permessi per cambiare le info del gruppo e fissare messaggi) | ⟨2⟩
+517c3659d	📝 La descrizione del gruppo è stata cambiata; è stata ripristinata. Se la modifica l'ha fatta il fondatore, nel pannello tocca 🛂 Sicurezza di membri e gruppo → 📸 Salva lo stato attuale.
+e6529ed9a	un numero di telefono
+b9f1af256	un indirizzo e-mail
+8f8cbef64	un indirizzo di wallet crypto
+bf4118840	un invito "scrivimi in privato"
+f0840bba1	📞 Telefono
+c0c435e96	📧 E-mail
+ace48f755	🪙 Wallet crypto
+5e78fdc15	💬 "Scrivimi in privato"
+e0669071a	Dati personali
+74a706b28	🛂 ⟨0⟩, il tuo messaggio è stato eliminato perché conteneva ⟨1⟩. Per la tua sicurezza, non condividere dati personali nel gruppo.
+0b6ac9fc5	dati personali / schema di truffa (⟨0⟩)
+1c979a8ff	ancora nessuno
+e386f2a7c	🛂 <b>Sicurezza di membri e gruppo</b> — ⟨0⟩
+d3c7dee60	📜 <b>Accettazione delle regole:</b> un nuovo membro non può scrivere finché non accetta le regole del gruppo con un pulsante (se il captcha è attivo, viene chiesto dopo il captcha). Chi ha accettato una volta non viene richiesto di nuovo quando rientra.
+67f8d8ae3	🏷 <b>Protezione info del gruppo:</b> se qualcuno diverso dal fondatore cambia il nome, la foto o il messaggio fissato del gruppo, tutto viene ripristinato; la descrizione viene controllata ogni 10 minuti. Le modifiche del fondatore vengono salvate automaticamente; se il fondatore ha cambiato la descrizione, salvala con 📸. Solo il fondatore / co-fondatore può cambiarlo.
+092c6482f	Ultima istantanea: ⟨0⟩
+e26ff3006	🔐 <b>Dati personali e schemi di truffa:</b> i messaggi dei membri che contengono numero di telefono, e-mail, IBAN, indirizzo di wallet crypto o un invito "scrivimi in privato" vengono eliminati e si applica la sanzione scelta.
+5dce9c972	🤖 <b>Protezione dallo spam di comandi:</b> i comandi che i membri inviano ad altri bot vengono eliminati; chi lo ripete ⟨1⟩ volte in ⟨0⟩ s riceve la sanzione scelta. Oltre ⟨3⟩ segnalazioni in ⟨2⟩ minuti vengono ignorate e si applica la stessa sanzione. Solo il fondatore / co-fondatore può cambiarlo.
+4ccb73609	📜 Accettazione delle regole
+614de7399	🏷 Protezione info del gruppo
+c6b97674b	📸 Salva lo stato attuale
+3052b371c	🔐 Protezione dati personali
+39cb36b03	👇 Sanzione dati personali
+8299dd6da	🤖 Protezione dallo spam di comandi
+e6c02779f	👇 Sanzione spam di comandi
+8fc0cad4c	🚫 Disattiva comandi (⟨0⟩) ›
+afbd89c3f	Protezione comandi
+e17cd1749	🚫 ⟨0⟩, questo comando è disattivato in questo gruppo.
+16c681ed1	comando disattivato in questo gruppo (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, non inviare continuamente comandi di altri bot; in questo gruppo vengono eliminati.
+3519e7bcc	spam di comandi (comandi di altri bot)
+a64baef4c	🤖 ⟨0⟩, in questo gruppo i comandi di altri bot vengono eliminati.
+7dd5bf468	🚩 ⟨0⟩, hai inviato troppe segnalazioni; per un po' verranno ignorate.
+81879c932	abuso del sistema di segnalazione
+f6d2e9197	🚫 <b>Disattiva comandi</b> — ⟨0⟩
+054caaae3	I membri non possono usare in questo gruppo i comandi che disattivi: il messaggio viene eliminato e si applica l'azione scelta (se è scelto "Elimina", appare un breve avviso "questo comando è disattivato in questo gruppo"). Lo staff può continuare a usare i comandi disattivati. Solo il fondatore / co-fondatore può cambiarlo.
+0bb5c2cf8	Comandi disattivati: <b>⟨0⟩</b>
+d5b266a81	Uso rapido: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Quando si usa un comando disattivato
+c22b8f825	🚫 <b>Disattiva comandi</b>
+76a397d40	Uso: <code>/komutkapat comando</code> · <code>/komutac comando</code>
+bd149a1f2	Lo staff può continuare a usare i comandi disattivati.
+8c7a4527b	⚠️ /⟨0⟩ non è tra i comandi disattivabili.
+4bd6b629c	Disattivabili: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ è già attivo.
+c04beaefc	🚫 /⟨0⟩ è già disattivato.
+c1b5afc45	✅ /⟨0⟩ attivato per i membri di questo gruppo.
+36b26ef8c	🚫 /⟨0⟩ disattivato per i membri di questo gruppo (lo staff può usarlo).
+4509732b3	🚫 Comando ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	L’anti-inoltro ora è: ⟨0⟩
 6d6d358e6	Uso: /antiforward on|off
 117ba2454	ATTIVO
@@ -40053,11 +41406,21 @@ f5c96387f	🛟 Ripristino
 1bd24917c	✖️ Chiudi
 e38a49a6f	Impostazioni di protezione del canale
 f81ca3a77	Solo il fondatore del gruppo può modificare questa impostazione.
+499b40121	Solo il fondatore e il co-fondatore possono modificare questa impostazione.
 4081e665c	Impostazione non valida
 ce432606a	✅ Attivato
 ca037fcc4	❌ Disattivato
 a006b158d	⚙️ Sanzione ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Sanzione: ⟨0⟩
+829773348	⚙️ Sanzione protezione dati personali → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Sanzione protezione spam di comandi → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Azione per comando disattivato → ⟨0⟩ | ⟨1⟩
+d66461de6	Azione: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ disattivato
+1366de2b8	✅ /⟨0⟩ attivato
+a69466222	📸 Info del gruppo (nome, descrizione, foto, messaggio fissato) salvate | ⟨0⟩
+87f3326f9	📸 Salvato
+49c866e1e	Impossibile salvare (il bot è admin?)
 286a11648	Sanzione al limite: ⟨0⟩
 c32110889	La lista è cambiata, aggiornata
 cf6b53ca2	🗑 ⟨0⟩ eliminato: ⟨1⟩ | ⟨2⟩
@@ -40075,7 +41438,6 @@ e413c4b9e	Regole eliminate
 0f514bbde	✅ Blocco anti-raid rimosso dal pannello | ⟨0⟩
 8e6a20f22	🔓 Sbloccato
 f5014f259	Impossibile sbloccare (permessi del bot?)
-7f0e2a142	Gruppo non trovato.
 f41c17d41	Per usare questo pannello devi essere admin del gruppo.
 8213d6575	<i>Per annullare: cancel</i>
 1465f36fd	Scrivi la risposta rispondendo al messaggio che si è aperto.
@@ -40153,10 +41515,8 @@ a0ec7c7bd	➖ Rimuovi questo gruppo dalla rete
 db918b20f	Questo gruppo non è in una rete. Se aggiungi alla tua rete i gruppi che gestisci, i ban si estendono a tutti e puoi copiare le impostazioni con un tocco. (Serve fondatore / co-fondatore.)
 e44c5b572	➕ Aggiungi questo gruppo alla mia rete
 fe6b211f8	⟨0⟩ (⟨1⟩ admin)
-1c979a8ff	ancora nessuno
 9f41d74fa	🛟 <b>Ripristino admin</b> — ⟨0⟩
 62477adfc	La lista degli admin viene salvata ogni 6 ore. Se qualcuno rimuove i permessi di 3+ admin in poco tempo, admin e persone di fiducia ricevono un avviso con un pulsante di ripristino. Le persone di fiducia possono ripristinare gli admin inviando <code>/recover</code> al bot in privato.
-092c6482f	Ultima istantanea: ⟨0⟩
 ba8991412	Persone di fiducia (⟨0⟩/3) — tocca per rimuovere:
 5729ee3a9	➕ Aggiungi persona di fiducia
 72e9b014a	Ripristina automaticamente
@@ -40183,8 +41543,6 @@ f9a34a2ad	Sincronizzazione ban ⟨0⟩
 eacfa093c	Copiato in ⟨0⟩ gruppi
 c39c747b1	Solo il fondatore può modificare le impostazioni di ripristino.
 95e917987	Rimosso
-87f3326f9	📸 Salvato
-49c866e1e	Impossibile salvare (il bot è admin?)
 b13ed05bb	♻️ ⟨0⟩ admin ripristinati⟨1⟩
 8670a3a46	, ⟨0⟩ non riusciti
 c3b595125	Solo il fondatore può aggiungere persone di fiducia.
@@ -40285,6 +41643,7 @@ a96302489	Al momento non c’è nessun invio.
 b0b0b34ae	📢 <b>Annunci recenti</b>
 b6eaec96e	↪️ messaggio inoltrato
 a2148c2a7	🗳 sondaggio
+a68f06db1	(media)
 771c7f3fb	👆 ⟨0⟩ clic⟨1⟩
 8139aea8f	(⟨0⟩ persone)
 71fc8c6a3	❌ Annulla #⟨0⟩
@@ -40594,6 +41953,10 @@ c0c03c505	⟨0⟩ rimosso dalla lista di esenzione.
 e6695a6db	⟨0⟩ aggiunto alla lista di esenzione dallo spam.
 9e5f1a353	Gruppo privato
 688f939e9	Filtro parole
+9d784908d	Accettazione delle Regole
+1340d231a	Protezione Info del Gruppo
+1bd1325c6	Protezione Dati Personali
+1c138f426	Protezione Comandi
 cbabb7d8b	Nessuna
 28b8f5479	👥 Membri: ⟨0⟩
 ceb987630	👮 Admin: ⟨0⟩
@@ -40704,6 +42067,7 @@ bfe1425f8	/forcesub @channel — Gli utenti devono unirsi al canale per scrivere
 886d570db	/unlockdown · /unlockmedia — Rimuovi i blocchi
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <comando> · /komutac <comando> — Disattiva / attiva un comando dei membri in questo gruppo (solo fondatore / co-fondatore)
 3d2493394	/blockmedia · /blockpack — Blocca media/pacchetti
 20abda0cf	/admin (/addadmin) · /senioradmin @user [titolo] — Assegna un grado
 3c7389596	/remove @user — Rimuovi un grado
@@ -41274,6 +42638,21 @@ f7e588100	🌐 Lista spam CAS
 4a02f552b	✏️ Tracciamento dei cambi di nome
 32a52c44c	🗳 Votazione per silenziare
 9b96d57aa	Durata della votazione per silenziare
+d321f95bf	🛂 Sicurezza di membri e gruppo
+496842aa2	Un nuovo membro non può scrivere finché non accetta le regole del gruppo con un pulsante. Chi ha accettato una volta non viene richiesto di nuovo.
+11daa849d	Se qualcuno diverso dal fondatore cambia il nome, la foto, il messaggio fissato o la descrizione del gruppo, tutto viene ripristinato. Solo il fondatore / co-fondatore può cambiarlo.
+bca49e9f7	🔐 Dati personali e schemi di truffa
+f82c0d7d4	I messaggi dei membri che contengono telefono, e-mail, IBAN, indirizzo di wallet crypto o un invito "scrivimi in privato" vengono eliminati.
+b49a7535a	📞 Numero di telefono
+ae97acaeb	📧 Indirizzo e-mail
+bf9420e5b	🪙 Indirizzo di wallet crypto
+83cc05280	💬 Inviti "scrivimi in privato"
+60ee0d4b1	Sanzione dati personali
+1089f4de7	I comandi che i membri inviano ad altri bot vengono eliminati; chi li ripete spesso o invia troppe segnalazioni viene sanzionato. Solo il fondatore / co-fondatore può cambiarlo.
+7b002b274	Sanzione spam di comandi
+2d1965747	🚫 Comandi disattivati
+8add0446e	Un comando per riga (es. rapor, zar). I membri non possono usarli, lo staff sì. Disattivabili: ⟨0⟩
+2646100b5	Quando si usa un comando disattivato
 d51893a35	🌍 Lingua
 8d6c8a4a5	La lingua del bot in questo gruppo
 45ac69c17	Messaggi, pulsanti e avvisi del bot saranno in questa lingua. I contenuti che hai scritto non cambiano.
@@ -41292,6 +42671,7 @@ c4395cbb9	Persone di fiducia (al massimo 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Scelta non valida
+21140c9c2	Comando non disattivabile: ⟨0⟩
 4094a1250	Troppo lungo: ⟨0⟩…
 3994c99a9	ID non valido: ⟨0⟩ (solo numeri)
 5055a2323	Al massimo ⟨0⟩ persone
@@ -41623,6 +43003,9 @@ f666e1d93	🗄 Backup del database · ⟨0⟩ MB (compresso ⟨1⟩ MB)
 9cfd9973e	Per ripristinare, metti il file .db dello zip nella cartella del bot con il nome bot_data.db.
 391c8e6d0	🗄 Backup eseguito ma non entra in Telegram (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 Backup in corso...
+35db56b39	⚠️ <b>Il database si è danneggiato</b> (database disk image is malformed).
+6889d6242	Il bot si riavvia tra 5 s; all'avvio il file danneggiato verrà messo da parte e i dati recuperati.
+6ffdbe5e2	Il bot è appena partito, quindi non è stato fatto un riavvio automatico. Riavvia il bot manualmente.
 103ec5f85	Chat: ⟨0⟩
 0f97d9633	⚠️ Errore del bot
 15781d4a0	⚠️ Questo pulsante è scaduto o non valido. Riapri il menu.
@@ -41638,6 +43021,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS avviato
 82459fdce	Database: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	Gruppi/canali registrati: <b>⟨0⟩</b>
+05229d023	🛠 <b>Il database era danneggiato ed è stato riparato.</b> File danneggiato: <code>⟨0⟩</code>
+8a235e6be	Tabelle recuperate: ⟨0⟩ · ripristinate dal backup: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Non recuperabile: ⟨0⟩
 6c20c0dd0	⚠️ Il database si è aperto vuoto ed è stato ripristinato dall’ultimo backup: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Nessuna chat registrata. Se questo numero cala al riavvio del bot, il file del database potrebbe essere stato eliminato o il bot gira da un’altra cartella.
 3831f1221	Impossibile raggiungere il server
@@ -41891,6 +43277,72 @@ a77f997a9	флуд (⟨0⟩ хабар/⟨1⟩ сек)
 794910b1f	Тыйым салынған сөз
 8fb66aa89	тыйым салынған сөз
 4e5efb06d	қайталанған спам
+881f4a7b9	📜 Қош келдің, ⟨0⟩! Топқа жаза алу үшін ережелерді оқып, қабылдауың керек:
+932c8c539	📜 Қош келдің, ⟨0⟩! Топ ережелерін сақтауға келісесің бе?
+d11dd3db7	✅ Ережелерді оқыдым, қабылдаймын
+d6b7e92ea	📜 Ережелерді қабылдау күтілуде: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Бұл түйме жарамсыз.
+9c148e8f9	Бұл түйме саған арналмаған; ережелерді тек жаңа қосылған адам қабылдай алады.
+7f0e2a142	Топ табылмады.
+9d4cfb23f	Шектеуіңді алу мүмкін болмады; әкімшілерге хабарла.
+925b57ed1	✅ Рақмет! Енді жаза аласың.
+65d432938	✅ Ережелер қабылданды: ⟨0⟩ | ⟨1⟩
+440a0b88c	анонимді әкімші
+52b5bc87d	топ атауын
+39913ac6c	топ суретін
+66a230ead	бекітілген хабарды
+62ff3a80d	🏷 Топ ақпаратын қорғау: ⟨0⟩ ⟨1⟩ өзгертті → бұрынғы күйіне қайтарылды | ⟨2⟩
+a91a23aac	🏷 Топ ақпаратын қорғау: ⟨0⟩ ⟨1⟩ өзгертті → қайтару мүмкін болмады (ботта топ ақпаратын өзгерту және бекіту құқығы болуы керек) | ⟨2⟩
+517c3659d	📝 Топ сипаттамасы өзгертілген; бұрынғы күйіне қайтарылды. Өзгерісті құрылтайшы жасаса, панельде 🛂 Мүше және топ қауіпсіздігі → 📸 Қазіргі күйді сақтау түймесін бас.
+e6529ed9a	телефон нөмірі
+b9f1af256	электрондық пошта мекенжайы
+8f8cbef64	криптоәмиян мекенжайы
+bf4118840	«жеке жаз» шақыруы
+f0840bba1	📞 Телефон
+c0c435e96	📧 E-mail
+ace48f755	🪙 Криптоәмиян
+5e78fdc15	💬 «Жеке жаз»
+e0669071a	Жеке ақпарат
+74a706b28	🛂 ⟨0⟩, хабарыңда ⟨1⟩ болғандықтан жойылды. Қауіпсіздігің үшін жеке ақпаратыңды топта бөліспе.
+0b6ac9fc5	жеке ақпарат / алаяқтық үлгісі (⟨0⟩)
+1c979a8ff	әзірге жоқ
+e386f2a7c	🛂 <b>Мүше және топ қауіпсіздігі</b> — ⟨0⟩
+d3c7dee60	📜 <b>Ережелерді қабылдау:</b> жаңа мүше топ ережелерін түймемен қабылдағанша жаза алмайды (капча қосулы болса, капчадан кейін сұралады). Бір рет қабылдаған адамнан қайта қосылғанда сұралмайды.
+67f8d8ae3	🏷 <b>Топ ақпаратын қорғау:</b> құрылтайшыдан басқа біреу топ атауын, суретін немесе бекітілген хабарды өзгертсе, бұрынғы күйіне қайтарылады; сипаттама әр 10 минут сайын тексеріледі. Құрылтайшының өзгерістері автоматты сақталады; сипаттаманы құрылтайшы өзгертсе, 📸 арқылы сақта. Тек құрылтайшы / тең құрылтайшы өзгерте алады.
+092c6482f	Соңғы көшірме: ⟨0⟩
+e26ff3006	🔐 <b>Жеке ақпарат және алаяқтық үлгілері:</b> мүшелердің телефон нөмірі, e-mail, IBAN, криптоәмиян мекенжайы немесе «жеке жаз» шақыруы бар хабарлары жойылып, таңдалған жаза қолданылады.
+5dce9c972	🤖 <b>Командалық спамнан қорғау:</b> мүшелер басқа боттарға жазған командалар жойылады; ⟨0⟩ с ішінде ⟨1⟩ рет қайталағанға таңдалған жаза қолданылады. ⟨2⟩ минутта ⟨3⟩ шағымнан артығы ескерілмейді және сол жаза қолданылады. Тек құрылтайшы / тең құрылтайшы өзгерте алады.
+4ccb73609	📜 Ережелерді қабылдау
+614de7399	🏷 Топ ақпаратын қорғау
+c6b97674b	📸 Қазіргі күйді сақтау
+3052b371c	🔐 Жеке ақпаратты қорғау
+39cb36b03	👇 Жеке ақпарат үшін жаза
+8299dd6da	🤖 Командалық спамнан қорғау
+e6c02779f	👇 Командалық спам үшін жаза
+8fc0cad4c	🚫 Командаларды өшіру (⟨0⟩) ›
+afbd89c3f	Командаларды қорғау
+e17cd1749	🚫 ⟨0⟩, бұл команда бұл топта өшірілген.
+16c681ed1	бұл топта өшірілген команда (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, басқа боттардың командаларын қайта-қайта жіберме; бұл топта олар жойылады.
+3519e7bcc	командалық спам (басқа боттардың командалары)
+a64baef4c	🤖 ⟨0⟩, бұл топта басқа боттардың командалары жойылады.
+7dd5bf468	🚩 ⟨0⟩, тым көп шағым жібердің; шағымдарың біраз уақыт ескерілмейді.
+81879c932	шағым жүйесін теріс пайдалану
+f6d2e9197	🚫 <b>Командаларды өшіру</b> — ⟨0⟩
+054caaae3	Сен өшірген командаларды мүшелер бұл топта қолдана алмайды: хабар жойылып, таңдалған әрекет қолданылады («Жою» таңдалса, қысқа «бұл команда бұл топта өшірілген» ескертуі көрсетіледі). Әкімшілер өшірілген командаларды қолдана береді. Тек құрылтайшы / тең құрылтайшы өзгерте алады.
+0bb5c2cf8	Өшірілген командалар саны: <b>⟨0⟩</b>
+d5b266a81	Жылдам қолдану: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Өшірілген команда қолданылғанда
+c22b8f825	🚫 <b>Командаларды өшіру</b>
+76a397d40	Қолданылуы: <code>/komutkapat команда</code> · <code>/komutac команда</code>
+bd149a1f2	Өшірілген командаларды әкімшілер қолдана береді.
+8c7a4527b	⚠️ /⟨0⟩ өшіруге болатын командалардың қатарында жоқ.
+4bd6b629c	Өшіруге болатындар: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ қосулы тұр.
+c04beaefc	🚫 /⟨0⟩ өшірулі тұр.
+c1b5afc45	✅ /⟨0⟩ бұл топта мүшелер үшін қосылды.
+36b26ef8c	🚫 /⟨0⟩ бұл топта мүшелер үшін өшірілді (әкімшілер қолдана алады).
+4509732b3	🚫 Команда ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Қайта жіберуге тыйым қазір: ⟨0⟩
 6d6d358e6	Қолданылуы: /antiforward on|off
 117ba2454	ҚОСУЛЫ
@@ -42206,11 +43658,21 @@ f5c96387f	🛟 Қалпына келтіру
 1bd24917c	✖️ Жабу
 e38a49a6f	Арнаны қорғау баптаулары
 f81ca3a77	Бұл баптауды тек топтың құрылтайшысы өзгерте алады.
+499b40121	Бұл баптауды тек құрылтайшы мен тең құрылтайшы өзгерте алады.
 4081e665c	Жарамсыз баптау
 ce432606a	✅ Қосылды
 ca037fcc4	❌ Өшірілді
 a006b158d	⚙️ ⟨0⟩ жазасы → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Жаза: ⟨0⟩
+829773348	⚙️ Жеке ақпаратты қорғау жазасы → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Командалық спамнан қорғау жазасы → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Өшірілген команда әрекеті → ⟨0⟩ | ⟨1⟩
+d66461de6	Әрекет: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ өшірілді
+1366de2b8	✅ /⟨0⟩ қосылды
+a69466222	📸 Топ ақпараты (атауы, сипаттамасы, суреті, бекітілген хабар) сақталды | ⟨0⟩
+87f3326f9	📸 Сақталды
+49c866e1e	Сақтау мүмкін болмады (бот админ бе?)
 286a11648	Шектегі жаза: ⟨0⟩
 c32110889	Тізім өзгерді, жаңартылды
 cf6b53ca2	🗑 ⟨0⟩ жойылды: ⟨1⟩ | ⟨2⟩
@@ -42228,7 +43690,6 @@ e413c4b9e	Ережелер жойылды
 0f514bbde	✅ Рейд құлпы панельден алынды | ⟨0⟩
 8e6a20f22	🔓 Ашылды
 f5014f259	Ашу мүмкін болмады (боттың рұқсаттары?)
-7f0e2a142	Топ табылмады.
 f41c17d41	Бұл панельді пайдалану үшін топта админ болуыңыз керек.
 8213d6575	<i>Бас тарту үшін: cancel</i>
 1465f36fd	Жауабыңызды ашылған хабарға жауап ретінде жазыңыз.
@@ -42306,10 +43767,8 @@ a0ec7c7bd	➖ Бұл топты желіден шығару
 db918b20f	Бұл топ ешбір желіде жоқ. Өзіңіз басқаратын топтарды желіңізге қоссаңыз, бандар бәріне таралады және баптауларды бір басумен көшіре аласыз. (Құрылтайшы / тең құрылтайшы қажет.)
 e44c5b572	➕ Бұл топты менің желіме қосу
 fe6b211f8	⟨0⟩ (⟨1⟩ админ)
-1c979a8ff	әзірге жоқ
 9f41d74fa	🛟 <b>Админдерді қалпына келтіру</b> — ⟨0⟩
 62477adfc	Админдер тізімі әр 6 сағат сайын сақталады. Біреу қысқа уақытта 3+ админнің құқықтарын алып тастаса, админдер мен сенімді адамдар қалпына келтіру түймесі бар ескерту алады. Сенімді адамдар ботқа жеке <code>/recover</code> жіберу арқылы админдерді қалпына келтіре алады.
-092c6482f	Соңғы көшірме: ⟨0⟩
 ba8991412	Сенімді адамдар (⟨0⟩/3) — алып тастау үшін басыңыз:
 5729ee3a9	➕ Сенімді адам қосу
 72e9b014a	Автоматты түрде қалпына келтіру
@@ -42336,8 +43795,6 @@ f9a34a2ad	Бан синхрондауы ⟨0⟩
 eacfa093c	⟨0⟩ топқа көшірілді
 c39c747b1	Қалпына келтіру баптауларын тек құрылтайшы өзгерте алады.
 95e917987	Алып тасталды
-87f3326f9	📸 Сақталды
-49c866e1e	Сақтау мүмкін болмады (бот админ бе?)
 b13ed05bb	♻️ ⟨0⟩ админ қалпына келтірілді⟨1⟩
 8670a3a46	, ⟨0⟩ сәтсіз
 c3b595125	Сенімді адамдарды тек құрылтайшы қоса алады.
@@ -42438,6 +43895,7 @@ a96302489	Қазір ештеңе жіберілмейді.
 b0b0b34ae	📢 <b>Соңғы хабарландырулар</b>
 b6eaec96e	↪️ қайта жіберілген хабар
 a2148c2a7	🗳 сауалнама
+a68f06db1	(медиа)
 771c7f3fb	👆 ⟨0⟩ басу⟨1⟩
 8139aea8f	(⟨0⟩ адам)
 71fc8c6a3	❌ #⟨0⟩ бас тарту
@@ -42749,6 +44207,10 @@ e6695a6db	⟨0⟩ спамнан босату тізіміне қосылды.
 9e5f1a353	Жабық топ
 e9312bd1b	Капча
 688f939e9	Сөз сүзгісі
+9d784908d	Ережелерді қабылдау
+1340d231a	Топ ақпаратын қорғау
+1bd1325c6	Жеке ақпаратты қорғау
+1c138f426	Командаларды қорғау
 cbabb7d8b	Жоқ
 28b8f5479	👥 Мүшелер: ⟨0⟩
 ceb987630	👮 Админдер: ⟨0⟩
@@ -42859,6 +44321,7 @@ bfe1425f8	/forcesub @channel — Жазу үшін пайдаланушылар 
 886d570db	/unlockdown · /unlockmedia — Құлыптарды алу
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <команда> · /komutac <команда> — Мүше командасын бұл топта өшіру / қосу (тек құрылтайшы / тең құрылтайшы)
 3d2493394	/blockmedia · /blockpack — Медиа/пакеттерді бұғаттау
 20abda0cf	/admin (/addadmin) · /senioradmin @user [тег] — Дәреже беру
 3c7389596	/remove @user — Дәрежені алу
@@ -43432,6 +44895,21 @@ f7e588100	🌐 CAS спам тізімі
 4a02f552b	✏️ Ат өзгерісін бақылау
 32a52c44c	🗳 Мут дауыс беру
 9b96d57aa	Мут дауыс беру ұзақтығы
+d321f95bf	🛂 Мүше және топ қауіпсіздігі
+496842aa2	Жаңа мүше топ ережелерін түймемен қабылдағанша жаза алмайды. Бір рет қабылдаған адамнан қайта сұралмайды.
+11daa849d	Құрылтайшыдан басқа біреу өзгерткен топ атауы, суреті, бекітілген хабары және сипаттамасы бұрынғы күйіне қайтарылады. Тек құрылтайшы / тең құрылтайшы өзгерте алады.
+bca49e9f7	🔐 Жеке ақпарат және алаяқтық үлгілері
+f82c0d7d4	Мүшелердің телефон, e-mail, IBAN, криптоәмиян мекенжайы немесе «жеке жаз» шақыруы бар хабарлары жойылады.
+b49a7535a	📞 Телефон нөмірі
+ae97acaeb	📧 E-mail мекенжайы
+bf9420e5b	🪙 Криптоәмиян мекенжайы
+83cc05280	💬 «Жеке жаз» шақырулары
+60ee0d4b1	Жеке ақпарат үшін жаза
+1089f4de7	Мүшелер басқа боттарға жазған командалар жойылады; жиі қайталайтындар мен тым көп шағым жіберетіндер жазаланады. Тек құрылтайшы / тең құрылтайшы өзгерте алады.
+7b002b274	Командалық спам үшін жаза
+2d1965747	🚫 Өшірілген командалар
+8add0446e	Әр жолға бір команда (мыс. rapor, zar). Мүшелер қолдана алмайды, әкімшілер қолдана алады. Өшіруге болатындар: ⟨0⟩
+2646100b5	Өшірілген команда қолданылғанда
 d51893a35	🌍 Тіл
 8d6c8a4a5	Боттың осы топтағы тілі
 45ac69c17	Боттың хабарлары, түймелері мен ескертулері осы тілде болады. Сіз жазған мазмұн өзгермейді.
@@ -43450,6 +44928,7 @@ c4395cbb9	Сенімді адамдар (ең көбі 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Жарамсыз таңдау
+21140c9c2	Өшіруге болмайтын команда: ⟨0⟩
 4094a1250	Тым ұзын: ⟨0⟩…
 3994c99a9	Жарамсыз ID: ⟨0⟩ (тек сандар)
 5055a2323	Ең көбі ⟨0⟩ адам
@@ -43782,6 +45261,9 @@ f666e1d93	🗄 Дерекқордың сақтық көшірмесі · ⟨0⟩
 9cfd9973e	Қалпына келтіру үшін zip ішіндегі .db файлын бот қалтасына bot_data.db атымен салыңыз.
 391c8e6d0	🗄 Сақтық көшірме жасалды, бірақ Telegram-ға сыймайды (⟨0⟩ МБ): ⟨1⟩
 c3fcc95df	🗄 Сақтық көшірме жасалуда...
+35db56b39	⚠️ <b>Дерекқор бүлінді</b> (database disk image is malformed).
+6889d6242	Бот 5 с ішінде қайта іске қосылады; іске қосылғанда бүлінген файл бөлек қойылып, деректер қалпына келтіріледі.
+6ffdbe5e2	Бот жаңа ғана іске қосылды, автоматты қайта іске қосу жасалмады. Ботты қолмен қайта іске қосыңыз.
 103ec5f85	Чат: ⟨0⟩
 0f97d9633	⚠️ Бот қатесі
 15781d4a0	⚠️ Бұл түйме ескірген немесе жарамсыз. Мәзірді қайта ашыңыз.
@@ -43797,6 +45279,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS іске қосылды
 82459fdce	Дерекқор: <code>⟨0⟩</code> (⟨1⟩ КБ)
 d2e59a824	Тіркелген топтар/арналар: <b>⟨0⟩</b>
+05229d023	🛠 <b>Дерекқор бүлінген еді, қалпына келтірілді.</b> Бүлінген файл: <code>⟨0⟩</code>
+8a235e6be	Қалпына келтірілген кесте: ⟨0⟩ · сақтық көшірмеден алынған: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Қалпына келтірілмегендер: ⟨0⟩
 6c20c0dd0	⚠️ Дерекқор бос ашылды және соңғы сақтық көшірмеден қалпына келтірілді: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Тіркелген чат жоқ. Бот қайта іске қосылғанда бұл сан азайса, дерекқор файлы жойылған немесе бот басқа қалтадан іске қосылған болуы мүмкін.
 3831f1221	Серверге қосылу мүмкін болмады
@@ -44049,6 +45534,72 @@ a77f997a9	flood (⟨0⟩ mensagens/⟨1⟩ s)
 794910b1f	Palavra proibida
 8fb66aa89	palavra proibida
 4e5efb06d	spam repetido
+881f4a7b9	📜 Bem-vindo, ⟨0⟩! Para escrever no grupo, você precisa ler e aceitar as regras:
+932c8c539	📜 Bem-vindo, ⟨0⟩! Você concorda em seguir as regras do grupo?
+d11dd3db7	✅ Li as regras e aceito
+d6b7e92ea	📜 Aguardando aceitação das regras: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Este botão é inválido.
+9c148e8f9	Este botão não é para você; só quem acabou de entrar pode aceitar as regras.
+7f0e2a142	Grupo não encontrado.
+9d4cfb23f	Não foi possível remover sua restrição; avise os administradores.
+925b57ed1	✅ Obrigado! Agora você pode escrever.
+65d432938	✅ Regras aceitas: ⟨0⟩ | ⟨1⟩
+440a0b88c	administrador anônimo
+52b5bc87d	o nome do grupo
+39913ac6c	a foto do grupo
+66a230ead	a mensagem fixada
+62ff3a80d	🏷 Proteção das informações do grupo: ⟨0⟩ alterou ⟨1⟩ → restaurado | ⟨2⟩
+a91a23aac	🏷 Proteção das informações do grupo: ⟨0⟩ alterou ⟨1⟩ → não foi possível reverter (o bot precisa das permissões de alterar informações do grupo e fixar mensagens) | ⟨2⟩
+517c3659d	📝 A descrição do grupo foi alterada; ela foi restaurada. Se a alteração foi feita pelo fundador, toque no painel em 🛂 Segurança de membros e grupo → 📸 Salvar estado atual.
+e6529ed9a	um número de telefone
+b9f1af256	um endereço de e-mail
+8f8cbef64	um endereço de carteira cripto
+bf4118840	um convite "me chama no privado"
+f0840bba1	📞 Telefone
+c0c435e96	📧 E-mail
+ace48f755	🪙 Carteira cripto
+5e78fdc15	💬 "Me chama no privado"
+e0669071a	Dados pessoais
+74a706b28	🛂 ⟨0⟩, sua mensagem foi apagada porque continha ⟨1⟩. Para sua segurança, não compartilhe dados pessoais no grupo.
+0b6ac9fc5	dados pessoais / padrão de golpe (⟨0⟩)
+1c979a8ff	nenhum ainda
+e386f2a7c	🛂 <b>Segurança de membros e grupo</b> — ⟨0⟩
+d3c7dee60	📜 <b>Aceitação das regras:</b> um novo membro não pode escrever até aceitar as regras do grupo com um botão (se o captcha estiver ativo, é perguntado depois do captcha). Quem aceitou uma vez não é perguntado de novo ao voltar.
+67f8d8ae3	🏷 <b>Proteção das informações do grupo:</b> se alguém que não seja o fundador alterar o nome, a foto ou a mensagem fixada do grupo, tudo é restaurado; a descrição é verificada a cada 10 minutos. As alterações do fundador são salvas automaticamente; se o fundador alterou a descrição, salve com 📸. Só o fundador / cofundador pode alterar isto.
+092c6482f	Último snapshot: ⟨0⟩
+e26ff3006	🔐 <b>Dados pessoais e padrões de golpe:</b> mensagens de membros com número de telefone, e-mail, IBAN, endereço de carteira cripto ou convite "me chama no privado" são apagadas e a punição escolhida é aplicada.
+5dce9c972	🤖 <b>Proteção contra spam de comandos:</b> comandos que membros enviam para outros bots são apagados; quem repetir ⟨1⟩ vezes em ⟨0⟩ s recebe a punição escolhida. Mais de ⟨3⟩ denúncias em ⟨2⟩ minutos são ignoradas e a mesma punição é aplicada. Só o fundador / cofundador pode alterar isto.
+4ccb73609	📜 Aceitação das regras
+614de7399	🏷 Proteção das informações do grupo
+c6b97674b	📸 Salvar estado atual
+3052b371c	🔐 Proteção de dados pessoais
+39cb36b03	👇 Punição por dados pessoais
+8299dd6da	🤖 Proteção contra spam de comandos
+e6c02779f	👇 Punição por spam de comandos
+8fc0cad4c	🚫 Desativar comandos (⟨0⟩) ›
+afbd89c3f	Proteção de comandos
+e17cd1749	🚫 ⟨0⟩, este comando está desativado neste grupo.
+16c681ed1	comando desativado neste grupo (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, não fique enviando comandos de outros bots; neste grupo eles são apagados.
+3519e7bcc	spam de comandos (comandos de outros bots)
+a64baef4c	🤖 ⟨0⟩, neste grupo os comandos de outros bots são apagados.
+7dd5bf468	🚩 ⟨0⟩, você enviou denúncias demais; suas denúncias serão ignoradas por um tempo.
+81879c932	abuso do sistema de denúncias
+f6d2e9197	🚫 <b>Desativar comandos</b> — ⟨0⟩
+054caaae3	Os membros não podem usar neste grupo os comandos que você desativar: a mensagem é apagada e a ação escolhida é aplicada (se "Apagar" estiver escolhido, aparece um aviso curto "este comando está desativado neste grupo"). A equipe continua podendo usar os comandos desativados. Só o fundador / cofundador pode alterar isto.
+0bb5c2cf8	Comandos desativados: <b>⟨0⟩</b>
+d5b266a81	Uso rápido: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Ao usar um comando desativado
+c22b8f825	🚫 <b>Desativar comandos</b>
+76a397d40	Uso: <code>/komutkapat comando</code> · <code>/komutac comando</code>
+bd149a1f2	A equipe continua podendo usar os comandos desativados.
+8c7a4527b	⚠️ /⟨0⟩ não está entre os comandos que podem ser desativados.
+4bd6b629c	Podem ser desativados: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ já está ativado.
+c04beaefc	🚫 /⟨0⟩ já está desativado.
+c1b5afc45	✅ /⟨0⟩ ativado para os membros deste grupo.
+36b26ef8c	🚫 /⟨0⟩ desativado para os membros deste grupo (a equipe pode usar).
+4509732b3	🚫 Comando ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Anti-encaminhamento agora: ⟨0⟩
 6d6d358e6	Uso: /antiforward on|off
 117ba2454	ATIVADO
@@ -44361,11 +45912,21 @@ f5c96387f	🛟 Recuperação
 1bd24917c	✖️ Fechar
 e38a49a6f	Configurações de proteção do canal
 f81ca3a77	Só o fundador do grupo pode alterar esta configuração.
+499b40121	Só o fundador e o cofundador podem alterar esta configuração.
 4081e665c	Configuração inválida
 ce432606a	✅ Ativado
 ca037fcc4	❌ Desativado
 a006b158d	⚙️ Punição de ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Punição: ⟨0⟩
+829773348	⚙️ Punição da proteção de dados pessoais → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Punição da proteção contra spam de comandos → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Ação para comando desativado → ⟨0⟩ | ⟨1⟩
+d66461de6	Ação: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ desativado
+1366de2b8	✅ /⟨0⟩ ativado
+a69466222	📸 Informações do grupo (nome, descrição, foto, mensagem fixada) salvas | ⟨0⟩
+87f3326f9	📸 Salvo
+49c866e1e	Não foi possível salvar (o bot é admin?)
 286a11648	Punição por limite: ⟨0⟩
 c32110889	A lista mudou, atualizada
 cf6b53ca2	🗑 ⟨0⟩ apagado: ⟨1⟩ | ⟨2⟩
@@ -44383,7 +45944,6 @@ e413c4b9e	Regras apagadas
 0f514bbde	✅ Bloqueio anti-raid removido pelo painel | ⟨0⟩
 8e6a20f22	🔓 Desbloqueado
 f5014f259	Não foi possível desbloquear (permissões do bot?)
-7f0e2a142	Grupo não encontrado.
 f41c17d41	Você precisa ser admin do grupo para usar este painel.
 8213d6575	<i>Para cancelar: cancel</i>
 1465f36fd	Escreva sua resposta respondendo à mensagem que abriu.
@@ -44461,10 +46021,8 @@ a0ec7c7bd	➖ Remover este grupo da rede
 db918b20f	Este grupo não está em uma rede. Se você adicionar seus grupos à sua rede, os banimentos se espalham para todos e você copia configurações com um toque. (Requer fundador / cofundador.)
 e44c5b572	➕ Adicionar este grupo à minha rede
 fe6b211f8	⟨0⟩ (⟨1⟩ admins)
-1c979a8ff	nenhum ainda
 9f41d74fa	🛟 <b>Recuperação de admins</b> — ⟨0⟩
 62477adfc	A lista de admins é salva a cada 6 horas. Se alguém remover as permissões de 3+ admins em pouco tempo, admins e pessoas de confiança recebem um alerta com botão de recuperação. As pessoas de confiança podem restaurar os admins enviando <code>/recover</code> ao bot no privado.
-092c6482f	Último snapshot: ⟨0⟩
 ba8991412	Pessoas de confiança (⟨0⟩/3) — toque para remover:
 5729ee3a9	➕ Adicionar pessoa de confiança
 72e9b014a	Restaurar automaticamente
@@ -44491,8 +46049,6 @@ f9a34a2ad	Sincronização de banimentos ⟨0⟩
 eacfa093c	Copiado para ⟨0⟩ grupos
 c39c747b1	Só o fundador pode alterar as configurações de recuperação.
 95e917987	Removido
-87f3326f9	📸 Salvo
-49c866e1e	Não foi possível salvar (o bot é admin?)
 b13ed05bb	♻️ ⟨0⟩ admins restaurados⟨1⟩
 8670a3a46	, ⟨0⟩ falharam
 c3b595125	Só o fundador pode adicionar pessoas de confiança.
@@ -44593,6 +46149,7 @@ a96302489	Não está sendo enviado agora.
 b0b0b34ae	📢 <b>Anúncios recentes</b>
 b6eaec96e	↪️ mensagem encaminhada
 a2148c2a7	🗳 enquete
+a68f06db1	(mídia)
 771c7f3fb	👆 ⟨0⟩ cliques⟨1⟩
 8139aea8f	(⟨0⟩ pessoas)
 71fc8c6a3	❌ Cancelar #⟨0⟩
@@ -44902,6 +46459,10 @@ c0c03c505	⟨0⟩ removido da lista de isentos.
 e6695a6db	⟨0⟩ adicionado à lista de isentos de spam.
 9e5f1a353	Grupo privado
 688f939e9	Filtro de palavras
+9d784908d	Aceitação das Regras
+1340d231a	Proteção das Informações do Grupo
+1bd1325c6	Proteção de Dados Pessoais
+1c138f426	Proteção de Comandos
 cbabb7d8b	Nenhum
 28b8f5479	👥 Membros: ⟨0⟩
 ceb987630	👮 Admins: ⟨0⟩
@@ -45012,6 +46573,7 @@ bfe1425f8	/forcesub @channel — É preciso entrar no canal para escrever (desli
 886d570db	/unlockdown · /unlockmedia — Remover bloqueios
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <comando> · /komutac <comando> — Desativa / ativa um comando de membros neste grupo (só fundador / cofundador)
 3d2493394	/blockmedia · /blockpack — Bloquear mídia/pacotes
 20abda0cf	/admin (/addadmin) · /senioradmin @user [etiqueta] — Dar um cargo
 3c7389596	/remove @user — Remover um cargo
@@ -45584,6 +47146,21 @@ f7e588100	🌐 Lista de spam CAS
 4a02f552b	✏️ Rastreamento de mudança de nome
 32a52c44c	🗳 Votação de silêncio
 9b96d57aa	Duração do silêncio por votação
+d321f95bf	🛂 Segurança de membros e grupo
+496842aa2	Um novo membro não pode escrever até aceitar as regras do grupo com um botão. Quem aceitou uma vez não é perguntado de novo.
+11daa849d	Se alguém que não seja o fundador alterar o nome, a foto, a mensagem fixada ou a descrição do grupo, tudo é restaurado. Só o fundador / cofundador pode alterar isto.
+bca49e9f7	🔐 Dados pessoais e padrões de golpe
+f82c0d7d4	Mensagens de membros com telefone, e-mail, IBAN, endereço de carteira cripto ou convite "me chama no privado" são apagadas.
+b49a7535a	📞 Número de telefone
+ae97acaeb	📧 Endereço de e-mail
+bf9420e5b	🪙 Endereço de carteira cripto
+83cc05280	💬 Convites "me chama no privado"
+60ee0d4b1	Punição por dados pessoais
+1089f4de7	Comandos que membros enviam para outros bots são apagados; quem repete com frequência ou envia denúncias demais é punido. Só o fundador / cofundador pode alterar isto.
+7b002b274	Punição por spam de comandos
+2d1965747	🚫 Comandos desativados
+8add0446e	Um comando por linha (ex.: rapor, zar). Membros não podem usar, a equipe pode. Podem ser desativados: ⟨0⟩
+2646100b5	Ao usar um comando desativado
 d51893a35	🌍 Idioma
 8d6c8a4a5	Idioma do bot neste grupo
 45ac69c17	As mensagens, botões e alertas do bot ficarão neste idioma. O conteúdo que você escreveu não muda.
@@ -45602,6 +47179,7 @@ c4395cbb9	Pessoas de confiança (no máximo 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Opção inválida
+21140c9c2	Comando que não pode ser desativado: ⟨0⟩
 4094a1250	Longo demais: ⟨0⟩…
 3994c99a9	ID inválido: ⟨0⟩ (só números)
 5055a2323	No máximo ⟨0⟩ pessoas
@@ -45932,6 +47510,9 @@ f666e1d93	🗄 Backup do banco de dados · ⟨0⟩ MB (compactado ⟨1⟩ MB)
 9cfd9973e	Para restaurar, coloque o arquivo .db do zip na pasta do bot com o nome bot_data.db.
 391c8e6d0	🗄 Backup feito, mas não cabe no Telegram (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 Fazendo backup...
+35db56b39	⚠️ <b>O banco de dados foi corrompido</b> (database disk image is malformed).
+6889d6242	O bot será reiniciado em 5 s; na inicialização o arquivo corrompido será separado e os dados recuperados.
+6ffdbe5e2	O bot acabou de iniciar, então não foi feito reinício automático. Reinicie o bot manualmente.
 103ec5f85	Chat: ⟨0⟩
 0f97d9633	⚠️ Erro do bot
 15781d4a0	⚠️ Este botão está desatualizado ou é inválido. Abra o menu de novo.
@@ -45947,6 +47528,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS iniciado
 82459fdce	Banco de dados: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	Grupos/canais registrados: <b>⟨0⟩</b>
+05229d023	🛠 <b>O banco de dados estava corrompido e foi reparado.</b> Arquivo corrompido: <code>⟨0⟩</code>
+8a235e6be	Tabelas recuperadas: ⟨0⟩ · restauradas do backup: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Não foi possível recuperar: ⟨0⟩
 6c20c0dd0	⚠️ O banco de dados abriu vazio e foi restaurado do último backup: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Nenhum chat registrado. Se este número cair quando o bot reinicia, o arquivo do banco de dados pode ter sido apagado ou o bot está rodando de outra pasta.
 3831f1221	Não foi possível acessar o servidor
@@ -46045,17 +47629,6 @@ c264fb5af	💬 Управление темами
 f56347abf	🗑 Удаление историй
 fc5b6f247	ℹ️ Информация о группе
 16f35c22f	⭐ Добавление админов
-5a2dcf161	У бота нет прав для этого. Сделайте бота админом с нужными правами.
-da1585078	Бот не может выдать право, которого нет у него самого.
-5f334b209	Этот человек — админ группы; к админам это действие применить нельзя.
-a34bdfc67	Пользователь не найден в группе.
-247a273bd	Сообщение не найдено (возможно, удалено).
-342d7a053	Это сообщение нельзя удалить (возможно, оно старше 48 часов).
-59b207012	Telegram сейчас получает слишком много запросов, попробуйте чуть позже.
-29072692d	Чат не найден. Бот есть в этом чате?
-9a9bee4a1	Это работает только в супергруппах.
-e99fefa09	Нет доступа к боту (бот заблокирован или удалён из чата).
-f6a39420d	Не удалось связаться с Telegram, попробуйте чуть позже.
 fce0709e2	❌ Действие не удалось, попробуйте ещё раз.
 c1a2c3bf9	Нельзя применить это к себе.
 58503ae82	Это действие нельзя применить к этому аккаунту.
@@ -46188,6 +47761,72 @@ a77f997a9	флуд (⟨0⟩ сообщений/⟨1⟩ сек)
 794910b1f	Запрещённое слово
 8fb66aa89	запрещённое слово
 4e5efb06d	повторяющийся спам
+881f4a7b9	📜 Добро пожаловать, ⟨0⟩! Чтобы писать в группе, прочитай и прими правила:
+932c8c539	📜 Добро пожаловать, ⟨0⟩! Согласен соблюдать правила группы?
+d11dd3db7	✅ Я прочитал правила и принимаю их
+d6b7e92ea	📜 Ожидается принятие правил: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Эта кнопка недействительна.
+9c148e8f9	Эта кнопка не для тебя; правила может принять только новый участник.
+7f0e2a142	Группа не найдена.
+9d4cfb23f	Не удалось снять ограничение; пожалуйста, сообщи администраторам.
+925b57ed1	✅ Спасибо! Теперь ты можешь писать.
+65d432938	✅ Правила приняты: ⟨0⟩ | ⟨1⟩
+440a0b88c	анонимный администратор
+52b5bc87d	название группы
+39913ac6c	фото группы
+66a230ead	закреплённое сообщение
+62ff3a80d	🏷 Защита данных группы: ⟨0⟩ изменил(а) ⟨1⟩ → восстановлено | ⟨2⟩
+a91a23aac	🏷 Защита данных группы: ⟨0⟩ изменил(а) ⟨1⟩ → не удалось вернуть (боту нужны права на изменение данных группы и закрепление) | ⟨2⟩
+517c3659d	📝 Описание группы было изменено; оно восстановлено. Если изменение сделал основатель, нажми в панели 🛂 Безопасность участников и группы → 📸 Сохранить текущее состояние.
+e6529ed9a	номер телефона
+b9f1af256	адрес электронной почты
+8f8cbef64	адрес криптокошелька
+bf4118840	призыв «пиши в личку»
+f0840bba1	📞 Телефон
+c0c435e96	📧 E-mail
+ace48f755	🪙 Криптокошелёк
+5e78fdc15	💬 «Пиши в личку»
+e0669071a	Личные данные
+74a706b28	🛂 ⟨0⟩, твоё сообщение удалено, так как в нём был(а) ⟨1⟩. Ради своей безопасности не публикуй личные данные в группе.
+0b6ac9fc5	личные данные / мошеннический шаблон (⟨0⟩)
+1c979a8ff	пока нет
+e386f2a7c	🛂 <b>Безопасность участников и группы</b> — ⟨0⟩
+d3c7dee60	📜 <b>Принятие правил:</b> новый участник не может писать, пока не примет правила группы кнопкой (если включена капча — после капчи). Кто принял один раз, при повторном входе не спрашивается.
+67f8d8ae3	🏷 <b>Защита данных группы:</b> если кто-то, кроме основателя, меняет название, фото или закреплённое сообщение группы, всё возвращается; описание проверяется каждые 10 минут. Изменения основателя сохраняются автоматически; если описание изменил основатель, сохрани его кнопкой 📸. Менять может только основатель / сооснователь.
+092c6482f	Последний снимок: ⟨0⟩
+e26ff3006	🔐 <b>Личные данные и мошеннические шаблоны:</b> сообщения участников с номером телефона, e-mail, IBAN, адресом криптокошелька или призывом «пиши в личку» удаляются, и применяется выбранное наказание.
+5dce9c972	🤖 <b>Защита от спама командами:</b> команды, которые участники пишут другим ботам, удаляются; кто повторит это ⟨1⟩ раза за ⟨0⟩ с, получает выбранное наказание. Более ⟨3⟩ жалоб за ⟨2⟩ минут игнорируются, и применяется то же наказание. Менять может только основатель / сооснователь.
+4ccb73609	📜 Принятие правил
+614de7399	🏷 Защита данных группы
+c6b97674b	📸 Сохранить текущее состояние
+3052b371c	🔐 Защита личных данных
+39cb36b03	👇 Наказание за личные данные
+8299dd6da	🤖 Защита от спама командами
+e6c02779f	👇 Наказание за спам командами
+8fc0cad4c	🚫 Отключение команд (⟨0⟩) ›
+afbd89c3f	Защита команд
+e17cd1749	🚫 ⟨0⟩, эта команда отключена в этой группе.
+16c681ed1	команда, отключённая в этой группе (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, не отправляй снова и снова команды других ботов; в этой группе они удаляются.
+3519e7bcc	спам командами (команды других ботов)
+a64baef4c	🤖 ⟨0⟩, в этой группе команды других ботов удаляются.
+7dd5bf468	🚩 ⟨0⟩, ты отправил слишком много жалоб; какое-то время они будут игнорироваться.
+81879c932	злоупотребление системой жалоб
+f6d2e9197	🚫 <b>Отключение команд</b> — ⟨0⟩
+054caaae3	Отключённые тобой команды участники не могут использовать в этой группе: сообщение удаляется и применяется выбранное действие (если выбрано «Удалить», показывается короткое уведомление «эта команда отключена в этой группе»). Администраторы могут и дальше пользоваться отключёнными командами. Менять может только основатель / сооснователь.
+0bb5c2cf8	Отключено команд: <b>⟨0⟩</b>
+d5b266a81	Быстро: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 При использовании отключённой команды
+c22b8f825	🚫 <b>Отключение команд</b>
+76a397d40	Использование: <code>/komutkapat команда</code> · <code>/komutac команда</code>
+bd149a1f2	Администраторы могут и дальше пользоваться отключёнными командами.
+8c7a4527b	⚠️ /⟨0⟩ нельзя отключить.
+4bd6b629c	Можно отключить: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ уже включена.
+c04beaefc	🚫 /⟨0⟩ уже отключена.
+c1b5afc45	✅ /⟨0⟩ снова доступна участникам этой группы.
+36b26ef8c	🚫 /⟨0⟩ отключена для участников этой группы (администраторы могут пользоваться).
+4509732b3	🚫 Команда ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Анти-пересылка сейчас: ⟨0⟩
 6d6d358e6	Использование: /antiforward on|off
 117ba2454	ВКЛ
@@ -46359,7 +47998,7 @@ bc2943e26	🌙 Ночной режим начался. Ограничения д
 5f5e93020	Настройка ночного режима отменена.
 9ca4e6abd	Медиа
 c0ceeb976	Голосовые/видеосообщения
-d0517071a	Ссылка
+d0517071a	Ссылки
 02c5387be	Ограничения не выбраны
 8c6724096	Ночной режим сохранён!
 4c2f064b0	Ограничения: ⟨0⟩
@@ -46367,7 +48006,7 @@ ec5110d51	Задать часы: /nightmod 23:00 07:00
 015f290e6	Ночной режим настроен | ⟨0⟩
 a6ff502b6	⟨0⟩ Временный бан истёк, но разбан не удался: <code>⟨1⟩</code>
 09caa25fa	⟨0⟩ Временный бан закончился → ⟨1⟩ разбанен
-45cdd1bd7	🔗 Ссылка
+45cdd1bd7	🔗 Ссылки
 a70e468cd	Удаляются сообщения со ссылками, скрытыми (встроенными) ссылками и кнопками-ссылками.
 a0c63db58	🔤 Запрещённые слова
 09f922f95	Слова из списка ловятся с учётом турецких букв, регистра и leetspeak.
@@ -46501,11 +48140,21 @@ f5c96387f	🛟 Восстановление
 1bd24917c	✖️ Закрыть
 e38a49a6f	Настройки защиты канала
 f81ca3a77	Эту настройку может изменить только основатель группы.
+499b40121	Эту настройку могут менять только основатель и сооснователь.
 4081e665c	Неверная настройка
 ce432606a	✅ Включено
 ca037fcc4	❌ Выключено
 a006b158d	⚙️ Наказание ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Наказание: ⟨0⟩
+829773348	⚙️ Наказание защиты личных данных → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Наказание защиты от спама командами → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Действие при отключённой команде → ⟨0⟩ | ⟨1⟩
+d66461de6	Действие: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ отключена
+1366de2b8	✅ /⟨0⟩ включена
+a69466222	📸 Данные группы (название, описание, фото, закреп) сохранены | ⟨0⟩
+87f3326f9	📸 Сохранено
+49c866e1e	Не удалось сохранить (бот админ?)
 286a11648	Наказание за лимит: ⟨0⟩
 c32110889	Список изменился, обновлено
 cf6b53ca2	🗑 ⟨0⟩ удалено: ⟨1⟩ | ⟨2⟩
@@ -46523,7 +48172,6 @@ e413c4b9e	Правила удалены
 0f514bbde	✅ Блокировка от рейда снята через панель | ⟨0⟩
 8e6a20f22	🔓 Разблокировано
 f5014f259	Не удалось разблокировать (права бота?)
-7f0e2a142	Группа не найдена.
 f41c17d41	Чтобы пользоваться этой панелью, нужно быть админом группы.
 8213d6575	<i>Отмена: cancel</i>
 1465f36fd	Напишите ответ как ответ на открывшееся сообщение.
@@ -46600,11 +48248,8 @@ e26434728	Эта группа в сети ⟨0⟩ (групп: ⟨1⟩):
 a0ec7c7bd	➖ Убрать эту группу из сети
 db918b20f	Эта группа не в сети. Если добавить ваши группы в сеть, баны распространяются на все, а настройки можно копировать одним нажатием. (Нужен основатель / сооснователь.)
 e44c5b572	➕ Добавить эту группу в мою сеть
-fe6b211f8	⟨0⟩ (админов: ⟨1⟩)
-1c979a8ff	пока нет
 9f41d74fa	🛟 <b>Восстановление админов</b> — ⟨0⟩
 62477adfc	Список админов сохраняется каждые 6 часов. Если кто-то за короткое время снимет права у 3+ админов, админы и доверенные лица получат уведомление с кнопкой восстановления. Доверенные лица могут восстановить админов, отправив боту в личку <code>/recover</code>.
-092c6482f	Последний снимок: ⟨0⟩
 ba8991412	Доверенные лица (⟨0⟩/3) — нажмите, чтобы убрать:
 5729ee3a9	➕ Добавить доверенное лицо
 72e9b014a	Восстанавливать автоматически
@@ -46631,8 +48276,6 @@ f9a34a2ad	Синхронизация банов ⟨0⟩
 eacfa093c	Скопировано в ⟨0⟩ групп
 c39c747b1	Настройки восстановления может менять только основатель.
 95e917987	Убрано
-87f3326f9	📸 Сохранено
-49c866e1e	Не удалось сохранить (бот админ?)
 b13ed05bb	♻️ Восстановлено админов: ⟨0⟩⟨1⟩
 8670a3a46	, ошибок: ⟨0⟩
 c3b595125	Добавлять доверенных лиц может только основатель.
@@ -46733,6 +48376,7 @@ a96302489	Сейчас не отправляется.
 b0b0b34ae	📢 <b>Последние рассылки</b>
 b6eaec96e	↪️ пересланное сообщение
 a2148c2a7	🗳 опрос
+a68f06db1	(медиа)
 771c7f3fb	👆 Кликов: ⟨0⟩⟨1⟩
 8139aea8f	(⟨0⟩ человек)
 71fc8c6a3	❌ Отменить #⟨0⟩
@@ -47044,6 +48688,10 @@ e6695a6db	⟨0⟩ добавлен в исключения из антиспам
 9e5f1a353	Закрытая группа
 e9312bd1b	Капча
 688f939e9	Фильтр слов
+9d784908d	Принятие правил
+1340d231a	Защита данных группы
+1bd1325c6	Защита личных данных
+1c138f426	Защита команд
 cbabb7d8b	Нет
 28b8f5479	👥 Участники: ⟨0⟩
 ceb987630	👮 Админы: ⟨0⟩
@@ -47154,6 +48802,7 @@ bfe1425f8	/forcesub @channel — Чтобы писать, нужно вступ�
 886d570db	/unlockdown · /unlockmedia — Снять блокировки
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <команда> · /komutac <команда> — Отключить / включить команду участников в этой группе (только основатель / сооснователь)
 3d2493394	/blockmedia · /blockpack — Блокировка медиа/паков
 20abda0cf	/admin (/addadmin) · /senioradmin @user [тег] — Выдать ранг
 3c7389596	/remove @user — Снять ранг
@@ -47727,6 +49376,21 @@ f7e588100	🌐 Спам-список CAS
 4a02f552b	✏️ Отслеживание смены имени
 32a52c44c	🗳 Голосование за мут
 9b96d57aa	Длительность мута по голосованию
+d321f95bf	🛂 Безопасность участников и группы
+496842aa2	Новый участник не может писать, пока не примет правила группы кнопкой. Кто принял один раз, больше не спрашивается.
+11daa849d	Если кто-то, кроме основателя, меняет название, фото, закреплённое сообщение или описание группы, всё возвращается. Менять может только основатель / сооснователь.
+bca49e9f7	🔐 Личные данные и мошеннические шаблоны
+f82c0d7d4	Сообщения участников с телефоном, e-mail, IBAN, адресом криптокошелька или призывом «пиши в личку» удаляются.
+b49a7535a	📞 Номер телефона
+ae97acaeb	📧 Адрес e-mail
+bf9420e5b	🪙 Адрес криптокошелька
+83cc05280	💬 Призывы «пиши в личку»
+60ee0d4b1	Наказание за личные данные
+1089f4de7	Команды, которые участники пишут другим ботам, удаляются; часто повторяющие и отправляющие слишком много жалоб наказываются. Менять может только основатель / сооснователь.
+7b002b274	Наказание за спам командами
+2d1965747	🚫 Отключённые команды
+8add0446e	По одной команде в строке (напр. rapor, zar). Участники не могут их использовать, администраторы могут. Можно отключить: ⟨0⟩
+2646100b5	При использовании отключённой команды
 d51893a35	🌍 Язык
 8d6c8a4a5	Язык бота в этой группе
 45ac69c17	Сообщения, кнопки и уведомления бота будут на этом языке. Написанный вами контент не меняется.
@@ -47745,6 +49409,7 @@ c4395cbb9	Доверенные лица (не больше 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Неверный выбор
+21140c9c2	Эту команду нельзя отключить: ⟨0⟩
 4094a1250	Слишком длинно: ⟨0⟩…
 3994c99a9	Неверный ID: ⟨0⟩ (только цифры)
 5055a2323	Не больше ⟨0⟩ человек
@@ -48077,6 +49742,9 @@ f666e1d93	🗄 Резервная копия базы · ⟨0⟩ МБ (в арх
 9cfd9973e	Для восстановления положите .db-файл из архива в папку бота под именем bot_data.db.
 391c8e6d0	🗄 Копия сделана, но не помещается в Telegram (⟨0⟩ МБ): ⟨1⟩
 c3fcc95df	🗄 Делаю резервную копию...
+35db56b39	⚠️ <b>База данных повреждена</b> (database disk image is malformed).
+6889d6242	Бот перезапустится через 5 с; при запуске повреждённый файл будет отложен, а данные восстановлены.
+6ffdbe5e2	Бот только что запустился, поэтому автоматический перезапуск не выполнен. Перезапустите бота вручную.
 103ec5f85	Чат: ⟨0⟩
 0f97d9633	⚠️ Ошибка бота
 15781d4a0	⚠️ Эта кнопка устарела или недействительна. Откройте меню снова.
@@ -48092,6 +49760,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS запущен
 82459fdce	База данных: <code>⟨0⟩</code> (⟨1⟩ КБ)
 d2e59a824	Зарегистрировано групп/каналов: <b>⟨0⟩</b>
+05229d023	🛠 <b>База данных была повреждена и восстановлена.</b> Повреждённый файл: <code>⟨0⟩</code>
+8a235e6be	Восстановлено таблиц: ⟨0⟩ · из резервной копии: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Не удалось восстановить: ⟨0⟩
 6c20c0dd0	⚠️ База данных открылась пустой и была восстановлена из последней копии: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Нет зарегистрированных чатов. Если это число падает при перезапуске бота, возможно, файл базы удалён или бот запущен из другой папки.
 3831f1221	Не удалось связаться с сервером
@@ -48345,6 +50016,72 @@ a77f997a9	флуд (⟨0⟩ повідомлень/⟨1⟩ с)
 794910b1f	Заборонене слово
 8fb66aa89	заборонене слово
 4e5efb06d	повторюваний спам
+881f4a7b9	📜 Ласкаво просимо, ⟨0⟩! Щоб писати в групі, прочитай і прийми правила:
+932c8c539	📜 Ласкаво просимо, ⟨0⟩! Погоджуєшся дотримуватися правил групи?
+d11dd3db7	✅ Я прочитав правила і приймаю їх
+d6b7e92ea	📜 Очікується прийняття правил: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Ця кнопка недійсна.
+9c148e8f9	Ця кнопка не для тебе; правила може прийняти лише новий учасник.
+7f0e2a142	Групу не знайдено.
+9d4cfb23f	Не вдалося зняти обмеження; будь ласка, повідом адміністраторів.
+925b57ed1	✅ Дякуємо! Тепер ти можеш писати.
+65d432938	✅ Правила прийнято: ⟨0⟩ | ⟨1⟩
+440a0b88c	анонімний адміністратор
+52b5bc87d	назву групи
+39913ac6c	фото групи
+66a230ead	закріплене повідомлення
+62ff3a80d	🏷 Захист даних групи: ⟨0⟩ змінив(ла) ⟨1⟩ → відновлено | ⟨2⟩
+a91a23aac	🏷 Захист даних групи: ⟨0⟩ змінив(ла) ⟨1⟩ → не вдалося повернути (боту потрібні права на зміну даних групи та закріплення) | ⟨2⟩
+517c3659d	📝 Опис групи було змінено; його відновлено. Якщо зміну зробив засновник, натисни в панелі 🛂 Безпека учасників і групи → 📸 Зберегти поточний стан.
+e6529ed9a	номер телефону
+b9f1af256	адреса електронної пошти
+8f8cbef64	адреса криптогаманця
+bf4118840	заклик «пиши в особисті»
+f0840bba1	📞 Телефон
+c0c435e96	📧 E-mail
+ace48f755	🪙 Криптогаманець
+5e78fdc15	💬 «Пиши в особисті»
+e0669071a	Особисті дані
+74a706b28	🛂 ⟨0⟩, твоє повідомлення видалено, бо в ньому був(ла) ⟨1⟩. Заради своєї безпеки не публікуй особисті дані в групі.
+0b6ac9fc5	особисті дані / шахрайський шаблон (⟨0⟩)
+1c979a8ff	поки немає
+e386f2a7c	🛂 <b>Безпека учасників і групи</b> — ⟨0⟩
+d3c7dee60	📜 <b>Прийняття правил:</b> новий учасник не може писати, доки не прийме правила групи кнопкою (якщо ввімкнена капча — після капчі). Хто прийняв один раз, при повторному вході не питається.
+67f8d8ae3	🏷 <b>Захист даних групи:</b> якщо хтось, крім засновника, змінює назву, фото чи закріплене повідомлення групи, усе повертається; опис перевіряється кожні 10 хвилин. Зміни засновника зберігаються автоматично; якщо опис змінив засновник, збережи його кнопкою 📸. Змінювати може лише засновник / співзасновник.
+092c6482f	Останній знімок: ⟨0⟩
+e26ff3006	🔐 <b>Особисті дані та шахрайські шаблони:</b> повідомлення учасників із номером телефону, e-mail, IBAN, адресою криптогаманця чи закликом «пиши в особисті» видаляються, і застосовується вибране покарання.
+5dce9c972	🤖 <b>Захист від спаму командами:</b> команди, які учасники пишуть іншим ботам, видаляються; хто повторить це ⟨1⟩ рази за ⟨0⟩ с, отримує вибране покарання. Понад ⟨3⟩ скарг за ⟨2⟩ хвилин ігноруються, і застосовується те саме покарання. Змінювати може лише засновник / співзасновник.
+4ccb73609	📜 Прийняття правил
+614de7399	🏷 Захист даних групи
+c6b97674b	📸 Зберегти поточний стан
+3052b371c	🔐 Захист особистих даних
+39cb36b03	👇 Покарання за особисті дані
+8299dd6da	🤖 Захист від спаму командами
+e6c02779f	👇 Покарання за спам командами
+8fc0cad4c	🚫 Вимкнення команд (⟨0⟩) ›
+afbd89c3f	Захист команд
+e17cd1749	🚫 ⟨0⟩, ця команда вимкнена в цій групі.
+16c681ed1	команда, вимкнена в цій групі (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, не надсилай знову і знову команди інших ботів; у цій групі вони видаляються.
+3519e7bcc	спам командами (команди інших ботів)
+a64baef4c	🤖 ⟨0⟩, у цій групі команди інших ботів видаляються.
+7dd5bf468	🚩 ⟨0⟩, ти надіслав забагато скарг; певний час вони ігноруватимуться.
+81879c932	зловживання системою скарг
+f6d2e9197	🚫 <b>Вимкнення команд</b> — ⟨0⟩
+054caaae3	Вимкнені тобою команди учасники не можуть використовувати в цій групі: повідомлення видаляється і застосовується вибрана дія (якщо вибрано «Видалити», показується коротке сповіщення «ця команда вимкнена в цій групі»). Адміністратори можуть і далі користуватися вимкненими командами. Змінювати може лише засновник / співзасновник.
+0bb5c2cf8	Вимкнено команд: <b>⟨0⟩</b>
+d5b266a81	Швидко: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 Коли використано вимкнену команду
+c22b8f825	🚫 <b>Вимкнення команд</b>
+76a397d40	Використання: <code>/komutkapat команда</code> · <code>/komutac команда</code>
+bd149a1f2	Адміністратори можуть і далі користуватися вимкненими командами.
+8c7a4527b	⚠️ /⟨0⟩ не можна вимкнути.
+4bd6b629c	Можна вимкнути: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ уже ввімкнена.
+c04beaefc	🚫 /⟨0⟩ уже вимкнена.
+c1b5afc45	✅ /⟨0⟩ знову доступна учасникам цієї групи.
+36b26ef8c	🚫 /⟨0⟩ вимкнена для учасників цієї групи (адміністратори можуть користуватися).
+4509732b3	🚫 Команда ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Анти-пересилання зараз: ⟨0⟩
 6d6d358e6	Використання: /antiforward on|off
 117ba2454	УВІМК
@@ -48660,11 +50397,21 @@ f5c96387f	🛟 Відновлення
 1bd24917c	✖️ Закрити
 e38a49a6f	Налаштування захисту каналу
 f81ca3a77	Це налаштування може змінити лише засновник групи.
+499b40121	Це налаштування можуть змінювати лише засновник і співзасновник.
 4081e665c	Невірне налаштування
 ce432606a	✅ Увімкнено
 ca037fcc4	❌ Вимкнено
 a006b158d	⚙️ Покарання ⟨0⟩ → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Покарання: ⟨0⟩
+829773348	⚙️ Покарання захисту особистих даних → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Покарання захисту від спаму командами → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ Дія при вимкненій команді → ⟨0⟩ | ⟨1⟩
+d66461de6	Дія: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ вимкнена
+1366de2b8	✅ /⟨0⟩ ввімкнена
+a69466222	📸 Дані групи (назва, опис, фото, закріп) збережено | ⟨0⟩
+87f3326f9	📸 Збережено
+49c866e1e	Не вдалося зберегти (бот адмін?)
 286a11648	Покарання за ліміт: ⟨0⟩
 c32110889	Список змінився, оновлено
 cf6b53ca2	🗑 ⟨0⟩ видалено: ⟨1⟩ | ⟨2⟩
@@ -48682,7 +50429,6 @@ e413c4b9e	Правила видалено
 0f514bbde	✅ Блокування від рейду знято через панель | ⟨0⟩
 8e6a20f22	🔓 Розблоковано
 f5014f259	Не вдалося розблокувати (права бота?)
-7f0e2a142	Групу не знайдено.
 f41c17d41	Щоб користуватися цією панеллю, потрібно бути адміном групи.
 8213d6575	<i>Скасувати: cancel</i>
 1465f36fd	Напишіть відповідь як відповідь на повідомлення, що відкрилося.
@@ -48760,10 +50506,8 @@ a0ec7c7bd	➖ Прибрати цю групу з мережі
 db918b20f	Ця група не в мережі. Якщо додати ваші групи в мережу, бани поширюються на всі, а налаштування можна копіювати одним натиском. (Потрібен засновник / співзасновник.)
 e44c5b572	➕ Додати цю групу в мою мережу
 fe6b211f8	⟨0⟩ (адмінів: ⟨1⟩)
-1c979a8ff	поки немає
 9f41d74fa	🛟 <b>Відновлення адмінів</b> — ⟨0⟩
 62477adfc	Список адмінів зберігається кожні 6 годин. Якщо хтось за короткий час зніме права з 3+ адмінів, адміни й довірені особи отримають сповіщення з кнопкою відновлення. Довірені особи можуть відновити адмінів, надіславши боту в особисті <code>/recover</code>.
-092c6482f	Останній знімок: ⟨0⟩
 ba8991412	Довірені особи (⟨0⟩/3) — натисніть, щоб прибрати:
 5729ee3a9	➕ Додати довірену особу
 72e9b014a	Відновлювати автоматично
@@ -48790,8 +50534,6 @@ f9a34a2ad	Синхронізація банів ⟨0⟩
 eacfa093c	Скопійовано в ⟨0⟩ груп
 c39c747b1	Змінювати налаштування відновлення може лише засновник.
 95e917987	Видалено
-87f3326f9	📸 Збережено
-49c866e1e	Не вдалося зберегти (бот адмін?)
 b13ed05bb	♻️ Відновлено адмінів: ⟨0⟩⟨1⟩
 8670a3a46	, не вдалося: ⟨0⟩
 c3b595125	Додавати довірених осіб може лише засновник.
@@ -48892,6 +50634,7 @@ a96302489	Зараз нічого не надсилається.
 b0b0b34ae	📢 <b>Останні розсилки</b>
 b6eaec96e	↪️ переслане повідомлення
 a2148c2a7	🗳 опитування
+a68f06db1	(медіа)
 771c7f3fb	👆 Натискань: ⟨0⟩⟨1⟩
 8139aea8f	(людей: ⟨0⟩)
 71fc8c6a3	❌ Скасувати #⟨0⟩
@@ -49203,6 +50946,10 @@ e6695a6db	⟨0⟩ додано до списку винятків зі спам�
 9e5f1a353	Приватна група
 e9312bd1b	Капча
 688f939e9	Фільтр слів
+9d784908d	Прийняття правил
+1340d231a	Захист даних групи
+1bd1325c6	Захист особистих даних
+1c138f426	Захист команд
 cbabb7d8b	Немає
 28b8f5479	👥 Учасники: ⟨0⟩
 ceb987630	👮 Адміни: ⟨0⟩
@@ -49313,6 +51060,7 @@ bfe1425f8	/forcesub @channel — Щоб писати, користувачі м�
 886d570db	/unlockdown · /unlockmedia — Зняти блокування
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <команда> · /komutac <команда> — Вимкнути / ввімкнути команду учасників у цій групі (лише засновник / співзасновник)
 3d2493394	/blockmedia · /blockpack — Блокувати медіа/набори
 20abda0cf	/admin (/addadmin) · /senioradmin @user [тег] — Надати ранг
 3c7389596	/remove @user — Зняти ранг
@@ -49886,6 +51634,21 @@ f7e588100	🌐 Спам-список CAS
 4a02f552b	✏️ Відстеження зміни імені
 32a52c44c	🗳 Голосування за мут
 9b96d57aa	Тривалість муту за голосуванням
+d321f95bf	🛂 Безпека учасників і групи
+496842aa2	Новий учасник не може писати, доки не прийме правила групи кнопкою. Хто прийняв один раз, більше не питається.
+11daa849d	Якщо хтось, крім засновника, змінює назву, фото, закріплене повідомлення чи опис групи, усе повертається. Змінювати може лише засновник / співзасновник.
+bca49e9f7	🔐 Особисті дані та шахрайські шаблони
+f82c0d7d4	Повідомлення учасників із телефоном, e-mail, IBAN, адресою криптогаманця чи закликом «пиши в особисті» видаляються.
+b49a7535a	📞 Номер телефону
+ae97acaeb	📧 Адреса e-mail
+bf9420e5b	🪙 Адреса криптогаманця
+83cc05280	💬 Заклики «пиши в особисті»
+60ee0d4b1	Покарання за особисті дані
+1089f4de7	Команди, які учасники пишуть іншим ботам, видаляються; ті, хто часто повторює чи надсилає забагато скарг, отримують покарання. Змінювати може лише засновник / співзасновник.
+7b002b274	Покарання за спам командами
+2d1965747	🚫 Вимкнені команди
+8add0446e	По одній команді в рядку (напр. rapor, zar). Учасники не можуть їх використовувати, адміністратори можуть. Можна вимкнути: ⟨0⟩
+2646100b5	Коли використано вимкнену команду
 d51893a35	🌍 Мова
 8d6c8a4a5	Мова бота в цій групі
 45ac69c17	Повідомлення, кнопки та сповіщення бота будуть цією мовою. Написаний вами вміст не змінюється.
@@ -49904,6 +51667,7 @@ c4395cbb9	Довірені особи (щонайбільше 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Недійсний вибір
+21140c9c2	Цю команду не можна вимкнути: ⟨0⟩
 4094a1250	Задовго: ⟨0⟩…
 3994c99a9	Недійсний ID: ⟨0⟩ (лише цифри)
 5055a2323	Максимум людей: ⟨0⟩
@@ -50236,6 +52000,9 @@ f666e1d93	🗄 Резервна копія бази даних · ⟨0⟩ МБ (
 9cfd9973e	Щоб відновити, покладіть .db-файл з архіву в папку бота під назвою bot_data.db.
 391c8e6d0	🗄 Резервну копію створено, але вона не вміщується в Telegram (⟨0⟩ МБ): ⟨1⟩
 c3fcc95df	🗄 Створюю резервну копію...
+35db56b39	⚠️ <b>Базу даних пошкоджено</b> (database disk image is malformed).
+6889d6242	Бот перезапуститься через 5 с; під час запуску пошкоджений файл буде відкладено, а дані відновлено.
+6ffdbe5e2	Бот щойно запустився, тому автоматичний перезапуск не виконано. Перезапустіть бота вручну.
 103ec5f85	Чат: ⟨0⟩
 0f97d9633	⚠️ Помилка бота
 15781d4a0	⚠️ Ця кнопка застаріла або недійсна. Відкрийте меню знову.
@@ -50251,6 +52018,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS запущено
 82459fdce	База даних: <code>⟨0⟩</code> (⟨1⟩ КБ)
 d2e59a824	Зареєстровані групи/канали: <b>⟨0⟩</b>
+05229d023	🛠 <b>База даних була пошкоджена і її відновлено.</b> Пошкоджений файл: <code>⟨0⟩</code>
+8a235e6be	Відновлено таблиць: ⟨0⟩ · з резервної копії: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Не вдалося відновити: ⟨0⟩
 6c20c0dd0	⚠️ База даних відкрилася порожньою й була відновлена з останньої резервної копії: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Немає зареєстрованих чатів. Якщо це число падає після перезапуску бота, файл бази даних міг бути видалений або бот працює з іншої папки.
 3831f1221	Не вдалося зв’язатися із сервером
@@ -50502,6 +52272,71 @@ a77f997a9	flood (⟨0⟩ xabar/⟨1⟩ s)
 794910b1f	Taqiqlangan so‘z
 8fb66aa89	taqiqlangan so‘z
 4e5efb06d	takroriy spam
+881f4a7b9	📜 Xush kelibsan ⟨0⟩! Guruhga yozish uchun qoidalarni o‘qib, qabul qilishing kerak:
+932c8c539	📜 Xush kelibsan ⟨0⟩! Guruh qoidalariga rioya qilishga rozimisan?
+d11dd3db7	✅ Qoidalarni o‘qidim, qabul qilaman
+d6b7e92ea	📜 Qoidalarni qabul qilish kutilmoqda: ⟨0⟩ | ⟨1⟩
+f85d7e4b8	Bu tugma yaroqsiz.
+9c148e8f9	Bu tugma sen uchun emas; qoidalarni faqat yangi qo‘shilgan odam tasdiqlay oladi.
+7f0e2a142	Guruh topilmadi.
+9d4cfb23f	Cheklovingni olib bo‘lmadi; iltimos, adminlarga xabar ber.
+925b57ed1	✅ Rahmat! Endi yoza olasan.
+65d432938	✅ Qoidalar qabul qilindi: ⟨0⟩ | ⟨1⟩
+440a0b88c	anonim admin
+52b5bc87d	guruh nomini
+39913ac6c	guruh rasmini
+66a230ead	qadalgan xabarni
+62ff3a80d	🏷 Guruh ma’lumotlari himoyasi: ⟨0⟩ ⟨1⟩ o‘zgartirdi → avvalgi holiga qaytarildi | ⟨2⟩
+a91a23aac	🏷 Guruh ma’lumotlari himoyasi: ⟨0⟩ ⟨1⟩ o‘zgartirdi → qaytarib bo‘lmadi (botda guruh ma’lumotlarini o‘zgartirish va qadash huquqi bo‘lishi kerak) | ⟨2⟩
+517c3659d	📝 Guruh tavsifi o‘zgartirilgan; avvalgi holiga qaytarildi. O‘zgarishni asoschi qilgan bo‘lsa, panelda 🛂 A’zo va guruh xavfsizligi → 📸 Hozirgi holatni saqlash tugmasini bos.
+e6529ed9a	telefon raqami
+b9f1af256	elektron pochta manzili
+8f8cbef64	kripto hamyon manzili
+bf4118840	"shaxsiyga yoz" chaqiruvi
+c0c435e96	📧 E-pochta
+ace48f755	🪙 Kripto hamyon
+5e78fdc15	💬 "Shaxsiyga yoz"
+e0669071a	Shaxsiy ma’lumot
+74a706b28	🛂 ⟨0⟩, xabaringda ⟨1⟩ bo‘lgani uchun o‘chirildi. Xavfsizliging uchun shaxsiy ma’lumotlaringni guruhda ulashma.
+0b6ac9fc5	shaxsiy ma’lumot / firibgarlik namunasi (⟨0⟩)
+1c979a8ff	hali yo‘q
+e386f2a7c	🛂 <b>A’zo va guruh xavfsizligi</b> — ⟨0⟩
+d3c7dee60	📜 <b>Qoidalarni qabul qilish:</b> yangi a’zo guruh qoidalarini tugma bilan qabul qilmaguncha yoza olmaydi (captcha yoqilgan bo‘lsa, captchadan keyin so‘raladi). Bir marta qabul qilgan odamdan qayta qo‘shilganda so‘ralmaydi.
+67f8d8ae3	🏷 <b>Guruh ma’lumotlari himoyasi:</b> asoschidan boshqa kimdir guruh nomi, rasmi yoki qadalgan xabarni o‘zgartirsa, avvalgi holiga qaytariladi; tavsif har 10 daqiqada tekshiriladi. Asoschining o‘zgarishlari avtomatik saqlanadi; tavsifni asoschi o‘zgartirgan bo‘lsa, 📸 bilan saqla. Faqat asoschi / hammuassis o‘zgartira oladi.
+092c6482f	Oxirgi nusxa: ⟨0⟩
+e26ff3006	🔐 <b>Shaxsiy ma’lumot va firibgarlik namunalari:</b> a’zolarning telefon raqami, e-pochta, IBAN, kripto hamyon manzili yoki "shaxsiyga yoz" chaqiruvi bor xabarlari o‘chiriladi va tanlangan jazo qo‘llanadi.
+5dce9c972	🤖 <b>Buyruq spamidan himoya:</b> a’zolar boshqa botlarga yozgan buyruqlar o‘chiriladi; ⟨0⟩ soniya ichida ⟨1⟩ marta takrorlaganga tanlangan jazo qo‘llanadi. ⟨2⟩ daqiqada ⟨3⟩ tadan ortiq shikoyat e’tiborga olinmaydi va o‘sha jazo qo‘llanadi. Faqat asoschi / hammuassis o‘zgartira oladi.
+4ccb73609	📜 Qoidalarni qabul qilish
+614de7399	🏷 Guruh ma’lumotlari himoyasi
+c6b97674b	📸 Hozirgi holatni saqlash
+3052b371c	🔐 Shaxsiy ma’lumot himoyasi
+39cb36b03	👇 Shaxsiy ma’lumot jazosi
+8299dd6da	🤖 Buyruq spamidan himoya
+e6c02779f	👇 Buyruq spami jazosi
+8fc0cad4c	🚫 Buyruqlarni o‘chirish (⟨0⟩) ›
+afbd89c3f	Buyruq himoyasi
+e17cd1749	🚫 ⟨0⟩, bu buyruq bu guruhda o‘chirilgan.
+16c681ed1	bu guruhda o‘chirilgan buyruq (/⟨0⟩)
+68b35ccb5	🤖 ⟨0⟩, boshqa botlarning buyruqlarini qayta-qayta yuborma; bu guruhda o‘chiriladi.
+3519e7bcc	buyruq spami (boshqa botlarning buyruqlari)
+a64baef4c	🤖 ⟨0⟩, bu guruhda boshqa botlarning buyruqlari o‘chiriladi.
+7dd5bf468	🚩 ⟨0⟩, juda ko‘p shikoyat yubording; shikoyatlaring bir muddat e’tiborga olinmaydi.
+81879c932	shikoyat tizimini suiiste’mol qilish
+f6d2e9197	🚫 <b>Buyruqlarni o‘chirish</b> — ⟨0⟩
+054caaae3	O‘chirgan buyruqlaringni a’zolar bu guruhda ishlata olmaydi: xabar o‘chiriladi va tanlangan amal qo‘llanadi ("O‘chirish" tanlangan bo‘lsa, qisqa "bu buyruq bu guruhda o‘chirilgan" ogohlantirishi ko‘rsatiladi). Ma’murlar o‘chirilgan buyruqlardan foydalanishda davom etadi. Faqat asoschi / hammuassis o‘zgartira oladi.
+0bb5c2cf8	O‘chirilgan buyruqlar soni: <b>⟨0⟩</b>
+d5b266a81	Tezkor foydalanish: <code>/komutkapat rapor</code> · <code>/komutac rapor</code>
+bcef47451	👇 O‘chirilgan buyruq ishlatilganda
+c22b8f825	🚫 <b>Buyruqlarni o‘chirish</b>
+76a397d40	Foydalanish: <code>/komutkapat buyruq</code> · <code>/komutac buyruq</code>
+bd149a1f2	O‘chirilgan buyruqlardan ma’murlar foydalanishda davom etadi.
+8c7a4527b	⚠️ /⟨0⟩ o‘chirib bo‘ladigan buyruqlardan emas.
+4bd6b629c	O‘chirib bo‘ladiganlar: ⟨0⟩
+e0dea61b9	✅ /⟨0⟩ allaqachon yoqilgan.
+c04beaefc	🚫 /⟨0⟩ allaqachon o‘chirilgan.
+c1b5afc45	✅ /⟨0⟩ bu guruhda a’zolar uchun yoqildi.
+36b26ef8c	🚫 /⟨0⟩ bu guruhda a’zolar uchun o‘chirildi (ma’murlar ishlata oladi).
+4509732b3	🚫 Buyruq ⟨0⟩: /⟨1⟩ | ⟨2⟩
 c91e153a9	Anti-forward hozir: ⟨0⟩
 6d6d358e6	Foydalanish: /antiforward on|off
 117ba2454	YOQIQ
@@ -50814,11 +52649,21 @@ f5c96387f	🛟 Tiklash
 1bd24917c	✖️ Yopish
 e38a49a6f	Kanal himoyasi sozlamalari
 f81ca3a77	Bu sozlamani faqat guruh asoschisi o‘zgartira oladi.
+499b40121	Bu sozlamani faqat asoschi va hammuassis o‘zgartira oladi.
 4081e665c	Noto‘g‘ri sozlama
 ce432606a	✅ Yoqildi
 ca037fcc4	❌ O‘chirildi
 a006b158d	⚙️ ⟨0⟩ jazosi → ⟨1⟩ | ⟨2⟩
 0ebfd3ac6	Jazo: ⟨0⟩
+829773348	⚙️ Shaxsiy ma’lumot himoyasi jazosi → ⟨0⟩ | ⟨1⟩
+20edfd5a6	⚙️ Buyruq spamidan himoya jazosi → ⟨0⟩ | ⟨1⟩
+30c471209	⚙️ O‘chirilgan buyruq amali → ⟨0⟩ | ⟨1⟩
+d66461de6	Amal: ⟨0⟩
+5e8ff7f01	🚫 /⟨0⟩ o‘chirildi
+1366de2b8	✅ /⟨0⟩ yoqildi
+a69466222	📸 Guruh ma’lumotlari (nom, tavsif, rasm, qadalgan xabar) saqlandi | ⟨0⟩
+87f3326f9	📸 Saqlandi
+49c866e1e	Saqlab bo‘lmadi (bot adminmi?)
 286a11648	Limit jazosi: ⟨0⟩
 c32110889	Ro‘yxat o‘zgardi, yangilandi
 cf6b53ca2	🗑 ⟨0⟩ o‘chirildi: ⟨1⟩ | ⟨2⟩
@@ -50836,7 +52681,6 @@ e413c4b9e	Qoidalar o‘chirildi
 0f514bbde	✅ Reyd qulfi paneldan olindi | ⟨0⟩
 8e6a20f22	🔓 Ochildi
 f5014f259	Ochib bo‘lmadi (bot ruxsatlari?)
-7f0e2a142	Guruh topilmadi.
 f41c17d41	Bu paneldan foydalanish uchun guruhda admin bo‘lishingiz kerak.
 8213d6575	<i>Bekor qilish: cancel</i>
 1465f36fd	Javobingizni ochilgan xabarga javob qilib yozing.
@@ -50914,10 +52758,8 @@ a0ec7c7bd	➖ Bu guruhni tarmoqdan chiqarish
 db918b20f	Bu guruh tarmoqda emas. Boshqaradigan guruhlaringizni tarmog‘ingizga qo‘shsangiz, banlar hammasiga tarqaladi va sozlamalarni bir bosishda nusxalashingiz mumkin. (Asoschi / hammuassis kerak.)
 e44c5b572	➕ Bu guruhni tarmog‘imga qo‘shish
 fe6b211f8	⟨0⟩ (⟨1⟩ ta admin)
-1c979a8ff	hali yo‘q
 9f41d74fa	🛟 <b>Adminlarni tiklash</b> — ⟨0⟩
 62477adfc	Adminlar ro‘yxati har 6 soatda saqlanadi. Kimdir qisqa vaqtda 3+ adminning huquqlarini olsa, adminlar va ishonchli odamlar tiklash tugmali ogohlantirish oladi. Ishonchli odamlar botga shaxsiy xabarda <code>/recover</code> yuborib adminlarni tiklashi mumkin.
-092c6482f	Oxirgi nusxa: ⟨0⟩
 ba8991412	Ishonchli odamlar (⟨0⟩/3) — olib tashlash uchun bosing:
 5729ee3a9	➕ Ishonchli odam qo‘shish
 72e9b014a	Avtomatik tiklash
@@ -50944,8 +52786,6 @@ f9a34a2ad	Ban sinxronizatsiyasi ⟨0⟩
 eacfa093c	⟨0⟩ guruhga nusxalandi
 c39c747b1	Tiklash sozlamalarini faqat asoschi o‘zgartira oladi.
 95e917987	Olib tashlandi
-87f3326f9	📸 Saqlandi
-49c866e1e	Saqlab bo‘lmadi (bot adminmi?)
 b13ed05bb	♻️ ⟨0⟩ admin tiklandi⟨1⟩
 8670a3a46	, ⟨0⟩ ta xato
 c3b595125	Ishonchli odamni faqat asoschi qo‘sha oladi.
@@ -51045,6 +52885,7 @@ a96302489	Hozir yuborilmayapti.
 b0b0b34ae	📢 <b>So‘nggi e’lonlar</b>
 b6eaec96e	↪️ uzatilgan xabar
 a2148c2a7	🗳 so‘rovnoma
+a68f06db1	(media)
 771c7f3fb	👆 ⟨0⟩ bosish⟨1⟩
 8139aea8f	(⟨0⟩ kishi)
 71fc8c6a3	❌ #⟨0⟩ ni bekor qilish
@@ -51353,6 +53194,10 @@ c0c03c505	⟨0⟩ istisnolar ro‘yxatidan olib tashlandi.
 e6695a6db	⟨0⟩ spam istisnolari ro‘yxatiga qo‘shildi.
 9e5f1a353	Yopiq guruh
 688f939e9	So‘z filtri
+9d784908d	Qoidalarni qabul qilish
+1340d231a	Guruh ma’lumotlari himoyasi
+1bd1325c6	Shaxsiy ma’lumot himoyasi
+1c138f426	Buyruq himoyasi
 cbabb7d8b	Yo‘q
 28b8f5479	👥 A’zolar: ⟨0⟩
 ceb987630	👮 Adminlar: ⟨0⟩
@@ -51463,6 +53308,7 @@ bfe1425f8	/forcesub @channel — Yozish uchun foydalanuvchilar kanalga a’zo bo
 886d570db	/unlockdown · /unlockmedia — Qulflarni olib tashlash
 5f2fe106c	/nightmod · /wordban · /wordlist · /whitelist · /allowlink · /newbie
 443a00692	/setwarnlimit · /setwarnaction · /captchatime
+5888aec1a	/komutkapat <buyruq> · /komutac <buyruq> — A’zolar buyrug‘ini bu guruhda o‘chirish / yoqish (faqat asoschi / hammuassis)
 3d2493394	/blockmedia · /blockpack — Media/to‘plamlarni bloklash
 20abda0cf	/admin (/addadmin) · /senioradmin @user [teg] — Daraja berish
 3c7389596	/remove @user — Darajani olib tashlash
@@ -52029,6 +53875,21 @@ f7e588100	🌐 CAS spam ro‘yxati
 4a02f552b	✏️ Ism o‘zgarishini kuzatish
 32a52c44c	🗳 Ovoz bilan ovozsiz qilish
 9b96d57aa	Ovoz bilan ovozsiz qilish muddati
+d321f95bf	🛂 A’zo va guruh xavfsizligi
+496842aa2	Yangi a’zo guruh qoidalarini tugma bilan qabul qilmaguncha yoza olmaydi. Bir marta qabul qilgandan qayta so‘ralmaydi.
+11daa849d	Asoschidan boshqa kimdir o‘zgartirgan guruh nomi, rasmi, qadalgan xabari va tavsifi avvalgi holiga qaytariladi. Faqat asoschi / hammuassis o‘zgartira oladi.
+bca49e9f7	🔐 Shaxsiy ma’lumot va firibgarlik namunalari
+f82c0d7d4	A’zolarning telefon, e-pochta, IBAN, kripto hamyon manzili yoki "shaxsiyga yoz" chaqiruvi bor xabarlari o‘chiriladi.
+b49a7535a	📞 Telefon raqami
+ae97acaeb	📧 E-pochta manzili
+bf9420e5b	🪙 Kripto hamyon manzili
+83cc05280	💬 "Shaxsiyga yoz" chaqiruvlari
+60ee0d4b1	Shaxsiy ma’lumot jazosi
+1089f4de7	A’zolar boshqa botlarga yozgan buyruqlar o‘chiriladi; tez-tez takrorlaganlar va juda ko‘p shikoyat yuborganlar jazolanadi. Faqat asoschi / hammuassis o‘zgartira oladi.
+7b002b274	Buyruq spami jazosi
+2d1965747	🚫 O‘chirilgan buyruqlar
+8add0446e	Har qatorga bitta buyruq (masalan, rapor, zar). A’zolar ishlata olmaydi, ma’murlar ishlata oladi. O‘chirib bo‘ladiganlar: ⟨0⟩
+2646100b5	O‘chirilgan buyruq ishlatilganda
 d51893a35	🌍 Til
 8d6c8a4a5	Botning bu guruhdagi tili
 45ac69c17	Botning xabarlari, tugmalari va ogohlantirishlari shu tilda bo‘ladi. Siz yozgan kontent o‘zgarmaydi.
@@ -52047,6 +53908,7 @@ c4395cbb9	Ishonchli shaxslar (ko‘pi bilan 3)
 fe85b70c6	#green
 485f81ade	#red
 9cfcbc726	Noto‘g‘ri tanlov
+21140c9c2	O‘chirib bo‘lmaydigan buyruq: ⟨0⟩
 4094a1250	Juda uzun: ⟨0⟩…
 3994c99a9	Noto‘g‘ri ID: ⟨0⟩ (faqat raqamlar)
 5055a2323	Ko‘pi bilan ⟨0⟩ kishi
@@ -52374,6 +54236,9 @@ f666e1d93	🗄 Ma’lumotlar bazasi zaxirasi · ⟨0⟩ MB (siqilgan ⟨1⟩ MB)
 9cfd9973e	Tiklash uchun zip ichidagi .db faylni bot papkasiga bot_data.db nomi bilan joylang.
 391c8e6d0	🗄 Zaxira olindi, lekin Telegramga sig‘maydi (⟨0⟩ MB): ⟨1⟩
 c3fcc95df	🗄 Zaxira olinmoqda...
+35db56b39	⚠️ <b>Ma’lumotlar bazasi buzildi</b> (database disk image is malformed).
+6889d6242	Bot 5 soniyada qayta ishga tushiriladi; ishga tushishda buzilgan fayl chetga olinadi va ma’lumotlar tiklanadi.
+6ffdbe5e2	Bot hozirgina ishga tushdi, avtomatik qayta ishga tushirish qilinmadi. Botni qo‘lda qayta ishga tushiring.
 103ec5f85	Chat: ⟨0⟩
 0f97d9633	⚠️ Bot xatosi
 15781d4a0	⚠️ Bu tugma eskirgan yoki noto‘g‘ri. Menyuni qayta oching.
@@ -52389,6 +54254,9 @@ be0743f28	🔄 /reload: +⟨0⟩ / −⟨1⟩ | ⟨2⟩
 2a8ec5530	🟢 ULUS ishga tushdi
 82459fdce	Ma’lumotlar bazasi: <code>⟨0⟩</code> (⟨1⟩ KB)
 d2e59a824	Ro‘yxatdan o‘tgan guruhlar/kanallar: <b>⟨0⟩</b>
+05229d023	🛠 <b>Ma’lumotlar bazasi buzilgan edi, tiklandi.</b> Buzilgan fayl: <code>⟨0⟩</code>
+8a235e6be	Tiklangan jadval: ⟨0⟩ · zaxiradan olingan: ⟨1⟩⟨2⟩⟨3⟩
+9bd6ab5aa	⚠️ Tiklab bo‘lmaganlar: ⟨0⟩
 6c20c0dd0	⚠️ Ma’lumotlar bazasi bo‘sh ochildi va oxirgi zaxiradan tiklandi: <code>⟨0⟩</code>
 0e4276ce2	⚠️ Ro‘yxatdan o‘tgan chatlar yo‘q. Bot qayta ishga tushganda bu son kamaysa, ma’lumotlar bazasi fayli o‘chirilgan yoki bot boshqa papkadan ishlayotgan bo‘lishi mumkin.
 3831f1221	Serverga ulanib bo‘lmadi
