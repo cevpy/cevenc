@@ -112,6 +112,13 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
 - 📌 Sabitle, 🗑 Süreli sil (6 sa – 7 gün); `/gonderiler`, `/gonderiplan`
 - Sınırlar: albüm yok (Telegram düzenlemede tek medya); sesli mesaj ve yuvarlak video eklenemez
 
+## Gizlilik ve veri silme ✅ (tamamlandı)
+- `/gizlilik` (`/privacy`): hangi veriler, ne kadar süre, ne için, kimler görür, haklar, iletişim (kurucunun kullanıcı adı); 15 dilde
+- `/verilerimisil` (`/deletemydata`): talep kurucuya gelir (klonlardakiler dahil), ✅ Onayla / ❌ Reddet
+  - Silinir: profil, isim geçmişi, mesaj istatistikleri, AFK, dil, davet ve duyuru tercihleri
+  - Kalır: uyarı, susturma, ban ve spam listesi kayıtları · 7 günde bir talep
+- Tüm zamanlar sıralaması düzeltildi: 30 günden eski mesajlar silinirken kişi başı toplama eklenir
+
 ## Önerildi, şimdilik seçilmedi
 - Davet yarışması (haftalık/aylık davet sıralaması)
 - Hesap güven puanı (hesap yaşı, profil fotoğrafı, biyografideki link, premium)

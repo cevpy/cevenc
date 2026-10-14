@@ -941,6 +941,7 @@ CMD_ALIASES = {
     'setveda': 'setgoodbye', 'yenile': 'reload', 'rapor': 'report', 'dil': 'setlang',
     'komutkapat': 'disablecmd', 'komutac': 'enablecmd', 'gonderi': 'post', 'gonderiler': 'posts',
     'gonderiplan': 'scheduled',
+    'gizlilik': 'privacy', 'verilerimisil': 'deletemydata',
 }
 ALIAS_TO_TR = {v: k for k, v in CMD_ALIASES.items()}
 
@@ -1846,6 +1847,24 @@ def init_db():
                 UNIQUE (bot_id, code)
             );
             CREATE INDEX IF NOT EXISTS idx_cposts_owner ON channel_posts(bot_id, owner_id);
+            CREATE TABLE IF NOT EXISTS msg_totals (
+                chat_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                cnt INTEGER NOT NULL DEFAULT 0,
+                username TEXT,
+                first_name TEXT,
+                PRIMARY KEY (chat_id, user_id)
+            );
+            CREATE TABLE IF NOT EXISTS data_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                bot_id INTEGER,
+                name TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at REAL NOT NULL,
+                decided_at REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_datareq_user ON data_requests(user_id, created_at);
             CREATE INDEX IF NOT EXISTS idx_announce ON announcements(bot_id, status);
 
             CREATE INDEX IF NOT EXISTS idx_forward_ts ON forward_history(timestamp);
@@ -9253,17 +9272,19 @@ def _get_leaderboard(chat_id: str, period: str, limit: int = 15,
             """, (chat_id, since_ts, until_ts, limit)).fetchall()
         else:
             rows = conn.execute("""
-                SELECT ms.user_id,
-                       COALESCE(u.username, ms.username, '') as username,
-                       COALESCE(u.first_name, ms.first_name, '') as first_name,
-                       COUNT(*) as cnt
-                FROM message_stats ms
-                LEFT JOIN users u ON u.user_id = ms.user_id AND u.chat_id = ms.chat_id
-                WHERE ms.chat_id = ?
-                GROUP BY ms.user_id
+                SELECT t.user_id,
+                       COALESCE(u.username, MAX(t.username), '') as username,
+                       COALESCE(u.first_name, MAX(t.first_name), '') as first_name,
+                       SUM(t.n) as cnt
+                FROM (SELECT user_id, MAX(username) username, MAX(first_name) first_name, COUNT(*) n
+                      FROM message_stats WHERE chat_id = ? GROUP BY user_id
+                      UNION ALL
+                      SELECT user_id, username, first_name, cnt FROM msg_totals WHERE chat_id = ?) t
+                LEFT JOIN users u ON u.user_id = t.user_id AND u.chat_id = ?
+                GROUP BY t.user_id
                 ORDER BY cnt DESC
                 LIMIT ?
-            """, (chat_id, limit)).fetchall()
+            """, (chat_id, chat_id, chat_id, limit)).fetchall()
     return rows
 
 def _get_user_count(chat_id: str, user_id: int, period: str,
@@ -9278,11 +9299,17 @@ def _get_user_count(chat_id: str, user_id: int, period: str,
                 (chat_id, user_id, since_ts, until_ts)
             ).fetchone()
         else:
-            row = conn.execute(
-                "SELECT COUNT(*) as cnt FROM message_stats WHERE chat_id = ? AND user_id = ?",
-                (chat_id, user_id)
-            ).fetchone()
+            return msg_total(chat_id, user_id, conn)
     return row['cnt'] if row else 0
+
+def msg_total(chat_id: str, user_id: int, conn=None) -> int:
+    """Kişinin gruptaki tüm zamanlar mesaj sayısı: son günlerin ayrıntısı + eski günlerin toplamı (msg_totals)."""
+    if conn is None:
+        with get_db() as c:
+            return msg_total(chat_id, user_id, c)
+    n = conn.execute("SELECT COUNT(*) FROM message_stats WHERE chat_id = ? AND user_id = ?", (chat_id, user_id)).fetchone()[0]
+    old = conn.execute("SELECT cnt FROM msg_totals WHERE chat_id = ? AND user_id = ?", (chat_id, user_id)).fetchone()
+    return n + (old[0] if old else 0)
 
 def _format_name(row) -> str:
     
@@ -11059,6 +11086,7 @@ async def cmd_grupbilgi(update: Update, context):
         return
     with get_db() as conn:
         total_msgs = conn.execute("SELECT COUNT(*) as c FROM message_stats WHERE chat_id=?", (chat_id,)).fetchone()['c']
+        total_msgs += conn.execute("SELECT COALESCE(SUM(cnt), 0) FROM msg_totals WHERE chat_id=?", (chat_id,)).fetchone()[0]
         total_users = conn.execute("SELECT COUNT(DISTINCT user_id) as c FROM message_stats WHERE chat_id=?", (chat_id,)).fetchone()['c']
         total_bans = conn.execute("SELECT COUNT(*) as c FROM ban_list WHERE chat_id=?", (chat_id,)).fetchone()['c']
         total_warns = conn.execute("SELECT SUM(warn_count) as c FROM warnings WHERE chat_id=?", (chat_id,)).fetchone()['c'] or 0
@@ -11163,6 +11191,7 @@ async def help_command(update: Update, context):
                 "/id — ID goster\n"
                 "/kanal — Kanal baglantisi\n"
                 "/itiraz <aciklama> — Ban itirazi gonder\n"
+                "/gizlilik — Gizlilik politikası · /verilerimisil — Verilerimin silinmesini iste\n"
                 "/kurtar — Admin kurtarma (guvenilir kisiler icin)\n"
                 "💬 Bota yazdığın mesaj bot yöneticisine iletilir, yanıtı buraya gelir.\n"
             ) + brand_footer())
@@ -11206,6 +11235,7 @@ async def help_command(update: Update, context):
         "/help — Bu menu\n"
         "/id — ID goster\n"
         "/itiraz <aciklama> — Ban itirazi (bota ozelden)\n"
+        "/gizlilik — Gizlilik politikası · /verilerimisil — Verilerimin silinmesini iste\n"
         "/report [sebep] veya @admin — Yanitladigin mesaji yetkililere bildir\n"
     )
 
@@ -11377,6 +11407,7 @@ PRIVATE_COMMANDS = [
     ("setlang", "Dil / Language"),
     ("destek", "Yöneticiye yaz (destek hattı)"),
     ("gonderi", "Kanal gönderisi hazırla"), ("gonderiler", "Hazırladığın kanal gönderileri"),
+    ("gizlilik", "Gizlilik politikası"), ("verilerimisil", "Verilerimin silinmesini iste"),
 ]
 CLONE_OWNER_COMMANDS = [
     ("panel", "Botunun grupları ve istatistikleri"), ("duyuru", "Gruplara, kanallara, kişilere duyuru"),
@@ -15363,7 +15394,7 @@ async def giveaway_eligible(chat_id: str, user, req: dict) -> str | None:
         return f"Önce {req.get('channel_title') or 'kanala'} katılmalısın."
     if req.get('min_msgs'):
         with get_db() as conn:
-            n = conn.execute("SELECT COUNT(*) FROM message_stats WHERE chat_id = ? AND user_id = ?", (chat_id, user.id)).fetchone()[0]
+            n = msg_total(chat_id, user.id, conn)
         if n < req['min_msgs']:
             return f"Grupta en az {req['min_msgs']} mesajın olmalı (şu an {n})."
     if req.get('min_days'):
@@ -18055,6 +18086,200 @@ def _clone_admin_view(bid: int):
             [ibtn("↩️ Liste", "cl|list")]]
     return text, InlineKeyboardMarkup(rows)
 
+# ── Gizlilik politikası ve veri silme talebi ──
+# /privacy: botun hangi verileri neden ve ne kadar tuttuğu. /verilerimisil: kişi talep verir, bot sahibi (kurucu;
+# klonlardaki talepler dahil) onaylarsa kişinin profil/istatistik/tercih verileri silinir; güvenlik kayıtları kalır.
+DATA_DELETE_TABLES = (
+    ('users', 'user_id'), ('name_history', 'user_id'), ('message_stats', 'user_id'), ('msg_totals', 'user_id'),
+    ('afk', 'user_id'), ('user_lang', 'user_id'), ('invite_links', 'user_id'), ('invite_joins', 'user_id'),
+    ('invite_joins', 'inviter_id'), ('tag_optout', 'user_id'), ('bot_users', 'user_id'), ('duyuru_clicks', 'user_id'),
+    ('member_events', 'user_id'), ('msg_cache', 'user_id'), ('msg_edits', 'user_id'), ('rules_accepted', 'user_id'),
+    ('member_tags', 'user_id'), ('support_msgs', 'user_id'), ('channel_log', 'user_id'))
+DATA_REQUEST_COOLDOWN = 7 * 86400
+_founder_uname = {'v': None, 'at': 0.0}
+
+async def founder_contact() -> str:
+    """İletişim: bot sahibinin (kurucu) güncel kullanıcı adı; saatte bir yenilenir."""
+    if time.time() - _founder_uname['at'] > 3600 and FOUNDER_ID:
+        try:
+            _founder_uname['v'] = (await (MAIN_BOT or bot).get_chat(FOUNDER_ID)).username
+        except TelegramError as e:
+            logger.debug(f"Kurucu kullanıcı adı alınamadı: {e}")
+        _founder_uname['at'] = time.time()
+    u = _founder_uname['v']
+    return f"@{u}" if isinstance(u, str) and u else "/destek"
+
+async def privacy_text() -> str:
+    contact = await founder_contact()
+    return "\n".join([
+        f"🔒 <b>{html.escape(brand())} — Gizlilik politikası</b>",
+        "",
+        "<b>1. Hangi verileri tutuyoruz</b>",
+        "• Telegram kimliğin: ID, ad, kullanıcı adı ve dil seçimin",
+        "• Ad ve kullanıcı adı değişikliklerin (isim geçmişi)",
+        "• Gruplardaki mesaj sayıların (sıralama ve istatistik için); mesaj içerikleri kalıcı tutulmaz",
+        "• Uyarı, susturma, ban ve rapor kayıtları",
+        "• Silinen ve düzenlenen mesajların kısa süreli kopyası (spam ve düzenleme koruması için)",
+        "• AFK durumu, duyuru aboneliği, davet sayıları ve çekiliş katılımları",
+        "",
+        "<b>2. Ne kadar saklıyoruz</b>",
+        f"• Mesaj önbelleği: 2 gün · düzenleme geçmişi: {EDIT_HISTORY_KEEP_DAYS} gün",
+        f"• Mesaj ayrıntıları: {MESSAGE_STATS_RETENTION_DAYS} gün; toplam mesaj sayın ve isim geçmişin süresiz",
+        f"• Ceza geçmişi: {MOD_LOG_RETENTION_DAYS} gün · yedekler: {BACKUP_KEEP} gün",
+        "",
+        "<b>3. Ne için kullanıyoruz</b>",
+        "Sadece grup koruması, istatistikler ve botun özellikleri için. Verilerin satılmaz, reklam için "
+        "kullanılmaz ve üçüncü kişilerle paylaşılmaz.",
+        "",
+        "<b>4. Kimler görebilir</b>",
+        "Bot sahibi ve grupların yetkilileri; yetkililer sadece kendi gruplarındaki kayıtları görür.",
+        "",
+        "<b>5. Hakların</b>",
+        "/verilerimisil ile verilerinin silinmesini isteyebilirsin; talebi bot sahibi inceler. Uyarı, susturma, "
+        "ban ve spam listesi kayıtları güvenlik için silinmez.",
+        "",
+        "<b>6. İletişim</b>",
+        contact,
+    ])
+
+async def cmd_gizlilik(update: Update, context):
+    """/privacy (/gizlilik) — gizlilik politikası."""
+    await update.effective_message.reply_text(await privacy_text(), parse_mode=ParseMode.HTML,
+                                              disable_web_page_preview=True)
+
+def _data_req_last(uid: int) -> dict | None:
+    with get_db() as conn:
+        r = conn.execute("SELECT * FROM data_requests WHERE user_id = ? ORDER BY id DESC LIMIT 1", (uid,)).fetchone()
+    return dict(r) if r else None
+
+def _data_req_block(uid: int) -> str | None:
+    """Talep verilemiyorsa sebebi."""
+    last = _data_req_last(uid)
+    if not last:
+        return None
+    if last['status'] in ('pending', 'processing'):
+        return "⏳ Önceki talebin hâlâ bot sahibinde; sonuçlanınca sana haber vereceğim."
+    if time.time() - last['created_at'] < DATA_REQUEST_COOLDOWN:
+        return "Son 7 gün içinde zaten talep verdin; biraz sonra tekrar deneyebilirsin."
+    return None
+
+async def cmd_verilerimisil(update: Update, context):
+    """/verilerimisil (/deletemydata) — veri silme talebi (özelden; bot sahibi onaylar)."""
+    msg, user = update.effective_message, update.effective_user
+    if update.effective_chat.type != 'private':
+        await msg.reply_text("🔒 Veri silme talebi için bana özelden /verilerimisil yaz.")
+        return
+    block = _data_req_block(user.id)
+    if block:
+        await msg.reply_text(block)
+        return
+    await msg.reply_text(
+        "🗑 <b>Veri silme talebi</b>\n\n"
+        "<b>Onaylanırsa silinir:</b> profilin, isim geçmişin, mesaj istatistiklerin, AFK, dil, davet ve duyuru "
+        "tercihlerin.\n"
+        "<b>Kalır (güvenlik):</b> uyarı, susturma, ban ve spam listesi kayıtları.\n\n"
+        "Talebi bot sahibi inceler; sonuç sana buradan bildirilir. Gruplarda yazmaya devam edersen yeni veriler "
+        "yine kaydedilir.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup([[ibtn("✅ Talep gönder", "dr|send", GREEN), ibtn("❌ Vazgeç", "dr|x")]]))
+
+def delete_user_data(uid: int) -> int:
+    """Kişinin profil/istatistik/tercih verilerini siler (güvenlik kayıtları kalır). Dönüş: silinen satır sayısı."""
+    flush_writes()
+    n = 0
+    with get_db() as conn:
+        for tbl, col in DATA_DELETE_TABLES:
+            try:
+                n += conn.execute(f"DELETE FROM {tbl} WHERE {col} = ?", (uid,)).rowcount
+            except sqlite3.OperationalError as e:
+                logger.debug(f"Veri silme {tbl}: {e}")
+        conn.commit()
+    _user_lang_cache.pop(uid, None)
+    return n
+
+def _data_req_summary(uid: int) -> str:
+    with get_db() as conn:
+        groups = conn.execute("SELECT COUNT(DISTINCT chat_id) FROM users WHERE user_id = ?", (uid,)).fetchone()[0]
+        mods = conn.execute("SELECT COUNT(*) FROM mod_log WHERE target_user_id = ?", (uid,)).fetchone()[0]
+        bans = conn.execute("SELECT COUNT(*) FROM ban_list WHERE user_id = ?", (uid,)).fetchone()[0]
+    return f"Grup: {groups} · ceza kaydı: {mods} · aktif ban: {bans}"
+
+async def data_request_callback(update: Update, context):
+    """dr|send / dr|x (kullanıcı) · dr|ok|id / dr|no|id (bot sahibi)."""
+    query = update.callback_query
+    parts = query.data.split('|')
+    op, uid = parts[1], query.from_user.id
+    if op == 'x':
+        await query.answer()
+        await query.edit_message_text("Vazgeçildi; verilerine dokunulmadı.")
+        return
+    if op == 'send':
+        block = _data_req_block(uid)
+        if block:
+            await query.answer(block, show_alert=True)
+            return
+        u = query.from_user
+        uname = getattr(u, 'username', None)
+        name = (getattr(u, 'full_name', None) or getattr(u, 'first_name', None) or str(uid)) + (f" (@{uname})" if uname else '')
+        with get_db() as conn:
+            rid = conn.execute("INSERT INTO data_requests (user_id, bot_id, name, status, created_at) "
+                               "VALUES (?, ?, ?, 'pending', ?)", (uid, cur_bot_id(), name, time.time())).lastrowid
+            conn.commit()
+        await query.answer("Talebin iletildi.")
+        await query.edit_message_text("✅ Talebin bot sahibine iletildi. Sonuç sana buradan bildirilecek.")
+        via = f"@{context.bot.username}" if getattr(context.bot, 'username', None) else "bot"
+        await _main_send(
+            FOUNDER_ID,
+            f"🗑 <b>Veri silme talebi</b> #{rid}\n👤 {html.escape(name)} · <code>{uid}</code>\n🤖 {html.escape(via)}\n"
+            f"📋 {_data_req_summary(uid)}\n\nOnaylarsan profil, isim geçmişi, istatistik ve tercihleri silinir; "
+            "uyarı, susturma, ban ve spam kayıtları kalır.",
+            parse_mode=ParseMode.HTML,
+            reply_markup=InlineKeyboardMarkup([[ibtn("✅ Onayla", f"dr|ok|{rid}", GREEN),
+                                                ibtn("❌ Reddet", f"dr|no|{rid}", RED)]]))
+        return
+    if op not in ('ok', 'no') or len(parts) < 3:
+        await query.answer("Bu buton geçersiz.", show_alert=True)
+        return
+    if uid != FOUNDER_ID:
+        await query.answer("Bu işlemi sadece bot sahibi yapabilir.", show_alert=True)
+        return
+    rid = int(parts[2])
+    with get_db() as conn:  # çift tıklamada iki kez işlenmesin
+        claimed = conn.execute("UPDATE data_requests SET status = 'processing' WHERE id = ? AND status = 'pending'",
+                               (rid,)).rowcount
+        conn.commit()
+        r = conn.execute("SELECT * FROM data_requests WHERE id = ?", (rid,)).fetchone()
+    if not claimed or not r:
+        await query.answer("Bu talep zaten işlendi.", show_alert=True)
+        return
+    r = dict(r)
+    lang = user_lang(r['user_id'])  # silinmeden önce: sonuç kişinin dilinde gitsin
+    if op == 'ok':
+        n = delete_user_data(r['user_id'])
+        status, note = 'approved', f"✅ Onaylandı, veriler silindi ({n} kayıt)."
+        reply = ("✅ Veri silme talebin onaylandı: profilin, isim geçmişin, istatistiklerin ve tercihlerin silindi. "
+                 "Uyarı, susturma, ban ve spam listesi kayıtları güvenlik için duruyor.")
+    else:
+        status, note = 'rejected', "❌ Reddedildi."
+        reply = f"❌ Veri silme talebin bot sahibi tarafından reddedildi. Sorun için: {await founder_contact()}"
+    with get_db() as conn:
+        conn.execute("UPDATE data_requests SET status = ?, decided_at = ? WHERE id = ?", (status, time.time(), rid))
+        conn.commit()
+    await query.answer(note[:190])
+    try:
+        await query.edit_message_text(f"{query.message.text_html}\n\n<b>{note}</b>", parse_mode=ParseMode.HTML)
+    except TelegramError as e:
+        logger.debug(f"Veri talebi mesajı güncellenemedi: {e}")
+    b = RUNNING_BOTS.get(r['bot_id']) or MAIN_BOT or bot
+    tok = _ctx_bot.set(b)
+    try:
+        with lang_override(lang):
+            await b.send_message(r['user_id'], reply)
+    except TelegramError as e:
+        logger.debug(f"Veri talebi sonucu bildirilemedi {r['user_id']}: {e}")
+    finally:
+        _ctx_bot.reset(tok)
+
 async def cmd_klon(update: Update, context):
     """/klon — klon bot menüsü (sadece ana botta, özelden)."""
     if update.effective_chat.type != 'private':
@@ -18524,6 +18749,14 @@ async def db_cleanup_job(context: ContextTypes.DEFAULT_TYPE):
             conn.execute("DELETE FROM msg_edits WHERE at < ?", (now - EDIT_HISTORY_KEEP_DAYS * 86400,))
             conn.execute("DELETE FROM admin_actions WHERE at < ?", (now - AUDIT_KEEP_DAYS * 86400,))
             conn.execute("DELETE FROM reports WHERE created_at < ?", (now - 30 * 86400,))
+            # tüm zamanlar sayacı: silinmeden önce eski mesajlar kişi başı toplama eklenir
+            conn.execute("""
+                INSERT INTO msg_totals (chat_id, user_id, cnt, username, first_name)
+                SELECT chat_id, user_id, COUNT(*), MAX(username), MAX(first_name) FROM message_stats
+                WHERE sent_at < ? GROUP BY chat_id, user_id
+                ON CONFLICT(chat_id, user_id) DO UPDATE SET cnt = cnt + excluded.cnt,
+                    username = COALESCE(excluded.username, username), first_name = COALESCE(excluded.first_name, first_name)
+            """, (msg_stats_cutoff,))
             conn.execute("DELETE FROM message_stats WHERE sent_at < ?", (msg_stats_cutoff,))
             conn.commit()
     _cleanup_in_memory_caches(now)
@@ -18997,6 +19230,8 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CommandHandler('davetler', cmd_davetler))
     app.add_handler(ChatMemberHandler(invite_track_handler, ChatMemberHandler.CHAT_MEMBER), group=-4)
     app.add_handler(CommandHandler('destek', cmd_destek, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler('gizlilik', cmd_gizlilik))
+    app.add_handler(CommandHandler('verilerimisil', cmd_verilerimisil))
     app.add_handler(CallbackQueryHandler(support_callback, pattern=r'^sp\|'))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.REPLY & ~filters.COMMAND, support_reply_handler),
                     group=-45)
@@ -19098,6 +19333,7 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CallbackQueryHandler(nightmod_callback, pattern='^nm_'))
     app.add_handler(CallbackQueryHandler(wordlist_callback, pattern='^wdel'))
     app.add_handler(CallbackQueryHandler(appeal_callback, pattern=r'^appeal(pick)?\|'))
+    app.add_handler(CallbackQueryHandler(data_request_callback, pattern=r'^dr\|'))
     app.add_handler(CallbackQueryHandler(help_settings_callback, pattern=r'^help_settings$'))
 
     if main_bot:
@@ -20491,7 +20727,6 @@ b5ad3a8e7	Yetkin yok veya kayıt yok.
 0644770db	♻️ ⟨0⟩ kaydındaki adminler geri yüklenecek:
 700b3ac82	Onaylıyor musun?
 1ca35b0e1	✅ Evet, geri yükle
-e6a5e85cd	❌ Vazgeç
 805c38798	Geri yükleniyor...
 cf63ea900	♻️ ⟨0⟩ admin geri yüklendi.⟨1⟩
 b8058c528	❌ Başarısız: ⟨0⟩
@@ -20655,6 +20890,7 @@ b0d9549b8	/yazitura — Yazi tura at
 b4031dc89	/help — Bu menu
 6467c9dbe	/id — ID goster
 0af5bde71	/itiraz <aciklama> — Ban itirazi (bota ozelden)
+3642ffea5	/gizlilik — Gizlilik politikası · /verilerimisil — Verilerimin silinmesini iste
 aff60c67d	/report [sebep] veya @admin — Yanitladigin mesaji yetkililere bildir
 15575b067	👮 Yetkili Komutlari — senin rütben: ⟨0⟩
 d955391ce	Rütbe sırası: 👑 Kurucu > 🔱 Yardımcı Kurucu > ⭐ Üst Admin > 🛡 Admin
@@ -20794,6 +21030,8 @@ fcea72bad	Seçili grup için hızlı kurulum
 333895635	Yöneticiye yaz (destek hattı)
 de94cd9e4	Kanal gönderisi hazırla
 7ffee2a93	Hazırladığın kanal gönderileri
+d27eff5c8	Gizlilik politikası
+eb96aa2f5	Verilerimin silinmesini iste
 0d0187ac4	Botunun grupları ve istatistikleri
 8938961a5	Gruplara, kanallara, kişilere duyuru
 be4f2dea9	Duyuru geçmişi
@@ -21793,6 +22031,47 @@ e211ffa2a	💎 Premium: Açık
 60c71135b	💎 Premium: Kapalı
 783d8db23	Durum: ⟨0⟩ · Sahip <code>⟨1⟩</code>
 1a2ec4716	↩️ Liste
+2f704a8f0	🔒 <b>⟨0⟩ — Gizlilik politikası</b>
+d9d9ac1f8	<b>1. Hangi verileri tutuyoruz</b>
+996ce26b2	• Telegram kimliğin: ID, ad, kullanıcı adı ve dil seçimin
+c4b153eb0	• Ad ve kullanıcı adı değişikliklerin (isim geçmişi)
+3a1de66af	• Gruplardaki mesaj sayıların (sıralama ve istatistik için); mesaj içerikleri kalıcı tutulmaz
+630660602	• Uyarı, susturma, ban ve rapor kayıtları
+9a8e2c224	• Silinen ve düzenlenen mesajların kısa süreli kopyası (spam ve düzenleme koruması için)
+0b8e28ab0	• AFK durumu, duyuru aboneliği, davet sayıları ve çekiliş katılımları
+5a4e6fa28	<b>2. Ne kadar saklıyoruz</b>
+d1ad0ee51	• Mesaj önbelleği: 2 gün · düzenleme geçmişi: ⟨0⟩ gün
+ef9969356	• Mesaj ayrıntıları: ⟨0⟩ gün; toplam mesaj sayın ve isim geçmişin süresiz
+0045612df	• Ceza geçmişi: ⟨0⟩ gün · yedekler: ⟨1⟩ gün
+cd1453252	<b>3. Ne için kullanıyoruz</b>
+8f2f14875	Sadece grup koruması, istatistikler ve botun özellikleri için. Verilerin satılmaz, reklam için kullanılmaz ve üçüncü kişilerle paylaşılmaz.
+0408a81a6	<b>4. Kimler görebilir</b>
+2aaa04410	Bot sahibi ve grupların yetkilileri; yetkililer sadece kendi gruplarındaki kayıtları görür.
+4b16ec584	<b>5. Hakların</b>
+70886128b	/verilerimisil ile verilerinin silinmesini isteyebilirsin; talebi bot sahibi inceler. Uyarı, susturma, ban ve spam listesi kayıtları güvenlik için silinmez.
+5b9cbf99a	<b>6. İletişim</b>
+9b8234242	⏳ Önceki talebin hâlâ bot sahibinde; sonuçlanınca sana haber vereceğim.
+ca8f894d6	Son 7 gün içinde zaten talep verdin; biraz sonra tekrar deneyebilirsin.
+911be3749	🔒 Veri silme talebi için bana özelden /verilerimisil yaz.
+7880b45fe	🗑 <b>Veri silme talebi</b>
+e83b4c167	<b>Onaylanırsa silinir:</b> profilin, isim geçmişin, mesaj istatistiklerin, AFK, dil, davet ve duyuru tercihlerin.
+c287e5d8c	<b>Kalır (güvenlik):</b> uyarı, susturma, ban ve spam listesi kayıtları.
+06cc2c9b5	Talebi bot sahibi inceler; sonuç sana buradan bildirilir. Gruplarda yazmaya devam edersen yeni veriler yine kaydedilir.
+8b20a58ab	✅ Talep gönder
+e6a5e85cd	❌ Vazgeç
+0a57e684e	Grup: ⟨0⟩ · ceza kaydı: ⟨1⟩ · aktif ban: ⟨2⟩
+e2af94e61	Vazgeçildi; verilerine dokunulmadı.
+3b1fe6568	Talebin iletildi.
+522ba7cdb	✅ Talebin bot sahibine iletildi. Sonuç sana buradan bildirilecek.
+82b141f80	🗑 <b>Veri silme talebi</b> #⟨0⟩
+5bf057285	👤 ⟨0⟩ · <code>⟨1⟩</code>
+51a7b41f2	Onaylarsan profil, isim geçmişi, istatistik ve tercihleri silinir; uyarı, susturma, ban ve spam kayıtları kalır.
+7269890c3	Bu işlemi sadece bot sahibi yapabilir.
+0847d1a9f	Bu talep zaten işlendi.
+40df18e4c	✅ Onaylandı, veriler silindi (⟨0⟩ kayıt).
+7dd6a6e74	✅ Veri silme talebin onaylandı: profilin, isim geçmişin, istatistiklerin ve tercihlerin silindi. Uyarı, susturma, ban ve spam listesi kayıtları güvenlik için duruyor.
+8b725edd3	❌ Reddedildi.
+3fa4a528b	❌ Veri silme talebin bot sahibi tarafından reddedildi. Sorun için: ⟨0⟩
 367b6aa51	Klon işlemleri bota özelden yapılır.
 a51f7d30f	Bu istek zaten işlendi.
 c862658b2	Eski sürümden kalan istek; kullanıcı /klon ile token göndermeli.
@@ -21809,7 +22088,6 @@ ba7f6e886	✅ Onaylandı, bot açıldı
 90edeb341	Ad, karşılama metni ve destek linki için: /klon
 172a66fda	❌ @⟨0⟩ için klon bot isteğin reddedildi.
 dffc58eb3	Artık izin istemene gerek yok: token'ı gönder, bot sahibi onaylayınca botun açılır.
-7269890c3	Bu işlemi sadece bot sahibi yapabilir.
 741c29704	Bekleyen isteğin yok.
 a353b8903	↩️ Kullanıcı isteği geri çekti
 cb7da55c2	↩️ İstek geri çekildi
@@ -22974,7 +23252,6 @@ b5ad3a8e7	لا صلاحية أو لا لقطة.
 0644770db	♻️ سيُستعاد المشرفون في لقطة ⟨0⟩:
 700b3ac82	هل تؤكد؟
 1ca35b0e1	✅ نعم، استعد
-e6a5e85cd	❌ إلغاء
 805c38798	جارٍ الاستعادة...
 cf63ea900	♻️ استُعيد ⟨0⟩ مشرفين.⟨1⟩
 b8058c528	❌ فشل: ⟨0⟩
@@ -23135,6 +23412,7 @@ b0d9549b8	/coin — رمي عملة
 b4031dc89	/help — هذه القائمة
 6467c9dbe	/id — عرض المعرّف
 0af5bde71	/appeal <شرح> — تظلم من الحظر (للبوت في الخاص)
+3642ffea5	/privacy — سياسة الخصوصية · /deletemydata — طلب حذف بياناتي
 aff60c67d	/report [السبب] أو @admin — الإبلاغ عن الرسالة المردود عليها للمشرفين
 15575b067	👮 أوامر المشرفين — رتبتك: ⟨0⟩
 d955391ce	ترتيب الرتب: 👑 المؤسس > 🔱 المؤسس المشارك > ⭐ مشرف أول > 🛡 مشرف
@@ -23271,6 +23549,8 @@ fcea72bad	إعداد سريع للمجموعة المختارة
 333895635	مراسلة المشرف (خط الدعم)
 de94cd9e4	تحضير منشور للقناة
 7ffee2a93	منشورات القناة التي حضّرتها
+d27eff5c8	سياسة الخصوصية
+eb96aa2f5	طلب حذف بياناتي
 0d0187ac4	مجموعات بوتك وإحصائياته
 8938961a5	إعلانات للمجموعات والقنوات والأشخاص
 be4f2dea9	سجل الإعلانات
@@ -24191,6 +24471,46 @@ e211ffa2a	💎 بريميوم: مفعّل
 60c71135b	💎 بريميوم: متوقف
 783d8db23	الحالة: ⟨0⟩ · المالك <code>⟨1⟩</code>
 1a2ec4716	↩️ القائمة
+2f704a8f0	🔒 <b>⟨0⟩ — سياسة الخصوصية</b>
+d9d9ac1f8	<b>1. ما البيانات التي نحتفظ بها</b>
+996ce26b2	• هويتك في تيليجرام: المعرّف والاسم واسم المستخدم واللغة المختارة
+c4b153eb0	• تغييرات اسمك واسم المستخدم (سجل الأسماء)
+3a1de66af	• عدد رسائلك في المجموعات (للترتيب والإحصاءات)؛ لا يُحتفظ بمحتوى الرسائل بشكل دائم
+630660602	• سجلات التحذير والكتم والحظر والبلاغات
+9a8e2c224	• نسخة قصيرة الأمد من الرسائل المحذوفة والمعدّلة (للحماية من السبام والتعديل)
+0b8e28ab0	• حالة AFK والاشتراك في الإعلانات وعدد الدعوات والمشاركة في السحوبات
+5a4e6fa28	<b>2. كم نحتفظ بها</b>
+d1ad0ee51	• ذاكرة الرسائل المؤقتة: يومان · سجل التعديلات: ⟨0⟩ يوم
+ef9969356	• تفاصيل الرسائل: ⟨0⟩ يومًا؛ إجمالي عدد رسائلك وسجل الأسماء بلا مدة محددة
+0045612df	• سجل العقوبات: ⟨0⟩ يومًا · النسخ الاحتياطية: ⟨1⟩ أيام
+cd1453252	<b>3. لماذا نستخدمها</b>
+8f2f14875	فقط لحماية المجموعات والإحصاءات وميزات البوت. لا تُباع بياناتك ولا تُستخدم للإعلانات ولا تُشارك مع أطراف ثالثة.
+0408a81a6	<b>4. من يمكنه رؤيتها</b>
+2aaa04410	مالك البوت ومشرفو المجموعات؛ يرى المشرفون سجلات مجموعاتهم فقط.
+4b16ec584	<b>5. حقوقك</b>
+70886128b	يمكنك طلب حذف بياناتك عبر /deletemydata؛ يراجع مالك البوت الطلب. لا تُحذف سجلات التحذير والكتم والحظر وقائمة السبام حفاظًا على الأمان.
+5b9cbf99a	<b>6. التواصل</b>
+9b8234242	⏳ طلبك السابق ما زال لدى مالك البوت؛ سأخبرك عند البت فيه.
+ca8f894d6	لقد قدّمت طلبًا خلال آخر 7 أيام؛ يمكنك المحاولة لاحقًا.
+911be3749	🔒 لطلب حذف البيانات أرسل لي /deletemydata في الخاص.
+7880b45fe	🗑 <b>طلب حذف البيانات</b>
+e83b4c167	<b>يُحذف عند الموافقة:</b> ملفك الشخصي وسجل الأسماء وإحصاءات الرسائل وAFK واللغة وتفضيلات الدعوات والإعلانات.
+c287e5d8c	<b>يبقى (للأمان):</b> سجلات التحذير والكتم والحظر وقائمة السبام.
+06cc2c9b5	يراجع مالك البوت الطلب؛ وستصلك النتيجة هنا. إن واصلت الكتابة في المجموعات فستُسجَّل بيانات جديدة مرة أخرى.
+8b20a58ab	✅ إرسال الطلب
+e6a5e85cd	❌ إلغاء
+0a57e684e	المجموعات: ⟨0⟩ · سجلات العقوبات: ⟨1⟩ · حظر نشط: ⟨2⟩
+e2af94e61	أُلغي؛ لم تُمس بياناتك.
+3b1fe6568	أُرسل طلبك.
+522ba7cdb	✅ أُرسل طلبك إلى مالك البوت. ستصلك النتيجة هنا.
+82b141f80	🗑 <b>طلب حذف البيانات</b> #⟨0⟩
+51a7b41f2	إن وافقت تُحذف ملفاته وسجل أسمائه وإحصاءاته وتفضيلاته؛ وتبقى سجلات التحذير والكتم والحظر والسبام.
+7269890c3	يمكن لمالك البوت فقط فعل هذا.
+0847d1a9f	تمت معالجة هذا الطلب بالفعل.
+40df18e4c	✅ تمت الموافقة وحُذفت البيانات (⟨0⟩ سجل).
+7dd6a6e74	✅ تمت الموافقة على طلب حذف بياناتك: حُذف ملفك الشخصي وسجل الأسماء والإحصاءات والتفضيلات. تبقى سجلات التحذير والكتم والحظر وقائمة السبام للأمان.
+8b725edd3	❌ مرفوض.
+3fa4a528b	❌ رفض مالك البوت طلب حذف بياناتك. للاستفسار: ⟨0⟩
 367b6aa51	إجراءات النسخة تتم في الخاص مع البوت.
 a51f7d30f	عولج هذا الطلب مسبقًا.
 c862658b2	طلب من إصدار قديم؛ يجب أن يرسل المستخدم التوكن عبر /clone.
@@ -24207,7 +24527,6 @@ ba7f6e886	✅ تمت الموافقة، بدأ البوت
 90edeb341	للاسم ونص الترحيب ورابط الدعم: /clone
 172a66fda	❌ رُفض طلب بوتك المستنسخ @⟨0⟩.
 dffc58eb3	لم تعد بحاجة لطلب إذن: أرسل التوكن، ويبدأ بوتك بعد موافقة مالك البوت.
-7269890c3	يمكن لمالك البوت فقط فعل هذا.
 741c29704	ليس لديك طلب معلّق.
 a353b8903	↩️ سحب المستخدم الطلب
 cb7da55c2	↩️ سُحب الطلب
@@ -25338,7 +25657,6 @@ b5ad3a8e7	İcazə yoxdur və ya surət yoxdur.
 0644770db	♻️ ⟨0⟩ surətindəki adminlər bərpa ediləcək:
 700b3ac82	Təsdiq edirsən?
 1ca35b0e1	✅ Bəli, bərpa et
-e6a5e85cd	❌ Ləğv et
 805c38798	Bərpa edilir...
 cf63ea900	♻️ ⟨0⟩ admin bərpa edildi.⟨1⟩
 b8058c528	❌ Alınmadı: ⟨0⟩
@@ -25498,6 +25816,7 @@ b0d9549b8	/coin — Pul at
 b4031dc89	/help — Bu menyu
 6467c9dbe	/id — ID-ni göstər
 0af5bde71	/appeal <izahat> — Bana etiraz (bota şəxsi)
+3642ffea5	/privacy — Məxfilik siyasəti · /deletemydata — Məlumatlarımın silinməsini istə
 aff60c67d	/report [səbəb] və ya @admin — Cavab verilən mesajı heyətə şikayət et
 15575b067	👮 Heyət əmrləri — rütbən: ⟨0⟩
 d955391ce	Rütbə sırası: 👑 Təsisçi > 🔱 Həmtəsisçi > ⭐ Baş admin > 🛡 Admin
@@ -25628,6 +25947,8 @@ fcea72bad	Seçilmiş qrup üçün sürətli quraşdırma
 333895635	Adminə yaz (dəstək xətti)
 de94cd9e4	Kanal paylaşımı hazırla
 7ffee2a93	Hazırladığın kanal paylaşımları
+d27eff5c8	Məxfilik siyasəti
+eb96aa2f5	Məlumatlarımın silinməsini istə
 0d0187ac4	Botunun qrupları və statistikası
 8938961a5	Qruplara, kanallara, insanlara elanlar
 be4f2dea9	Elan tarixçəsi
@@ -26526,6 +26847,46 @@ e211ffa2a	💎 Premium: Açıq
 60c71135b	💎 Premium: Bağlı
 783d8db23	Status: ⟨0⟩ · Sahib <code>⟨1⟩</code>
 1a2ec4716	↩️ Siyahı
+2f704a8f0	🔒 <b>⟨0⟩ — Məxfilik siyasəti</b>
+d9d9ac1f8	<b>1. Hansı məlumatları saxlayırıq</b>
+996ce26b2	• Telegram kimliyin: ID, ad, istifadəçi adı və dil seçimin
+c4b153eb0	• Ad və istifadəçi adı dəyişikliklərin (ad tarixçəsi)
+3a1de66af	• Qruplardakı mesaj sayların (reytinq və statistika üçün); mesaj məzmunu daimi saxlanılmır
+630660602	• Xəbərdarlıq, səssizləşdirmə, ban və şikayət qeydləri
+9a8e2c224	• Silinən və redaktə olunan mesajların qısamüddətli surəti (spam və redaktə qorunması üçün)
+0b8e28ab0	• AFK statusu, elan abunəliyi, dəvət sayları və çəkiliş iştirakları
+5a4e6fa28	<b>2. Nə qədər saxlayırıq</b>
+d1ad0ee51	• Mesaj keşi: 2 gün · redaktə tarixçəsi: ⟨0⟩ gün
+ef9969356	• Mesaj təfərrüatları: ⟨0⟩ gün; ümumi mesaj sayın və ad tarixçən müddətsiz
+0045612df	• Cəza tarixçəsi: ⟨0⟩ gün · ehtiyat nüsxələr: ⟨1⟩ gün
+cd1453252	<b>3. Nə üçün istifadə edirik</b>
+8f2f14875	Yalnız qrup qorunması, statistika və botun funksiyaları üçün. Məlumatların satılmır, reklam üçün istifadə olunmur və üçüncü şəxslərlə paylaşılmır.
+0408a81a6	<b>4. Kim görə bilər</b>
+2aaa04410	Bot sahibi və qrupların adminləri; adminlər yalnız öz qruplarındakı qeydləri görür.
+4b16ec584	<b>5. Hüquqların</b>
+70886128b	/deletemydata ilə məlumatlarının silinməsini istəyə bilərsən; talebi bot sahibi yoxlayır. Xəbərdarlıq, səssizləşdirmə, ban və spam siyahısı qeydləri təhlükəsizlik üçün silinmir.
+5b9cbf99a	<b>6. Əlaqə</b>
+9b8234242	⏳ Əvvəlki talebin hələ bot sahibindədir; nəticə olanda xəbər verəcəyəm.
+ca8f894d6	Son 7 gündə artıq talep vermisən; bir az sonra yenidən yoxla.
+911be3749	🔒 Məlumat silmə talebi üçün mənə şəxsidən /deletemydata yaz.
+7880b45fe	🗑 <b>Məlumat silmə talebi</b>
+e83b4c167	<b>Təsdiqlənsə silinir:</b> profilin, ad tarixçən, mesaj statistikan, AFK, dil, dəvət və elan seçimlərin.
+c287e5d8c	<b>Qalır (təhlükəsizlik):</b> xəbərdarlıq, səssizləşdirmə, ban və spam siyahısı qeydləri.
+06cc2c9b5	Talebi bot sahibi yoxlayır; nəticə sənə burada bildiriləcək. Qruplarda yazmağa davam etsən, yeni məlumatlar yenə qeydə alınacaq.
+8b20a58ab	✅ Talep göndər
+e6a5e85cd	❌ Ləğv et
+0a57e684e	Qrup: ⟨0⟩ · cəza qeydi: ⟨1⟩ · aktiv ban: ⟨2⟩
+e2af94e61	Ləğv edildi; məlumatlarına toxunulmadı.
+3b1fe6568	Talebin göndərildi.
+522ba7cdb	✅ Talebin bot sahibinə göndərildi. Nəticə sənə burada bildiriləcək.
+82b141f80	🗑 <b>Məlumat silmə talebi</b> #⟨0⟩
+51a7b41f2	Təsdiqləsən profil, ad tarixçəsi, statistika və seçimlər silinir; xəbərdarlıq, səssizləşdirmə, ban və spam qeydləri qalır.
+7269890c3	Bunu yalnız bot sahibi edə bilər.
+0847d1a9f	Bu talep artıq işlənib.
+40df18e4c	✅ Təsdiqləndi, məlumatlar silindi (⟨0⟩ qeyd).
+7dd6a6e74	✅ Məlumat silmə talebin təsdiqləndi: profilin, ad tarixçən, statistikan və seçimlərin silindi. Xəbərdarlıq, səssizləşdirmə, ban və spam siyahısı qeydləri təhlükəsizlik üçün qalır.
+8b725edd3	❌ Rədd edildi.
+3fa4a528b	❌ Məlumat silmə talebin bot sahibi tərəfindən rədd edildi. Suallar üçün: ⟨0⟩
 367b6aa51	Klon əməliyyatları botla şəxsi çatda edilir.
 a51f7d30f	Bu sorğuya artıq baxılıb.
 c862658b2	Köhnə versiyadan sorğu; istifadəçi /clone ilə token göndərməlidir.
@@ -26542,7 +26903,6 @@ ba7f6e886	✅ Təsdiqləndi, bot işə düşdü
 90edeb341	Ad, xoş gəldin mətni və dəstək linki üçün: /clone
 172a66fda	❌ @⟨0⟩ üçün klon bot sorğun rədd edildi.
 dffc58eb3	Artıq icazə istəməyə ehtiyac yoxdur: tokeni göndər, bot sahibi təsdiqləyəndə botun işə düşür.
-7269890c3	Bunu yalnız bot sahibi edə bilər.
 741c29704	Gözləyən sorğun yoxdur.
 a353b8903	↩️ İstifadəçi sorğunu geri götürdü
 cb7da55c2	↩️ Sorğu geri götürüldü
@@ -27687,7 +28047,6 @@ b5ad3a8e7	Keine Berechtigung oder kein Snapshot.
 0644770db	♻️ Die Admins aus dem Snapshot vom ⟨0⟩ werden wiederhergestellt:
 700b3ac82	Bestätigst du?
 1ca35b0e1	✅ Ja, wiederherstellen
-e6a5e85cd	❌ Abbrechen
 805c38798	Wird wiederhergestellt...
 cf63ea900	♻️ ⟨0⟩ Admins wiederhergestellt.⟨1⟩
 b8058c528	❌ Fehlgeschlagen: ⟨0⟩
@@ -27847,6 +28206,7 @@ b0d9549b8	/coin — Münze werfen
 b4031dc89	/help — Dieses Menü
 6467c9dbe	/id — ID anzeigen
 0af5bde71	/appeal <Begründung> — Bann-Einspruch (privat an den Bot)
+3642ffea5	/privacy — Datenschutzerklärung · /deletemydata — Löschung meiner Daten beantragen
 aff60c67d	/report [Grund] oder @admin — Die beantwortete Nachricht dem Team melden
 15575b067	👮 Team-Befehle — dein Rang: ⟨0⟩
 d955391ce	Rangfolge: 👑 Gründer > 🔱 Mitgründer > ⭐ Senior-Admin > 🛡 Admin
@@ -27983,6 +28343,8 @@ fcea72bad	Schnelleinrichtung für die ausgewählte Gruppe
 333895635	Dem Admin schreiben (Support-Linie)
 de94cd9e4	Kanalbeitrag vorbereiten
 7ffee2a93	Deine vorbereiteten Kanalbeiträge
+d27eff5c8	Datenschutzerklärung
+eb96aa2f5	Löschung meiner Daten beantragen
 0d0187ac4	Gruppen und Statistiken deines Bots
 8938961a5	Ankündigungen an Gruppen, Kanäle, Personen
 be4f2dea9	Ankündigungsverlauf
@@ -28894,6 +29256,46 @@ d3fb29907	🗑 Klon löschen
 e211ffa2a	💎 Premium: An
 60c71135b	💎 Premium: Aus
 783d8db23	Status: ⟨0⟩ · Besitzer <code>⟨1⟩</code>
+2f704a8f0	🔒 <b>⟨0⟩ — Datenschutzerklärung</b>
+d9d9ac1f8	<b>1. Welche Daten wir speichern</b>
+996ce26b2	• Deine Telegram-Identität: ID, Name, Benutzername und gewählte Sprache
+c4b153eb0	• Änderungen deines Namens und Benutzernamens (Namensverlauf)
+3a1de66af	• Deine Nachrichtenanzahl in Gruppen (für Ranglisten und Statistiken); Nachrichteninhalte werden nicht dauerhaft gespeichert
+630660602	• Einträge zu Verwarnungen, Stummschaltungen, Banns und Meldungen
+9a8e2c224	• Eine kurzzeitige Kopie gelöschter und bearbeiteter Nachrichten (für Spam- und Bearbeitungsschutz)
+0b8e28ab0	• AFK-Status, Ankündigungsabo, Einladungszahlen und Gewinnspielteilnahmen
+5a4e6fa28	<b>2. Wie lange wir speichern</b>
+d1ad0ee51	• Nachrichten-Cache: 2 Tage · Bearbeitungsverlauf: ⟨0⟩ Tage
+ef9969356	• Nachrichtendetails: ⟨0⟩ Tage; deine Gesamtzahl an Nachrichten und dein Namensverlauf unbegrenzt
+0045612df	• Strafverlauf: ⟨0⟩ Tage · Backups: ⟨1⟩ Tage
+cd1453252	<b>3. Wofür wir sie nutzen</b>
+8f2f14875	Nur für Gruppenschutz, Statistiken und die Funktionen des Bots. Deine Daten werden nicht verkauft, nicht für Werbung genutzt und nicht an Dritte weitergegeben.
+0408a81a6	<b>4. Wer sie sehen kann</b>
+2aaa04410	Der Bot-Besitzer und die Gruppenadmins; Admins sehen nur die Einträge ihrer eigenen Gruppen.
+4b16ec584	<b>5. Deine Rechte</b>
+70886128b	Mit /deletemydata kannst du die Löschung deiner Daten beantragen; der Bot-Besitzer prüft den Antrag. Einträge zu Verwarnungen, Stummschaltungen, Banns und der Spamliste werden aus Sicherheitsgründen nicht gelöscht.
+5b9cbf99a	<b>6. Kontakt</b>
+9b8234242	⏳ Dein vorheriger Antrag liegt noch beim Bot-Besitzer; ich melde mich, sobald entschieden ist.
+ca8f894d6	Du hast in den letzten 7 Tagen bereits einen Antrag gestellt; versuche es später erneut.
+911be3749	🔒 Um die Löschung deiner Daten zu beantragen, schreib mir privat /deletemydata.
+7880b45fe	🗑 <b>Antrag auf Datenlöschung</b>
+e83b4c167	<b>Bei Genehmigung gelöscht:</b> dein Profil, Namensverlauf, Nachrichtenstatistiken, AFK, Sprache sowie Einladungs- und Ankündigungseinstellungen.
+c287e5d8c	<b>Bleibt (Sicherheit):</b> Einträge zu Verwarnungen, Stummschaltungen, Banns und der Spamliste.
+06cc2c9b5	Der Bot-Besitzer prüft den Antrag; das Ergebnis erhältst du hier. Wenn du weiter in Gruppen schreibst, werden neue Daten wieder erfasst.
+8b20a58ab	✅ Antrag senden
+e6a5e85cd	❌ Abbrechen
+0a57e684e	Gruppen: ⟨0⟩ · Strafeinträge: ⟨1⟩ · aktive Banns: ⟨2⟩
+e2af94e61	Abgebrochen; deine Daten wurden nicht angetastet.
+3b1fe6568	Antrag gesendet.
+522ba7cdb	✅ Dein Antrag wurde an den Bot-Besitzer gesendet. Das Ergebnis erhältst du hier.
+82b141f80	🗑 <b>Antrag auf Datenlöschung</b> #⟨0⟩
+51a7b41f2	Wenn du genehmigst, werden Profil, Namensverlauf, Statistiken und Einstellungen gelöscht; Einträge zu Verwarnungen, Stummschaltungen, Banns und Spam bleiben.
+7269890c3	Nur der Bot-Besitzer kann das tun.
+0847d1a9f	Dieser Antrag wurde bereits bearbeitet.
+40df18e4c	✅ Genehmigt, Daten gelöscht (⟨0⟩ Einträge).
+7dd6a6e74	✅ Dein Antrag auf Datenlöschung wurde genehmigt: Profil, Namensverlauf, Statistiken und Einstellungen wurden gelöscht. Einträge zu Verwarnungen, Stummschaltungen, Banns und der Spamliste bleiben aus Sicherheitsgründen bestehen.
+8b725edd3	❌ Abgelehnt.
+3fa4a528b	❌ Der Bot-Besitzer hat deinen Antrag auf Datenlöschung abgelehnt. Bei Fragen: ⟨0⟩
 367b6aa51	Klon-Aktionen erfolgen privat mit dem Bot.
 a51f7d30f	Diese Anfrage wurde bereits bearbeitet.
 c862658b2	Eine Anfrage aus einer alten Version; der Nutzer muss mit /clone ein Token senden.
@@ -28910,7 +29312,6 @@ ba7f6e886	✅ Freigegeben, der Bot ist gestartet
 90edeb341	Für Name, Begrüßungstext und Support-Link: /clone
 172a66fda	❌ Deine Klon-Bot-Anfrage für @⟨0⟩ wurde abgelehnt.
 dffc58eb3	Du musst nicht mehr um Erlaubnis fragen: Sende das Token, dein Bot startet, sobald der Bot-Besitzer zustimmt.
-7269890c3	Nur der Bot-Besitzer kann das tun.
 741c29704	Du hast keine offene Anfrage.
 a353b8903	↩️ Der Nutzer hat die Anfrage zurückgezogen
 cb7da55c2	↩️ Anfrage zurückgezogen
@@ -30047,7 +30448,6 @@ b5ad3a8e7	No permission or no snapshot.
 0644770db	♻️ The admins in the ⟨0⟩ snapshot will be restored:
 700b3ac82	Do you confirm?
 1ca35b0e1	✅ Yes, restore
-e6a5e85cd	❌ Cancel
 805c38798	Restoring...
 cf63ea900	♻️ ⟨0⟩ admins restored.⟨1⟩
 b8058c528	❌ Failed: ⟨0⟩
@@ -30205,6 +30605,7 @@ b0d9549b8	/coin — Flip a coin
 b4031dc89	/help — This menu
 6467c9dbe	/id — Show ID
 0af5bde71	/appeal <explanation> — Ban appeal (privately to the bot)
+3642ffea5	/privacy — Privacy policy · /deletemydata — Request deletion of my data
 aff60c67d	/report [reason] or @admin — Report the replied message to the staff
 15575b067	👮 Staff Commands — your rank: ⟨0⟩
 d955391ce	Rank order: 👑 Founder > 🔱 Co-Founder > ⭐ Senior Admin > 🛡 Admin
@@ -30341,6 +30742,8 @@ fcea72bad	Quick setup for the selected group
 333895635	Write to the admin (support line)
 de94cd9e4	Prepare a channel post
 7ffee2a93	Channel posts you prepared
+d27eff5c8	Privacy policy
+eb96aa2f5	Request deletion of my data
 0d0187ac4	Your bot's groups and statistics
 8938961a5	Announcements to groups, channels, people
 be4f2dea9	Announcement history
@@ -31248,6 +31651,46 @@ e211ffa2a	💎 Premium: On
 60c71135b	💎 Premium: Off
 783d8db23	Status: ⟨0⟩ · Owner <code>⟨1⟩</code>
 1a2ec4716	↩️ List
+2f704a8f0	🔒 <b>⟨0⟩ — Privacy policy</b>
+d9d9ac1f8	<b>1. What data we keep</b>
+996ce26b2	• Your Telegram identity: ID, name, username and language choice
+c4b153eb0	• Changes to your name and username (name history)
+3a1de66af	• Your message counts in groups (for rankings and statistics); message contents are not kept permanently
+630660602	• Warning, mute, ban and report records
+9a8e2c224	• A short-lived copy of deleted and edited messages (for spam and edit protection)
+0b8e28ab0	• AFK status, announcement subscription, invite counts and giveaway entries
+5a4e6fa28	<b>2. How long we keep it</b>
+d1ad0ee51	• Message cache: 2 days · edit history: ⟨0⟩ days
+ef9969356	• Message details: ⟨0⟩ days; your total message count and name history are kept indefinitely
+0045612df	• Moderation history: ⟨0⟩ days · backups: ⟨1⟩ days
+cd1453252	<b>3. What we use it for</b>
+8f2f14875	Only for group protection, statistics and the bot's features. Your data is not sold, not used for advertising and not shared with third parties.
+0408a81a6	<b>4. Who can see it</b>
+2aaa04410	The bot owner and group admins; admins only see the records of their own groups.
+4b16ec584	<b>5. Your rights</b>
+70886128b	With /deletemydata you can ask for your data to be deleted; the bot owner reviews the request. Warning, mute, ban and spam list records are not deleted, for security.
+5b9cbf99a	<b>6. Contact</b>
+9b8234242	⏳ Your previous request is still with the bot owner; I'll let you know when it's decided.
+ca8f894d6	You already made a request in the last 7 days; you can try again later.
+911be3749	🔒 To request data deletion, send me /deletemydata privately.
+7880b45fe	🗑 <b>Data deletion request</b>
+e83b4c167	<b>Deleted if approved:</b> your profile, name history, message statistics, AFK, language, invite and announcement preferences.
+c287e5d8c	<b>Kept (security):</b> warning, mute, ban and spam list records.
+06cc2c9b5	The bot owner reviews the request; you'll be notified here. If you keep writing in groups, new data will be recorded again.
+8b20a58ab	✅ Send request
+e6a5e85cd	❌ Cancel
+0a57e684e	Groups: ⟨0⟩ · moderation records: ⟨1⟩ · active bans: ⟨2⟩
+e2af94e61	Cancelled; your data was not touched.
+3b1fe6568	Your request was sent.
+522ba7cdb	✅ Your request was sent to the bot owner. You'll be notified of the result here.
+82b141f80	🗑 <b>Data deletion request</b> #⟨0⟩
+51a7b41f2	If you approve, their profile, name history, statistics and preferences are deleted; warning, mute, ban and spam records stay.
+7269890c3	Only the bot owner can do this.
+0847d1a9f	This request has already been handled.
+40df18e4c	✅ Approved, data deleted (⟨0⟩ records).
+7dd6a6e74	✅ Your data deletion request was approved: your profile, name history, statistics and preferences were deleted. Warning, mute, ban and spam list records remain for security.
+8b725edd3	❌ Rejected.
+3fa4a528b	❌ Your data deletion request was rejected by the bot owner. For questions: ⟨0⟩
 367b6aa51	Clone actions are done privately with the bot.
 a51f7d30f	This request was already handled.
 c862658b2	A request from an old version; the user must send a token with /clone.
@@ -31264,7 +31707,6 @@ ba7f6e886	✅ Approved, the bot started
 90edeb341	For the name, welcome text and support link: /clone
 172a66fda	❌ Your clone bot request for @⟨0⟩ was declined.
 dffc58eb3	You no longer need to ask for permission: send the token, your bot starts once the bot owner approves.
-7269890c3	Only the bot owner can do this.
 741c29704	You have no pending request.
 a353b8903	↩️ The user withdrew the request
 cb7da55c2	↩️ Request withdrawn
@@ -31437,6 +31879,7 @@ a4439e0c5	<a href="tg://user?id=⟨0⟩">⟨1⟩</a>
 33337525a	🆔 <code>⟨0⟩</code>⟨1⟩
 817dbc364	• ⟨0⟩ (<code>⟨1⟩</code>)
 cd8533168	• ⟨0⟩: <code>⟨1⟩</code> — ⟨2⟩
+5bf057285	👤 ⟨0⟩ · <code>⟨1⟩</code>
 4e4068d8f	bot_data_⟨0⟩.db
 176712105	⟨0⟩<pre>⟨1⟩</pre>
 25e151e9c	(<code>⟨0⟩</code>)
@@ -32477,7 +32920,6 @@ b5ad3a8e7	Sin permiso o sin copia.
 0644770db	♻️ Se restaurarán los admins de la copia de ⟨0⟩:
 700b3ac82	¿Confirmas?
 1ca35b0e1	✅ Sí, restaurar
-e6a5e85cd	❌ Cancelar
 805c38798	Restaurando...
 cf63ea900	♻️ ⟨0⟩ admins restaurados.⟨1⟩
 b8058c528	❌ Fallaron: ⟨0⟩
@@ -32637,6 +33079,7 @@ b0d9549b8	/coin — Lanzar una moneda
 b4031dc89	/help — Este menú
 6467c9dbe	/id — Mostrar ID
 0af5bde71	/appeal <explicación> — Apelar un baneo (en privado al bot)
+3642ffea5	/privacy — Política de privacidad · /deletemydata — Solicitar el borrado de mis datos
 aff60c67d	/report [motivo] o @admin — Reportar al staff el mensaje respondido
 15575b067	👮 Comandos del staff — tu rango: ⟨0⟩
 d955391ce	Orden de rangos: 👑 Fundador > 🔱 Cofundador > ⭐ Admin sénior > 🛡 Admin
@@ -32773,6 +33216,8 @@ fcea72bad	Configuración rápida del grupo elegido
 333895635	Escribir al admin (línea de soporte)
 de94cd9e4	Preparar una publicación para el canal
 7ffee2a93	Publicaciones de canal que preparaste
+d27eff5c8	Política de privacidad
+eb96aa2f5	Solicitar el borrado de mis datos
 0d0187ac4	Grupos y estadísticas de tu bot
 8938961a5	Anuncios a grupos, canales y personas
 be4f2dea9	Historial de anuncios
@@ -33687,6 +34132,46 @@ e211ffa2a	💎 Premium: Activado
 60c71135b	💎 Premium: Desactivado
 783d8db23	Estado: ⟨0⟩ · Dueño <code>⟨1⟩</code>
 1a2ec4716	↩️ Lista
+2f704a8f0	🔒 <b>⟨0⟩ — Política de privacidad</b>
+d9d9ac1f8	<b>1. Qué datos guardamos</b>
+996ce26b2	• Tu identidad de Telegram: ID, nombre, usuario e idioma elegido
+c4b153eb0	• Los cambios de tu nombre y usuario (historial de nombres)
+3a1de66af	• Cuántos mensajes envías en los grupos (para clasificaciones y estadísticas); el contenido de los mensajes no se guarda de forma permanente
+630660602	• Registros de advertencias, silencios, baneos y reportes
+9a8e2c224	• Una copia temporal de los mensajes borrados y editados (para la protección contra spam y ediciones)
+0b8e28ab0	• Estado AFK, suscripción a anuncios, número de invitaciones y participación en sorteos
+5a4e6fa28	<b>2. Cuánto tiempo los guardamos</b>
+d1ad0ee51	• Caché de mensajes: 2 días · historial de ediciones: ⟨0⟩ días
+ef9969356	• Detalle de mensajes: ⟨0⟩ días; tu total de mensajes y tu historial de nombres, sin límite
+0045612df	• Historial de sanciones: ⟨0⟩ días · copias de seguridad: ⟨1⟩ días
+cd1453252	<b>3. Para qué los usamos</b>
+8f2f14875	Solo para la protección de grupos, las estadísticas y las funciones del bot. Tus datos no se venden, no se usan para publicidad y no se comparten con terceros.
+0408a81a6	<b>4. Quién puede verlos</b>
+2aaa04410	El dueño del bot y los administradores de los grupos; los administradores solo ven los registros de sus propios grupos.
+4b16ec584	<b>5. Tus derechos</b>
+70886128b	Con /deletemydata puedes pedir que se borren tus datos; el dueño del bot revisa la solicitud. Los registros de advertencias, silencios, baneos y lista de spam no se borran, por seguridad.
+5b9cbf99a	<b>6. Contacto</b>
+9b8234242	⏳ Tu solicitud anterior sigue con el dueño del bot; te avisaré cuando se resuelva.
+ca8f894d6	Ya hiciste una solicitud en los últimos 7 días; puedes intentarlo más tarde.
+911be3749	🔒 Para solicitar el borrado de datos, escríbeme /deletemydata por privado.
+7880b45fe	🗑 <b>Solicitud de borrado de datos</b>
+e83b4c167	<b>Si se aprueba, se borra:</b> tu perfil, historial de nombres, estadísticas de mensajes, AFK, idioma y preferencias de invitaciones y anuncios.
+c287e5d8c	<b>Se mantiene (seguridad):</b> registros de advertencias, silencios, baneos y lista de spam.
+06cc2c9b5	El dueño del bot revisa la solicitud; recibirás el resultado aquí. Si sigues escribiendo en los grupos, se volverán a registrar datos nuevos.
+8b20a58ab	✅ Enviar solicitud
+e6a5e85cd	❌ Cancelar
+0a57e684e	Grupos: ⟨0⟩ · registros de sanciones: ⟨1⟩ · baneos activos: ⟨2⟩
+e2af94e61	Cancelado; no se tocaron tus datos.
+3b1fe6568	Solicitud enviada.
+522ba7cdb	✅ Tu solicitud se envió al dueño del bot. Recibirás el resultado aquí.
+82b141f80	🗑 <b>Solicitud de borrado de datos</b> #⟨0⟩
+51a7b41f2	Si apruebas, se borran su perfil, historial de nombres, estadísticas y preferencias; los registros de advertencias, silencios, baneos y spam se mantienen.
+7269890c3	Solo el dueño del bot puede hacer esto.
+0847d1a9f	Esta solicitud ya se procesó.
+40df18e4c	✅ Aprobada, datos borrados (⟨0⟩ registros).
+7dd6a6e74	✅ Tu solicitud de borrado de datos fue aprobada: se borraron tu perfil, historial de nombres, estadísticas y preferencias. Los registros de advertencias, silencios, baneos y lista de spam se mantienen por seguridad.
+8b725edd3	❌ Rechazada.
+3fa4a528b	❌ El dueño del bot rechazó tu solicitud de borrado de datos. Para consultas: ⟨0⟩
 367b6aa51	Las acciones del clon se hacen en privado con el bot.
 a51f7d30f	Esta solicitud ya fue gestionada.
 c862658b2	Solicitud de una versión antigua; el usuario debe enviar un token con /clone.
@@ -33703,7 +34188,6 @@ ba7f6e886	✅ Aprobado, el bot se inició
 90edeb341	Para el nombre, el texto de bienvenida y el enlace de soporte: /clone
 172a66fda	❌ Tu solicitud de bot clon para @⟨0⟩ fue rechazada.
 dffc58eb3	Ya no necesitas pedir permiso: envía el token y tu bot empezará cuando el dueño del bot lo apruebe.
-7269890c3	Solo el dueño del bot puede hacer esto.
 741c29704	No tienes ninguna solicitud pendiente.
 a353b8903	↩️ El usuario retiró la solicitud
 cb7da55c2	↩️ Solicitud retirada
@@ -34860,7 +35344,6 @@ b5ad3a8e7	دسترسی یا اسنپ‌شات نیست.
 0644770db	♻️ ادمین‌های اسنپ‌شات ⟨0⟩ بازگردانده می‌شوند:
 700b3ac82	تأیید می‌کنید؟
 1ca35b0e1	✅ بله، بازگردان
-e6a5e85cd	❌ لغو
 805c38798	در حال بازیابی...
 cf63ea900	♻️ ⟨0⟩ ادمین بازگردانده شد.⟨1⟩
 b8058c528	❌ ناموفق: ⟨0⟩
@@ -35021,6 +35504,7 @@ b0d9549b8	/coin — شیر یا خط
 b4031dc89	/help — همین منو
 6467c9dbe	/id — نمایش آیدی
 0af5bde71	/appeal <توضیح> — اعتراض به بن (در خصوصی ربات)
+3642ffea5	/privacy — سیاست حریم خصوصی · /deletemydata — درخواست حذف داده‌هایم
 aff60c67d	/report [دلیل] یا @admin — گزارش پیام ریپلای‌شده به ادمین‌ها
 15575b067	👮 دستورات کادر مدیریت — رتبه شما: ⟨0⟩
 d955391ce	ترتیب رتبه‌ها: 👑 مؤسس > 🔱 هم‌مؤسس > ⭐ ادمین ارشد > 🛡 ادمین
@@ -35157,6 +35641,8 @@ fcea72bad	راه‌اندازی سریع گروه انتخاب‌شده
 333895635	پیام به ادمین (پشتیبانی)
 de94cd9e4	آماده‌کردن پست کانال
 7ffee2a93	پست‌های کانالی که آماده کرده‌اید
+d27eff5c8	سیاست حریم خصوصی
+eb96aa2f5	درخواست حذف داده‌هایم
 0d0187ac4	گروه‌ها و آمار ربات شما
 8938961a5	اعلان به گروه‌ها، کانال‌ها و افراد
 be4f2dea9	تاریخچه اعلان‌ها
@@ -36077,6 +36563,46 @@ e211ffa2a	💎 پریمیوم: روشن
 60c71135b	💎 پریمیوم: خاموش
 783d8db23	وضعیت: ⟨0⟩ · مالک <code>⟨1⟩</code>
 1a2ec4716	↩️ فهرست
+2f704a8f0	🔒 <b>⟨0⟩ — سیاست حریم خصوصی</b>
+d9d9ac1f8	<b>۱. چه داده‌هایی نگه می‌داریم</b>
+996ce26b2	• هویت تلگرام شما: شناسه، نام، نام کاربری و زبان انتخابی
+c4b153eb0	• تغییرات نام و نام کاربری شما (تاریخچه نام)
+3a1de66af	• تعداد پیام‌های شما در گروه‌ها (برای رتبه‌بندی و آمار)؛ محتوای پیام‌ها به‌طور دائم نگه داشته نمی‌شود
+630660602	• سوابق اخطار، سکوت، بن و گزارش
+9a8e2c224	• نسخه‌ی کوتاه‌مدت از پیام‌های حذف‌شده و ویرایش‌شده (برای محافظت در برابر اسپم و ویرایش)
+0b8e28ab0	• وضعیت AFK، اشتراک اطلاعیه‌ها، تعداد دعوت‌ها و شرکت در قرعه‌کشی‌ها
+5a4e6fa28	<b>۲. تا چه مدت نگه می‌داریم</b>
+d1ad0ee51	• حافظه‌ی پیام: ۲ روز · تاریخچه‌ی ویرایش: ⟨0⟩ روز
+ef9969356	• جزئیات پیام‌ها: ⟨0⟩ روز؛ تعداد کل پیام‌ها و تاریخچه‌ی نام بدون محدودیت زمانی
+0045612df	• سابقه‌ی جریمه‌ها: ⟨0⟩ روز · پشتیبان‌ها: ⟨1⟩ روز
+cd1453252	<b>۳. برای چه استفاده می‌کنیم</b>
+8f2f14875	فقط برای محافظت از گروه، آمار و قابلیت‌های ربات. داده‌های شما فروخته نمی‌شود، برای تبلیغات استفاده نمی‌شود و با اشخاص ثالث به اشتراک گذاشته نمی‌شود.
+0408a81a6	<b>۴. چه کسانی می‌توانند ببینند</b>
+2aaa04410	مالک ربات و مدیران گروه‌ها؛ مدیران فقط سوابق گروه‌های خودشان را می‌بینند.
+4b16ec584	<b>۵. حقوق شما</b>
+70886128b	با /deletemydata می‌توانید درخواست حذف داده‌هایتان را بدهید؛ مالک ربات درخواست را بررسی می‌کند. سوابق اخطار، سکوت، بن و فهرست اسپم برای امنیت حذف نمی‌شوند.
+5b9cbf99a	<b>۶. تماس</b>
+9b8234242	⏳ درخواست قبلی شما هنوز نزد مالک ربات است؛ وقتی نتیجه مشخص شود خبرتان می‌کنم.
+ca8f894d6	در ۷ روز گذشته درخواست داده‌اید؛ کمی بعد دوباره امتحان کنید.
+911be3749	🔒 برای درخواست حذف داده‌ها در خصوصی برایم /deletemydata بفرستید.
+7880b45fe	🗑 <b>درخواست حذف داده‌ها</b>
+e83b4c167	<b>در صورت تأیید حذف می‌شود:</b> نمایه، تاریخچه‌ی نام، آمار پیام‌ها، AFK، زبان و تنظیمات دعوت و اطلاعیه.
+c287e5d8c	<b>باقی می‌ماند (امنیت):</b> سوابق اخطار، سکوت، بن و فهرست اسپم.
+06cc2c9b5	مالک ربات درخواست را بررسی می‌کند؛ نتیجه همین‌جا اعلام می‌شود. اگر در گروه‌ها به نوشتن ادامه دهید، داده‌های جدید دوباره ثبت می‌شوند.
+8b20a58ab	✅ ارسال درخواست
+e6a5e85cd	❌ لغو
+0a57e684e	گروه: ⟨0⟩ · سابقه‌ی جریمه: ⟨1⟩ · بن فعال: ⟨2⟩
+e2af94e61	لغو شد؛ به داده‌هایتان دست زده نشد.
+3b1fe6568	درخواست شما ارسال شد.
+522ba7cdb	✅ درخواست شما برای مالک ربات ارسال شد. نتیجه همین‌جا اعلام می‌شود.
+82b141f80	🗑 <b>درخواست حذف داده‌ها</b> #⟨0⟩
+51a7b41f2	اگر تأیید کنید، نمایه، تاریخچه‌ی نام، آمار و تنظیمات او حذف می‌شود؛ سوابق اخطار، سکوت، بن و اسپم باقی می‌ماند.
+7269890c3	فقط مالک ربات می‌تواند این کار را انجام دهد.
+0847d1a9f	این درخواست قبلاً بررسی شده است.
+40df18e4c	✅ تأیید شد، داده‌ها حذف شدند (⟨0⟩ رکورد).
+7dd6a6e74	✅ درخواست حذف داده‌های شما تأیید شد: نمایه، تاریخچه‌ی نام، آمار و تنظیمات شما حذف شد. سوابق اخطار، سکوت، بن و فهرست اسپم برای امنیت باقی می‌مانند.
+8b725edd3	❌ رد شد.
+3fa4a528b	❌ مالک ربات درخواست حذف داده‌های شما را رد کرد. برای پرسش: ⟨0⟩
 367b6aa51	کارهای مربوط به کپی در خصوصی با ربات انجام می‌شود.
 a51f7d30f	این درخواست قبلاً رسیدگی شده است.
 c862658b2	درخواست از نسخه قدیمی؛ کاربر باید با /clone توکن بفرستد.
@@ -36093,7 +36619,6 @@ ba7f6e886	✅ تأیید شد، ربات شروع شد
 90edeb341	برای نام، متن خوشامد و لینک پشتیبانی: /clone
 172a66fda	❌ درخواست ربات کپی شما برای @⟨0⟩ رد شد.
 dffc58eb3	دیگر نیازی به اجازه گرفتن نیست: توکن را بفرستید، ربات شما پس از تأیید مالک ربات شروع می‌شود.
-7269890c3	فقط مالک ربات می‌تواند این کار را انجام دهد.
 741c29704	درخواست در انتظاری ندارید.
 a353b8903	↩️ کاربر درخواست را پس گرفت
 cb7da55c2	↩️ درخواست پس گرفته شد
@@ -37245,7 +37770,6 @@ b5ad3a8e7	Pas d’autorisation ou pas d’instantané.
 0644770db	♻️ Les admins de l’instantané du ⟨0⟩ vont être rétablis :
 700b3ac82	Confirmez-vous ?
 1ca35b0e1	✅ Oui, rétablir
-e6a5e85cd	❌ Annuler
 805c38798	Rétablissement...
 cf63ea900	♻️ ⟨0⟩ admins rétablis.⟨1⟩
 b8058c528	❌ Échec : ⟨0⟩
@@ -37405,6 +37929,7 @@ b0d9549b8	/coin — Lancer une pièce
 b4031dc89	/help — Ce menu
 6467c9dbe	/id — Afficher l’ID
 0af5bde71	/appeal <explication> — Recours contre un ban (en privé au bot)
+3642ffea5	/privacy — Politique de confidentialité · /deletemydata — Demander la suppression de mes données
 aff60c67d	/report [raison] ou @admin — Signaler le message cité à l’équipe
 15575b067	👮 Commandes de l’équipe — votre rang : ⟨0⟩
 d955391ce	Ordre des rangs : 👑 Fondateur > 🔱 Cofondateur > ⭐ Admin principal > 🛡 Admin
@@ -37541,6 +38066,8 @@ fcea72bad	Configuration rapide du groupe sélectionné
 333895635	Écrire à l’admin (ligne d’assistance)
 de94cd9e4	Préparer une publication de canal
 7ffee2a93	Publications de canal que vous avez préparées
+d27eff5c8	Politique de confidentialité
+eb96aa2f5	Demander la suppression de mes données
 0d0187ac4	Groupes et statistiques de votre bot
 8938961a5	Annonces aux groupes, canaux, personnes
 be4f2dea9	Historique des annonces
@@ -38456,6 +38983,46 @@ d3fb29907	🗑 Supprimer le clone
 e211ffa2a	💎 Premium : Activé
 60c71135b	💎 Premium : Désactivé
 783d8db23	Statut : ⟨0⟩ · Propriétaire <code>⟨1⟩</code>
+2f704a8f0	🔒 <b>⟨0⟩ — Politique de confidentialité</b>
+d9d9ac1f8	<b>1. Quelles données nous conservons</b>
+996ce26b2	• Votre identité Telegram : ID, nom, nom d’utilisateur et langue choisie
+c4b153eb0	• Les changements de votre nom et nom d’utilisateur (historique des noms)
+3a1de66af	• Le nombre de vos messages dans les groupes (pour les classements et statistiques) ; le contenu des messages n’est pas conservé durablement
+630660602	• Les avertissements, mises en sourdine, bans et signalements
+9a8e2c224	• Une copie temporaire des messages supprimés et modifiés (pour la protection anti-spam et anti-modification)
+0b8e28ab0	• Statut AFK, abonnement aux annonces, nombre d’invitations et participations aux concours
+5a4e6fa28	<b>2. Combien de temps nous les gardons</b>
+d1ad0ee51	• Cache des messages : 2 jours · historique des modifications : ⟨0⟩ jours
+ef9969356	• Détails des messages : ⟨0⟩ jours ; votre nombre total de messages et l’historique des noms sans limite
+0045612df	• Historique des sanctions : ⟨0⟩ jours · sauvegardes : ⟨1⟩ jours
+cd1453252	<b>3. À quoi elles servent</b>
+8f2f14875	Uniquement à la protection des groupes, aux statistiques et aux fonctions du bot. Vos données ne sont pas vendues, ni utilisées pour la publicité, ni partagées avec des tiers.
+0408a81a6	<b>4. Qui peut les voir</b>
+2aaa04410	Le propriétaire du bot et les administrateurs des groupes ; les administrateurs ne voient que les données de leurs propres groupes.
+4b16ec584	<b>5. Vos droits</b>
+70886128b	Avec /deletemydata vous pouvez demander la suppression de vos données ; le propriétaire du bot examine la demande. Les avertissements, mises en sourdine, bans et la liste anti-spam ne sont pas supprimés, pour la sécurité.
+5b9cbf99a	<b>6. Contact</b>
+9b8234242	⏳ Votre demande précédente est encore chez le propriétaire du bot ; je vous préviendrai dès qu’elle sera traitée.
+ca8f894d6	Vous avez déjà fait une demande ces 7 derniers jours ; réessayez plus tard.
+911be3749	🔒 Pour demander la suppression de vos données, envoyez-moi /deletemydata en privé.
+7880b45fe	🗑 <b>Demande de suppression des données</b>
+e83b4c167	<b>Supprimé si approuvé :</b> votre profil, historique des noms, statistiques de messages, AFK, langue et préférences d’invitations et d’annonces.
+c287e5d8c	<b>Conservé (sécurité) :</b> avertissements, mises en sourdine, bans et liste anti-spam.
+06cc2c9b5	Le propriétaire du bot examine la demande ; le résultat vous sera envoyé ici. Si vous continuez à écrire dans les groupes, de nouvelles données seront à nouveau enregistrées.
+8b20a58ab	✅ Envoyer la demande
+e6a5e85cd	❌ Annuler
+0a57e684e	Groupes : ⟨0⟩ · sanctions : ⟨1⟩ · bans actifs : ⟨2⟩
+e2af94e61	Annulé ; vos données n’ont pas été touchées.
+3b1fe6568	Demande envoyée.
+522ba7cdb	✅ Votre demande a été envoyée au propriétaire du bot. Le résultat vous sera envoyé ici.
+82b141f80	🗑 <b>Demande de suppression des données</b> #⟨0⟩
+51a7b41f2	Si vous approuvez, son profil, l’historique des noms, les statistiques et les préférences sont supprimés ; les avertissements, mises en sourdine, bans et spam restent.
+7269890c3	Seul le propriétaire du bot peut faire cela.
+0847d1a9f	Cette demande a déjà été traitée.
+40df18e4c	✅ Approuvée, données supprimées (⟨0⟩ enregistrements).
+7dd6a6e74	✅ Votre demande de suppression des données a été approuvée : votre profil, l’historique des noms, les statistiques et les préférences ont été supprimés. Les avertissements, mises en sourdine, bans et la liste anti-spam sont conservés pour la sécurité.
+8b725edd3	❌ Refusée.
+3fa4a528b	❌ Le propriétaire du bot a refusé votre demande de suppression des données. Pour toute question : ⟨0⟩
 367b6aa51	Les actions sur les clones se font en privé avec le bot.
 a51f7d30f	Cette demande a déjà été traitée.
 c862658b2	Une demande d’une ancienne version ; l’utilisateur doit envoyer un jeton avec /clone.
@@ -38472,7 +39039,6 @@ ba7f6e886	✅ Approuvé, le bot a démarré
 90edeb341	Pour le nom, le texte de bienvenue et le lien d’assistance : /clone
 172a66fda	❌ Votre demande de bot clone pour @⟨0⟩ a été refusée.
 dffc58eb3	Vous n’avez plus besoin de demander la permission : envoyez le jeton, votre bot démarre dès que le propriétaire du bot l’approuve.
-7269890c3	Seul le propriétaire du bot peut faire cela.
 741c29704	Vous n’avez aucune demande en attente.
 a353b8903	↩️ L’utilisateur a retiré la demande
 cb7da55c2	↩️ Demande retirée
@@ -39629,7 +40195,6 @@ b5ad3a8e7	अनुमति नहीं है या स्नैपशॉट
 0644770db	♻️ ⟨0⟩ के स्नैपशॉट वाले एडमिन बहाल किए जाएंगे:
 700b3ac82	क्या आप पुष्टि करते हैं?
 1ca35b0e1	✅ हाँ, बहाल करें
-e6a5e85cd	❌ रद्द करें
 805c38798	बहाल किया जा रहा है...
 cf63ea900	♻️ ⟨0⟩ एडमिन बहाल किए गए।⟨1⟩
 b8058c528	❌ विफल: ⟨0⟩
@@ -39790,6 +40355,7 @@ b0d9549b8	/coin — सिक्का उछालें
 b4031dc89	/help — यह मेनू
 6467c9dbe	/id — ID दिखाएं
 0af5bde71	/appeal <विवरण> — बैन अपील (बॉट को निजी में)
+3642ffea5	/privacy — गोपनीयता नीति · /deletemydata — मेरा डेटा हटाने का अनुरोध
 aff60c67d	/report [कारण] या @admin — रिप्लाई किए गए संदेश की टीम को रिपोर्ट करें
 15575b067	👮 टीम कमांड — आपकी रैंक: ⟨0⟩
 d955391ce	रैंक क्रम: 👑 संस्थापक > 🔱 सह-संस्थापक > ⭐ सीनियर एडमिन > 🛡 एडमिन
@@ -39926,6 +40492,8 @@ fcea72bad	चुने गए ग्रुप का त्वरित से�
 333895635	एडमिन को लिखें (सहायता लाइन)
 de94cd9e4	चैनल पोस्ट तैयार करें
 7ffee2a93	आपके तैयार किए चैनल पोस्ट
+d27eff5c8	गोपनीयता नीति
+eb96aa2f5	मेरा डेटा हटाने का अनुरोध
 0d0187ac4	आपके बॉट के ग्रुप और आँकड़े
 8938961a5	ग्रुप, चैनल, लोगों को घोषणाएँ
 be4f2dea9	घोषणा इतिहास
@@ -40846,6 +41414,46 @@ e211ffa2a	💎 प्रीमियम: चालू
 60c71135b	💎 प्रीमियम: बंद
 783d8db23	स्थिति: ⟨0⟩ · मालिक <code>⟨1⟩</code>
 1a2ec4716	↩️ सूची
+2f704a8f0	🔒 <b>⟨0⟩ — गोपनीयता नीति</b>
+d9d9ac1f8	<b>1. हम कौन-सा डेटा रखते हैं</b>
+996ce26b2	• आपकी Telegram पहचान: ID, नाम, यूज़रनेम और चुनी गई भाषा
+c4b153eb0	• आपके नाम और यूज़रनेम में बदलाव (नाम इतिहास)
+3a1de66af	• समूहों में आपके संदेशों की संख्या (रैंकिंग और आँकड़ों के लिए); संदेशों की सामग्री स्थायी रूप से नहीं रखी जाती
+630660602	• चेतावनी, म्यूट, बैन और रिपोर्ट के रिकॉर्ड
+9a8e2c224	• हटाए गए और संपादित संदेशों की अल्पकालिक प्रति (स्पैम और संपादन सुरक्षा के लिए)
+0b8e28ab0	• AFK स्थिति, घोषणा सदस्यता, निमंत्रण संख्या और गिवअवे भागीदारी
+5a4e6fa28	<b>2. हम कितने समय तक रखते हैं</b>
+d1ad0ee51	• संदेश कैश: 2 दिन · संपादन इतिहास: ⟨0⟩ दिन
+ef9969356	• संदेश विवरण: ⟨0⟩ दिन; आपके कुल संदेशों की संख्या और नाम इतिहास असीमित समय तक
+0045612df	• दंड इतिहास: ⟨0⟩ दिन · बैकअप: ⟨1⟩ दिन
+cd1453252	<b>3. हम इसका उपयोग किसलिए करते हैं</b>
+8f2f14875	केवल समूह सुरक्षा, आँकड़ों और बॉट की सुविधाओं के लिए। आपका डेटा बेचा नहीं जाता, विज्ञापन के लिए उपयोग नहीं होता और तीसरे पक्ष से साझा नहीं किया जाता।
+0408a81a6	<b>4. इसे कौन देख सकता है</b>
+2aaa04410	बॉट का मालिक और समूहों के एडमिन; एडमिन केवल अपने समूहों के रिकॉर्ड देखते हैं।
+4b16ec584	<b>5. आपके अधिकार</b>
+70886128b	/deletemydata से आप अपना डेटा हटाने का अनुरोध कर सकते हैं; बॉट का मालिक अनुरोध की समीक्षा करता है। चेतावनी, म्यूट, बैन और स्पैम सूची के रिकॉर्ड सुरक्षा के लिए नहीं हटाए जाते।
+5b9cbf99a	<b>6. संपर्क</b>
+9b8234242	⏳ आपका पिछला अनुरोध अभी बॉट मालिक के पास है; फ़ैसला होने पर मैं आपको बताऊँगा।
+ca8f894d6	आप पिछले 7 दिनों में अनुरोध कर चुके हैं; बाद में फिर कोशिश करें।
+911be3749	🔒 डेटा हटाने का अनुरोध करने के लिए मुझे निजी में /deletemydata भेजें।
+7880b45fe	🗑 <b>डेटा हटाने का अनुरोध</b>
+e83b4c167	<b>स्वीकृत होने पर हटेगा:</b> आपकी प्रोफ़ाइल, नाम इतिहास, संदेश आँकड़े, AFK, भाषा, निमंत्रण और घोषणा प्राथमिकताएँ।
+c287e5d8c	<b>बना रहेगा (सुरक्षा):</b> चेतावनी, म्यूट, बैन और स्पैम सूची के रिकॉर्ड।
+06cc2c9b5	बॉट का मालिक अनुरोध की समीक्षा करता है; परिणाम यहीं मिलेगा। अगर आप समूहों में लिखते रहे तो नया डेटा फिर से दर्ज होगा।
+8b20a58ab	✅ अनुरोध भेजें
+e6a5e85cd	❌ रद्द करें
+0a57e684e	समूह: ⟨0⟩ · दंड रिकॉर्ड: ⟨1⟩ · सक्रिय बैन: ⟨2⟩
+e2af94e61	रद्द किया गया; आपके डेटा को छुआ नहीं गया।
+3b1fe6568	आपका अनुरोध भेज दिया गया।
+522ba7cdb	✅ आपका अनुरोध बॉट मालिक को भेज दिया गया। परिणाम यहीं मिलेगा।
+82b141f80	🗑 <b>डेटा हटाने का अनुरोध</b> #⟨0⟩
+51a7b41f2	स्वीकृत करने पर उसकी प्रोफ़ाइल, नाम इतिहास, आँकड़े और प्राथमिकताएँ हट जाएँगी; चेतावनी, म्यूट, बैन और स्पैम रिकॉर्ड बने रहेंगे।
+7269890c3	यह केवल बॉट मालिक कर सकता है।
+0847d1a9f	यह अनुरोध पहले ही निपटाया जा चुका है।
+40df18e4c	✅ स्वीकृत, डेटा हटाया गया (⟨0⟩ रिकॉर्ड)।
+7dd6a6e74	✅ आपका डेटा हटाने का अनुरोध स्वीकृत हुआ: आपकी प्रोफ़ाइल, नाम इतिहास, आँकड़े और प्राथमिकताएँ हटा दी गईं। चेतावनी, म्यूट, बैन और स्पैम सूची के रिकॉर्ड सुरक्षा के लिए बने रहेंगे।
+8b725edd3	❌ अस्वीकृत।
+3fa4a528b	❌ बॉट मालिक ने आपका डेटा हटाने का अनुरोध अस्वीकार कर दिया। प्रश्नों के लिए: ⟨0⟩
 367b6aa51	क्लोन से जुड़े काम बॉट के साथ निजी में होते हैं।
 a51f7d30f	इस अनुरोध पर पहले ही फ़ैसला हो चुका है।
 c862658b2	पुराने संस्करण का अनुरोध; उपयोगकर्ता को /clone से टोकन भेजना होगा।
@@ -40862,7 +41470,6 @@ ba7f6e886	✅ स्वीकृत, बॉट शुरू हो गया
 90edeb341	नाम, स्वागत टेक्स्ट और सहायता लिंक के लिए: /clone
 172a66fda	❌ @⟨0⟩ के लिए आपका क्लोन बॉट अनुरोध अस्वीकार कर दिया गया।
 dffc58eb3	अब अनुमति माँगने की ज़रूरत नहीं: टोकन भेजें, बॉट मालिक के स्वीकृत करते ही आपका बॉट शुरू हो जाएगा।
-7269890c3	यह केवल बॉट मालिक कर सकता है।
 741c29704	आपका कोई लंबित अनुरोध नहीं है।
 a353b8903	↩️ उपयोगकर्ता ने अनुरोध वापस ले लिया
 cb7da55c2	↩️ अनुरोध वापस लिया गया
@@ -42008,7 +42615,6 @@ b5ad3a8e7	Tidak ada izin atau tidak ada snapshot.
 0644770db	♻️ Admin dalam snapshot ⟨0⟩ akan dipulihkan:
 700b3ac82	Kamu yakin?
 1ca35b0e1	✅ Ya, pulihkan
-e6a5e85cd	❌ Batal
 805c38798	Memulihkan...
 cf63ea900	♻️ ⟨0⟩ admin dipulihkan.⟨1⟩
 b8058c528	❌ Gagal: ⟨0⟩
@@ -42168,6 +42774,7 @@ b0d9549b8	/coin — Lempar koin
 b4031dc89	/help — Menu ini
 6467c9dbe	/id — Tampilkan ID
 0af5bde71	/appeal <penjelasan> — Banding ban (secara pribadi ke bot)
+3642ffea5	/privacy — Kebijakan privasi · /deletemydata — Minta penghapusan dataku
 aff60c67d	/report [alasan] atau @admin — Laporkan pesan yang dibalas ke staf
 15575b067	👮 Perintah Staf — pangkatmu: ⟨0⟩
 d955391ce	Urutan pangkat: 👑 Pendiri > 🔱 Wakil Pendiri > ⭐ Admin Senior > 🛡 Admin
@@ -42304,6 +42911,8 @@ fcea72bad	Pengaturan cepat untuk grup terpilih
 333895635	Tulis ke admin (layanan bantuan)
 de94cd9e4	Siapkan postingan kanal
 7ffee2a93	Postingan kanal yang kamu siapkan
+d27eff5c8	Kebijakan privasi
+eb96aa2f5	Minta penghapusan dataku
 0d0187ac4	Grup dan statistik botmu
 8938961a5	Pengumuman ke grup, saluran, orang
 be4f2dea9	Riwayat pengumuman
@@ -43218,6 +43827,46 @@ e211ffa2a	💎 Premium: Aktif
 60c71135b	💎 Premium: Nonaktif
 783d8db23	Status: ⟨0⟩ · Pemilik <code>⟨1⟩</code>
 1a2ec4716	↩️ Daftar
+2f704a8f0	🔒 <b>⟨0⟩ — Kebijakan privasi</b>
+d9d9ac1f8	<b>1. Data apa yang kami simpan</b>
+996ce26b2	• Identitas Telegram-mu: ID, nama, username, dan pilihan bahasa
+c4b153eb0	• Perubahan nama dan username-mu (riwayat nama)
+3a1de66af	• Jumlah pesanmu di grup (untuk peringkat dan statistik); isi pesan tidak disimpan permanen
+630660602	• Catatan peringatan, bisukan, ban, dan laporan
+9a8e2c224	• Salinan singkat pesan yang dihapus dan diedit (untuk perlindungan spam dan edit)
+0b8e28ab0	• Status AFK, langganan pengumuman, jumlah undangan, dan keikutsertaan giveaway
+5a4e6fa28	<b>2. Berapa lama kami menyimpan</b>
+d1ad0ee51	• Cache pesan: 2 hari · riwayat edit: ⟨0⟩ hari
+ef9969356	• Detail pesan: ⟨0⟩ hari; total pesan dan riwayat namamu tanpa batas waktu
+0045612df	• Riwayat hukuman: ⟨0⟩ hari · cadangan: ⟨1⟩ hari
+cd1453252	<b>3. Untuk apa kami gunakan</b>
+8f2f14875	Hanya untuk perlindungan grup, statistik, dan fitur bot. Datamu tidak dijual, tidak dipakai untuk iklan, dan tidak dibagikan ke pihak ketiga.
+0408a81a6	<b>4. Siapa yang bisa melihat</b>
+2aaa04410	Pemilik bot dan admin grup; admin hanya melihat catatan grup mereka sendiri.
+4b16ec584	<b>5. Hak-hakmu</b>
+70886128b	Dengan /deletemydata kamu bisa meminta datamu dihapus; pemilik bot meninjau permintaannya. Catatan peringatan, bisukan, ban, dan daftar spam tidak dihapus demi keamanan.
+5b9cbf99a	<b>6. Kontak</b>
+9b8234242	⏳ Permintaanmu sebelumnya masih di pemilik bot; aku akan mengabarimu saat diputuskan.
+ca8f894d6	Kamu sudah mengajukan permintaan dalam 7 hari terakhir; coba lagi nanti.
+911be3749	🔒 Untuk meminta penghapusan data, kirimi aku /deletemydata secara pribadi.
+7880b45fe	🗑 <b>Permintaan penghapusan data</b>
+e83b4c167	<b>Dihapus jika disetujui:</b> profil, riwayat nama, statistik pesan, AFK, bahasa, serta preferensi undangan dan pengumuman.
+c287e5d8c	<b>Tetap disimpan (keamanan):</b> catatan peringatan, bisukan, ban, dan daftar spam.
+06cc2c9b5	Pemilik bot meninjau permintaannya; hasilnya dikirim ke sini. Jika kamu terus menulis di grup, data baru akan tercatat lagi.
+8b20a58ab	✅ Kirim permintaan
+e6a5e85cd	❌ Batal
+0a57e684e	Grup: ⟨0⟩ · catatan hukuman: ⟨1⟩ · ban aktif: ⟨2⟩
+e2af94e61	Dibatalkan; datamu tidak disentuh.
+3b1fe6568	Permintaanmu terkirim.
+522ba7cdb	✅ Permintaanmu dikirim ke pemilik bot. Hasilnya akan dikirim ke sini.
+82b141f80	🗑 <b>Permintaan penghapusan data</b> #⟨0⟩
+51a7b41f2	Jika disetujui, profil, riwayat nama, statistik, dan preferensinya dihapus; catatan peringatan, bisukan, ban, dan spam tetap ada.
+7269890c3	Hanya pemilik bot yang bisa melakukan ini.
+0847d1a9f	Permintaan ini sudah diproses.
+40df18e4c	✅ Disetujui, data dihapus (⟨0⟩ catatan).
+7dd6a6e74	✅ Permintaan penghapusan datamu disetujui: profil, riwayat nama, statistik, dan preferensimu telah dihapus. Catatan peringatan, bisukan, ban, dan daftar spam tetap disimpan demi keamanan.
+8b725edd3	❌ Ditolak.
+3fa4a528b	❌ Permintaan penghapusan datamu ditolak oleh pemilik bot. Untuk pertanyaan: ⟨0⟩
 367b6aa51	Tindakan klon dilakukan di chat pribadi dengan bot.
 a51f7d30f	Permintaan ini sudah ditangani.
 c862658b2	Permintaan dari versi lama; pengguna harus mengirim token dengan /clone.
@@ -43234,7 +43883,6 @@ ba7f6e886	✅ Disetujui, bot berjalan
 90edeb341	Untuk nama, teks sambutan, dan tautan bantuan: /clone
 172a66fda	❌ Permintaan bot klon untuk @⟨0⟩ ditolak.
 dffc58eb3	Kamu tidak perlu lagi meminta izin: kirim tokennya, botmu mulai setelah pemilik bot menyetujui.
-7269890c3	Hanya pemilik bot yang bisa melakukan ini.
 741c29704	Kamu tidak punya permintaan yang tertunda.
 a353b8903	↩️ Pengguna menarik permintaannya
 cb7da55c2	↩️ Permintaan ditarik
@@ -44385,7 +45033,6 @@ b5ad3a8e7	Nessun permesso o nessuna istantanea.
 0644770db	♻️ Verranno ripristinati gli admin dell’istantanea del ⟨0⟩:
 700b3ac82	Confermi?
 1ca35b0e1	✅ Sì, ripristina
-e6a5e85cd	❌ Annulla
 805c38798	Ripristino in corso...
 cf63ea900	♻️ ⟨0⟩ admin ripristinati.⟨1⟩
 b8058c528	❌ Non riuscito: ⟨0⟩
@@ -44545,6 +45192,7 @@ b0d9549b8	/coin — Lancia una moneta
 b4031dc89	/help — Questo menu
 6467c9dbe	/id — Mostra l’ID
 0af5bde71	/appeal <spiegazione> — Ricorso contro il ban (in privato al bot)
+3642ffea5	/privacy — Informativa sulla privacy · /deletemydata — Richiedi la cancellazione dei miei dati
 aff60c67d	/report [motivo] o @admin — Segnala allo staff il messaggio a cui rispondi
 15575b067	👮 Comandi dello staff — il tuo grado: ⟨0⟩
 d955391ce	Ordine dei gradi: 👑 Fondatore > 🔱 Co-fondatore > ⭐ Admin senior > 🛡 Admin
@@ -44681,6 +45329,8 @@ fcea72bad	Configurazione rapida del gruppo selezionato
 333895635	Scrivi all’admin (linea di supporto)
 de94cd9e4	Prepara un post per il canale
 7ffee2a93	Post del canale che hai preparato
+d27eff5c8	Informativa sulla privacy
+eb96aa2f5	Richiedi la cancellazione dei miei dati
 0d0187ac4	Gruppi e statistiche del tuo bot
 8938961a5	Annunci a gruppi, canali, persone
 be4f2dea9	Cronologia annunci
@@ -45597,6 +46247,46 @@ e211ffa2a	💎 Premium: Attivo
 60c71135b	💎 Premium: Disattivo
 783d8db23	Stato: ⟨0⟩ · Proprietario <code>⟨1⟩</code>
 1a2ec4716	↩️ Elenco
+2f704a8f0	🔒 <b>⟨0⟩ — Informativa sulla privacy</b>
+d9d9ac1f8	<b>1. Quali dati conserviamo</b>
+996ce26b2	• La tua identità Telegram: ID, nome, username e lingua scelta
+c4b153eb0	• Le modifiche al tuo nome e username (cronologia dei nomi)
+3a1de66af	• Il numero dei tuoi messaggi nei gruppi (per classifiche e statistiche); il contenuto dei messaggi non viene conservato in modo permanente
+630660602	• Registri di avvisi, silenziamenti, ban e segnalazioni
+9a8e2c224	• Una copia temporanea dei messaggi eliminati e modificati (per la protezione da spam e modifiche)
+0b8e28ab0	• Stato AFK, iscrizione agli annunci, numero di inviti e partecipazioni ai giveaway
+5a4e6fa28	<b>2. Per quanto tempo li conserviamo</b>
+d1ad0ee51	• Cache dei messaggi: 2 giorni · cronologia delle modifiche: ⟨0⟩ giorni
+ef9969356	• Dettagli dei messaggi: ⟨0⟩ giorni; il totale dei tuoi messaggi e la cronologia dei nomi senza scadenza
+0045612df	• Cronologia delle sanzioni: ⟨0⟩ giorni · backup: ⟨1⟩ giorni
+cd1453252	<b>3. Per cosa li usiamo</b>
+8f2f14875	Solo per la protezione dei gruppi, le statistiche e le funzioni del bot. I tuoi dati non vengono venduti, né usati per pubblicità, né condivisi con terzi.
+0408a81a6	<b>4. Chi può vederli</b>
+2aaa04410	Il proprietario del bot e gli amministratori dei gruppi; gli amministratori vedono solo i registri dei propri gruppi.
+4b16ec584	<b>5. I tuoi diritti</b>
+70886128b	Con /deletemydata puoi chiedere la cancellazione dei tuoi dati; il proprietario del bot esamina la richiesta. I registri di avvisi, silenziamenti, ban e della lista spam non vengono cancellati, per sicurezza.
+5b9cbf99a	<b>6. Contatti</b>
+9b8234242	⏳ La tua richiesta precedente è ancora dal proprietario del bot; ti avviserò quando sarà decisa.
+ca8f894d6	Hai già fatto una richiesta negli ultimi 7 giorni; riprova più tardi.
+911be3749	🔒 Per richiedere la cancellazione dei dati, scrivimi /deletemydata in privato.
+7880b45fe	🗑 <b>Richiesta di cancellazione dei dati</b>
+e83b4c167	<b>Se approvata, vengono cancellati:</b> profilo, cronologia dei nomi, statistiche dei messaggi, AFK, lingua e preferenze di inviti e annunci.
+c287e5d8c	<b>Restano (sicurezza):</b> registri di avvisi, silenziamenti, ban e lista spam.
+06cc2c9b5	Il proprietario del bot esamina la richiesta; il risultato arriverà qui. Se continui a scrivere nei gruppi, nuovi dati verranno registrati di nuovo.
+8b20a58ab	✅ Invia richiesta
+e6a5e85cd	❌ Annulla
+0a57e684e	Gruppi: ⟨0⟩ · sanzioni: ⟨1⟩ · ban attivi: ⟨2⟩
+e2af94e61	Annullato; i tuoi dati non sono stati toccati.
+3b1fe6568	Richiesta inviata.
+522ba7cdb	✅ La tua richiesta è stata inviata al proprietario del bot. Il risultato arriverà qui.
+82b141f80	🗑 <b>Richiesta di cancellazione dei dati</b> #⟨0⟩
+51a7b41f2	Se approvi, vengono cancellati profilo, cronologia dei nomi, statistiche e preferenze; restano avvisi, silenziamenti, ban e spam.
+7269890c3	Solo il proprietario del bot può farlo.
+0847d1a9f	Questa richiesta è già stata gestita.
+40df18e4c	✅ Approvata, dati cancellati (⟨0⟩ registri).
+7dd6a6e74	✅ La tua richiesta di cancellazione dei dati è stata approvata: profilo, cronologia dei nomi, statistiche e preferenze sono stati cancellati. I registri di avvisi, silenziamenti, ban e lista spam restano per sicurezza.
+8b725edd3	❌ Rifiutata.
+3fa4a528b	❌ Il proprietario del bot ha rifiutato la tua richiesta di cancellazione dei dati. Per domande: ⟨0⟩
 367b6aa51	Le azioni sui cloni si fanno in privato con il bot.
 a51f7d30f	Questa richiesta è già stata gestita.
 c862658b2	Una richiesta di una vecchia versione; l’utente deve inviare un token con /clone.
@@ -45613,7 +46303,6 @@ ba7f6e886	✅ Approvato, il bot è partito
 90edeb341	Per nome, testo di benvenuto e link di supporto: /clone
 172a66fda	❌ La tua richiesta di bot clone per @⟨0⟩ è stata rifiutata.
 dffc58eb3	Non devi più chiedere il permesso: invia il token, il tuo bot parte quando il proprietario del bot approva.
-7269890c3	Solo il proprietario del bot può farlo.
 741c29704	Non hai richieste in sospeso.
 a353b8903	↩️ L’utente ha ritirato la richiesta
 cb7da55c2	↩️ Richiesta ritirata
@@ -46770,7 +47459,6 @@ b5ad3a8e7	Рұқсат жоқ немесе көшірме жоқ.
 0644770db	♻️ ⟨0⟩ көшірмесіндегі админдер қалпына келтіріледі:
 700b3ac82	Растайсыз ба?
 1ca35b0e1	✅ Иә, қалпына келтіру
-e6a5e85cd	❌ Бас тарту
 805c38798	Қалпына келтірілуде...
 cf63ea900	♻️ ⟨0⟩ админ қалпына келтірілді.⟨1⟩
 b8058c528	❌ Сәтсіз: ⟨0⟩
@@ -46931,6 +47619,7 @@ b0d9549b8	/coin — Тиын лақтыру
 b4031dc89	/help — Осы мәзір
 6467c9dbe	/id — ID көрсету
 0af5bde71	/appeal <түсініктеме> — Банға шағым (ботқа жеке)
+3642ffea5	/privacy — Құпиялылық саясаты · /deletemydata — Деректерімді жоюды сұрау
 aff60c67d	/report [себеп] немесе @admin — Жауап берілген хабарды қызметкерлерге шағымдану
 15575b067	👮 Қызметкер командалары — дәрежеңіз: ⟨0⟩
 d955391ce	Дәрежелер реті: 👑 Құрылтайшы > 🔱 Тең құрылтайшы > ⭐ Аға админ > 🛡 Админ
@@ -47067,6 +47756,8 @@ fcea72bad	Таңдалған топты жылдам орнату
 333895635	Админге жазу (қолдау желісі)
 de94cd9e4	Арнаға жазба дайындау
 7ffee2a93	Сіз дайындаған арна жазбалары
+d27eff5c8	Құпиялылық саясаты
+eb96aa2f5	Деректерімді жоюды сұрау
 0d0187ac4	Ботыңыздың топтары мен статистикасы
 8938961a5	Топтарға, арналарға, адамдарға хабарландыру
 be4f2dea9	Хабарландырулар тарихы
@@ -47987,6 +48678,46 @@ e211ffa2a	💎 Премиум: Қосулы
 60c71135b	💎 Премиум: Өшірулі
 783d8db23	Күйі: ⟨0⟩ · Иесі <code>⟨1⟩</code>
 1a2ec4716	↩️ Тізім
+2f704a8f0	🔒 <b>⟨0⟩ — Құпиялылық саясаты</b>
+d9d9ac1f8	<b>1. Қандай деректерді сақтаймыз</b>
+996ce26b2	• Telegram деректеріңіз: ID, аты, пайдаланушы аты және таңдалған тіл
+c4b153eb0	• Атыңыз бен пайдаланушы атыңыздың өзгерістері (аттар тарихы)
+3a1de66af	• Топтардағы хабарларыңыздың саны (рейтинг пен статистика үшін); хабар мазмұны тұрақты сақталмайды
+630660602	• Ескерту, дыбысын өшіру, бан және шағым жазбалары
+9a8e2c224	• Жойылған және өңделген хабарлардың қысқа мерзімді көшірмесі (спам мен өңдеуден қорғау үшін)
+0b8e28ab0	• AFK күйі, хабарландыруларға жазылу, шақырулар саны және ұтыс ойындарына қатысу
+5a4e6fa28	<b>2. Қанша уақыт сақтаймыз</b>
+d1ad0ee51	• Хабар кэші: 2 күн · өңдеу тарихы: ⟨0⟩ күн
+ef9969356	• Хабар мәліметтері: ⟨0⟩ күн; жалпы хабар саны мен аттар тарихы мерзімсіз
+0045612df	• Жазалар тарихы: ⟨0⟩ күн · сақтық көшірмелер: ⟨1⟩ күн
+cd1453252	<b>3. Не үшін қолданамыз</b>
+8f2f14875	Тек топ қорғауы, статистика және бот мүмкіндіктері үшін. Деректеріңіз сатылмайды, жарнамаға қолданылмайды және үшінші тұлғаларға берілмейді.
+0408a81a6	<b>4. Кім көре алады</b>
+2aaa04410	Бот иесі және топ әкімшілері; әкімшілер тек өз топтарының жазбаларын көреді.
+4b16ec584	<b>5. Құқықтарыңыз</b>
+70886128b	/deletemydata арқылы деректеріңізді жоюды сұрай аласыз; сұрауды бот иесі қарайды. Ескерту, дыбысын өшіру, бан және спам тізімі жазбалары қауіпсіздік үшін жойылмайды.
+5b9cbf99a	<b>6. Байланыс</b>
+9b8234242	⏳ Алдыңғы сұрауыңыз әлі бот иесінде; шешім шыққанда хабарлаймын.
+ca8f894d6	Соңғы 7 күнде сұрау жібердіңіз; кейінірек қайталап көріңіз.
+911be3749	🔒 Деректерді жоюды сұрау үшін маған жеке /deletemydata жазыңыз.
+7880b45fe	🗑 <b>Деректерді жою сұрауы</b>
+e83b4c167	<b>Мақұлданса жойылады:</b> профиліңіз, аттар тарихы, хабар статистикасы, AFK, тіл, шақыру және хабарландыру баптаулары.
+c287e5d8c	<b>Қалады (қауіпсіздік):</b> ескерту, дыбысын өшіру, бан және спам тізімі жазбалары.
+06cc2c9b5	Сұрауды бот иесі қарайды; нәтиже осында келеді. Топтарда жазуды жалғастырсаңыз, жаңа деректер қайтадан жазылады.
+8b20a58ab	✅ Сұрау жіберу
+e6a5e85cd	❌ Бас тарту
+0a57e684e	Топ: ⟨0⟩ · жаза жазбасы: ⟨1⟩ · белсенді бан: ⟨2⟩
+e2af94e61	Бас тартылды; деректеріңізге тиіспедік.
+3b1fe6568	Сұрауыңыз жіберілді.
+522ba7cdb	✅ Сұрауыңыз бот иесіне жіберілді. Нәтиже осында келеді.
+82b141f80	🗑 <b>Деректерді жою сұрауы</b> #⟨0⟩
+51a7b41f2	Мақұлдасаңыз профиль, аттар тарихы, статистика және баптаулар жойылады; ескерту, дыбысын өшіру, бан және спам жазбалары қалады.
+7269890c3	Мұны тек бот иесі жасай алады.
+0847d1a9f	Бұл сұрау бұрын қаралған.
+40df18e4c	✅ Мақұлданды, деректер жойылды (⟨0⟩ жазба).
+7dd6a6e74	✅ Деректерді жою сұрауыңыз мақұлданды: профиліңіз, аттар тарихы, статистика және баптаулар жойылды. Ескерту, дыбысын өшіру, бан және спам тізімі жазбалары қауіпсіздік үшін сақталды.
+8b725edd3	❌ Қабылданбады.
+3fa4a528b	❌ Деректерді жою сұрауыңызды бот иесі қабылдамады. Сұрақтар үшін: ⟨0⟩
 367b6aa51	Клон әрекеттері ботпен жеке чатта жасалады.
 a51f7d30f	Бұл өтінім бұрын қаралған.
 c862658b2	Ескі нұсқадағы өтінім; пайдаланушы /clone арқылы токен жіберуі керек.
@@ -48003,7 +48734,6 @@ ba7f6e886	✅ Мақұлданды, бот іске қосылды
 90edeb341	Атауы, сәлемдесу мәтіні және қолдау сілтемесі үшін: /clone
 172a66fda	❌ @⟨0⟩ үшін клон бот өтініміңіз қабылданбады.
 dffc58eb3	Енді рұқсат сұраудың қажеті жоқ: токенді жіберіңіз, бот иесі мақұлдағанда ботыңыз іске қосылады.
-7269890c3	Мұны тек бот иесі жасай алады.
 741c29704	Күтудегі өтініміңіз жоқ.
 a353b8903	↩️ Пайдаланушы өтінімді кері алды
 cb7da55c2	↩️ Өтінім кері алынды
@@ -49155,7 +49885,6 @@ b5ad3a8e7	Sem permissão ou sem snapshot.
 0644770db	♻️ Os admins do snapshot de ⟨0⟩ serão restaurados:
 700b3ac82	Confirma?
 1ca35b0e1	✅ Sim, restaurar
-e6a5e85cd	❌ Cancelar
 805c38798	Restaurando...
 cf63ea900	♻️ ⟨0⟩ admins restaurados.⟨1⟩
 b8058c528	❌ Falharam: ⟨0⟩
@@ -49315,6 +50044,7 @@ b0d9549b8	/coin — Cara ou coroa
 b4031dc89	/help — Este menu
 6467c9dbe	/id — Mostrar ID
 0af5bde71	/appeal <explicação> — Recurso contra banimento (no privado do bot)
+3642ffea5	/privacy — Política de privacidade · /deletemydata — Pedir a exclusão dos meus dados
 aff60c67d	/report [motivo] ou @admin — Denunciar à equipe a mensagem respondida
 15575b067	👮 Comandos da equipe — seu cargo: ⟨0⟩
 d955391ce	Ordem dos cargos: 👑 Fundador > 🔱 Cofundador > ⭐ Admin sênior > 🛡 Admin
@@ -49451,6 +50181,8 @@ fcea72bad	Configuração rápida do grupo selecionado
 333895635	Falar com o admin (linha de suporte)
 de94cd9e4	Preparar uma publicação para o canal
 7ffee2a93	Publicações de canal que você preparou
+d27eff5c8	Política de privacidade
+eb96aa2f5	Pedir a exclusão dos meus dados
 0d0187ac4	Grupos e estatísticas do seu bot
 8938961a5	Anúncios para grupos, canais e pessoas
 be4f2dea9	Histórico de anúncios
@@ -50368,6 +51100,46 @@ e211ffa2a	💎 Premium: Ativado
 60c71135b	💎 Premium: Desativado
 783d8db23	Status: ⟨0⟩ · Dono <code>⟨1⟩</code>
 1a2ec4716	↩️ Lista
+2f704a8f0	🔒 <b>⟨0⟩ — Política de privacidade</b>
+d9d9ac1f8	<b>1. Quais dados guardamos</b>
+996ce26b2	• Sua identidade no Telegram: ID, nome, nome de usuário e idioma escolhido
+c4b153eb0	• Mudanças no seu nome e nome de usuário (histórico de nomes)
+3a1de66af	• Quantas mensagens você envia nos grupos (para rankings e estatísticas); o conteúdo das mensagens não é guardado permanentemente
+630660602	• Registros de advertências, silenciamentos, banimentos e denúncias
+9a8e2c224	• Uma cópia temporária de mensagens apagadas e editadas (para proteção contra spam e edições)
+0b8e28ab0	• Status AFK, inscrição em anúncios, número de convites e participação em sorteios
+5a4e6fa28	<b>2. Por quanto tempo guardamos</b>
+d1ad0ee51	• Cache de mensagens: 2 dias · histórico de edições: ⟨0⟩ dias
+ef9969356	• Detalhes das mensagens: ⟨0⟩ dias; seu total de mensagens e histórico de nomes, sem prazo
+0045612df	• Histórico de punições: ⟨0⟩ dias · backups: ⟨1⟩ dias
+cd1453252	<b>3. Para que usamos</b>
+8f2f14875	Apenas para proteção de grupos, estatísticas e recursos do bot. Seus dados não são vendidos, não são usados para publicidade e não são compartilhados com terceiros.
+0408a81a6	<b>4. Quem pode ver</b>
+2aaa04410	O dono do bot e os administradores dos grupos; os administradores só veem os registros dos próprios grupos.
+4b16ec584	<b>5. Seus direitos</b>
+70886128b	Com /deletemydata você pode pedir a exclusão dos seus dados; o dono do bot analisa o pedido. Registros de advertências, silenciamentos, banimentos e da lista de spam não são apagados, por segurança.
+5b9cbf99a	<b>6. Contato</b>
+9b8234242	⏳ Seu pedido anterior ainda está com o dono do bot; aviso você quando for decidido.
+ca8f894d6	Você já fez um pedido nos últimos 7 dias; tente de novo mais tarde.
+911be3749	🔒 Para pedir a exclusão de dados, me mande /deletemydata no privado.
+7880b45fe	🗑 <b>Pedido de exclusão de dados</b>
+e83b4c167	<b>Se aprovado, é apagado:</b> seu perfil, histórico de nomes, estatísticas de mensagens, AFK, idioma e preferências de convites e anúncios.
+c287e5d8c	<b>Fica (segurança):</b> registros de advertências, silenciamentos, banimentos e lista de spam.
+06cc2c9b5	O dono do bot analisa o pedido; o resultado chega aqui. Se você continuar escrevendo nos grupos, novos dados serão registrados de novo.
+8b20a58ab	✅ Enviar pedido
+e6a5e85cd	❌ Cancelar
+0a57e684e	Grupos: ⟨0⟩ · registros de punição: ⟨1⟩ · banimentos ativos: ⟨2⟩
+e2af94e61	Cancelado; seus dados não foram tocados.
+3b1fe6568	Pedido enviado.
+522ba7cdb	✅ Seu pedido foi enviado ao dono do bot. O resultado chega aqui.
+82b141f80	🗑 <b>Pedido de exclusão de dados</b> #⟨0⟩
+51a7b41f2	Se você aprovar, perfil, histórico de nomes, estatísticas e preferências são apagados; registros de advertências, silenciamentos, banimentos e spam ficam.
+7269890c3	Só o dono do bot pode fazer isso.
+0847d1a9f	Este pedido já foi tratado.
+40df18e4c	✅ Aprovado, dados apagados (⟨0⟩ registros).
+7dd6a6e74	✅ Seu pedido de exclusão de dados foi aprovado: seu perfil, histórico de nomes, estatísticas e preferências foram apagados. Registros de advertências, silenciamentos, banimentos e da lista de spam ficam por segurança.
+8b725edd3	❌ Recusado.
+3fa4a528b	❌ O dono do bot recusou seu pedido de exclusão de dados. Para dúvidas: ⟨0⟩
 367b6aa51	As ações do clone são feitas no privado com o bot.
 a51f7d30f	Este pedido já foi tratado.
 c862658b2	Pedido de uma versão antiga; o usuário precisa enviar um token com /clone.
@@ -50384,7 +51156,6 @@ ba7f6e886	✅ Aprovado, o bot iniciou
 90edeb341	Para o nome, o texto de boas-vindas e o link de suporte: /clone
 172a66fda	❌ Seu pedido de bot clone para @⟨0⟩ foi recusado.
 dffc58eb3	Você não precisa mais pedir permissão: envie o token e seu bot começa quando o dono do bot aprovar.
-7269890c3	Só o dono do bot pode fazer isso.
 741c29704	Você não tem pedido pendente.
 a353b8903	↩️ O usuário retirou o pedido
 cb7da55c2	↩️ Pedido retirado
@@ -51515,7 +52286,6 @@ b5ad3a8e7	Нет прав или снимка.
 0644770db	♻️ Будут восстановлены админы из снимка ⟨0⟩:
 700b3ac82	Подтверждаете?
 1ca35b0e1	✅ Да, восстановить
-e6a5e85cd	❌ Отмена
 805c38798	Восстанавливаю...
 cf63ea900	♻️ Восстановлено админов: ⟨0⟩.⟨1⟩
 b8058c528	❌ Ошибка: ⟨0⟩
@@ -51676,6 +52446,7 @@ b0d9549b8	/coin — Подбросить монету
 b4031dc89	/help — Это меню
 6467c9dbe	/id — Показать ID
 0af5bde71	/appeal <пояснение> — Апелляция на бан (боту в личку)
+3642ffea5	/privacy — Политика конфиденциальности · /deletemydata — Запросить удаление моих данных
 aff60c67d	/report [причина] или @admin — Пожаловаться администрации на сообщение из ответа
 15575b067	👮 Команды администрации — ваш ранг: ⟨0⟩
 d955391ce	Порядок рангов: 👑 Основатель > 🔱 Сооснователь > ⭐ Старший админ > 🛡 Админ
@@ -51812,6 +52583,8 @@ fcea72bad	Быстрая настройка выбранной группы
 333895635	Написать администратору (поддержка)
 de94cd9e4	Подготовить пост для канала
 7ffee2a93	Подготовленные вами посты канала
+d27eff5c8	Политика конфиденциальности
+eb96aa2f5	Запросить удаление моих данных
 0d0187ac4	Группы и статистика вашего бота
 8938961a5	Рассылки в группы, каналы, людям
 be4f2dea9	История рассылок
@@ -52732,6 +53505,46 @@ e211ffa2a	💎 Премиум: Вкл
 60c71135b	💎 Премиум: Выкл
 783d8db23	Статус: ⟨0⟩ · Владелец <code>⟨1⟩</code>
 1a2ec4716	↩️ Список
+2f704a8f0	🔒 <b>⟨0⟩ — Политика конфиденциальности</b>
+d9d9ac1f8	<b>1. Какие данные мы храним</b>
+996ce26b2	• Ваши данные Telegram: ID, имя, юзернейм и выбранный язык
+c4b153eb0	• Изменения вашего имени и юзернейма (история имён)
+3a1de66af	• Количество ваших сообщений в группах (для рейтингов и статистики); содержимое сообщений постоянно не хранится
+630660602	• Записи о предупреждениях, мутах, банах и жалобах
+9a8e2c224	• Кратковременная копия удалённых и изменённых сообщений (для защиты от спама и правок)
+0b8e28ab0	• Статус AFK, подписка на рассылки, число приглашений и участие в розыгрышах
+5a4e6fa28	<b>2. Сколько мы храним</b>
+d1ad0ee51	• Кэш сообщений: 2 дня · история правок: ⟨0⟩ дн.
+ef9969356	• Подробности сообщений: ⟨0⟩ дн.; общее число сообщений и история имён — бессрочно
+0045612df	• История наказаний: ⟨0⟩ дн. · резервные копии: ⟨1⟩ дн.
+cd1453252	<b>3. Для чего используем</b>
+8f2f14875	Только для защиты групп, статистики и функций бота. Ваши данные не продаются, не используются для рекламы и не передаются третьим лицам.
+0408a81a6	<b>4. Кто может видеть</b>
+2aaa04410	Владелец бота и администраторы групп; администраторы видят записи только своих групп.
+4b16ec584	<b>5. Ваши права</b>
+70886128b	Через /deletemydata можно запросить удаление данных; запрос рассматривает владелец бота. Записи о предупреждениях, мутах, банах и спам-списке не удаляются ради безопасности.
+5b9cbf99a	<b>6. Контакт</b>
+9b8234242	⏳ Ваш предыдущий запрос ещё у владельца бота; я сообщу, когда будет решение.
+ca8f894d6	Вы уже отправляли запрос за последние 7 дней; попробуйте позже.
+911be3749	🔒 Чтобы запросить удаление данных, напишите мне /deletemydata в личку.
+7880b45fe	🗑 <b>Запрос на удаление данных</b>
+e83b4c167	<b>При одобрении удаляются:</b> профиль, история имён, статистика сообщений, AFK, язык, приглашения и настройки рассылок.
+c287e5d8c	<b>Остаются (безопасность):</b> записи о предупреждениях, мутах, банах и спам-списке.
+06cc2c9b5	Запрос рассматривает владелец бота; результат придёт сюда. Если продолжите писать в группах, новые данные снова будут записываться.
+8b20a58ab	✅ Отправить запрос
+e6a5e85cd	❌ Отмена
+0a57e684e	Групп: ⟨0⟩ · записей о наказаниях: ⟨1⟩ · активных банов: ⟨2⟩
+e2af94e61	Отменено; ваши данные не тронуты.
+3b1fe6568	Запрос отправлен.
+522ba7cdb	✅ Запрос отправлен владельцу бота. Результат придёт сюда.
+82b141f80	🗑 <b>Запрос на удаление данных</b> #⟨0⟩
+51a7b41f2	При одобрении удаляются профиль, история имён, статистика и настройки; записи о предупреждениях, мутах, банах и спаме остаются.
+7269890c3	Это может сделать только владелец бота.
+0847d1a9f	Этот запрос уже обработан.
+40df18e4c	✅ Одобрено, данные удалены (записей: ⟨0⟩).
+7dd6a6e74	✅ Ваш запрос на удаление данных одобрен: профиль, история имён, статистика и настройки удалены. Записи о предупреждениях, мутах, банах и спам-списке сохранены ради безопасности.
+8b725edd3	❌ Отклонено.
+3fa4a528b	❌ Владелец бота отклонил ваш запрос на удаление данных. По вопросам: ⟨0⟩
 367b6aa51	Действия с клоном выполняются в личке с ботом.
 a51f7d30f	Эта заявка уже обработана.
 c862658b2	Заявка из старой версии; пользователь должен отправить токен через /clone.
@@ -52748,7 +53561,6 @@ ba7f6e886	✅ Одобрено, бот запущен
 90edeb341	Имя, приветствие и ссылка поддержки: /clone
 172a66fda	❌ Ваша заявка на клон @⟨0⟩ отклонена.
 dffc58eb3	Разрешение больше не нужно: отправьте токен, бот запустится после одобрения владельцем.
-7269890c3	Это может сделать только владелец бота.
 741c29704	У вас нет ожидающей заявки.
 a353b8903	↩️ Пользователь отозвал заявку
 cb7da55c2	↩️ Заявка отозвана
@@ -53905,7 +54717,6 @@ b5ad3a8e7	Немає прав або знімка.
 0644770db	♻️ Буде відновлено адмінів зі знімка ⟨0⟩:
 700b3ac82	Підтверджуєте?
 1ca35b0e1	✅ Так, відновити
-e6a5e85cd	❌ Скасувати
 805c38798	Відновлення...
 cf63ea900	♻️ Відновлено адмінів: ⟨0⟩.⟨1⟩
 b8058c528	❌ Не вдалося: ⟨0⟩
@@ -54066,6 +54877,7 @@ b0d9549b8	/coin — Підкинути монетку
 b4031dc89	/help — Це меню
 6467c9dbe	/id — Показати ID
 0af5bde71	/appeal <пояснення> — Апеляція на бан (в особисті боту)
+3642ffea5	/privacy — Політика конфіденційності · /deletemydata — Запросити видалення моїх даних
 aff60c67d	/report [причина] або @admin — Поскаржитися персоналу на повідомлення, на яке ви відповіли
 15575b067	👮 Команди персоналу — ваш ранг: ⟨0⟩
 d955391ce	Порядок рангів: 👑 Засновник > 🔱 Співзасновник > ⭐ Старший адмін > 🛡 Адмін
@@ -54202,6 +55014,8 @@ fcea72bad	Швидке налаштування вибраної групи
 333895635	Написати адміну (лінія підтримки)
 de94cd9e4	Підготувати допис для каналу
 7ffee2a93	Підготовлені вами дописи каналу
+d27eff5c8	Політика конфіденційності
+eb96aa2f5	Запросити видалення моїх даних
 0d0187ac4	Групи та статистика вашого бота
 8938961a5	Розсилки в групи, канали, людям
 be4f2dea9	Історія розсилок
@@ -55122,6 +55936,46 @@ e211ffa2a	💎 Преміум: Увімк
 60c71135b	💎 Преміум: Вимк
 783d8db23	Статус: ⟨0⟩ · Власник <code>⟨1⟩</code>
 1a2ec4716	↩️ Список
+2f704a8f0	🔒 <b>⟨0⟩ — Політика конфіденційності</b>
+d9d9ac1f8	<b>1. Які дані ми зберігаємо</b>
+996ce26b2	• Ваші дані Telegram: ID, ім'я, юзернейм і вибрана мова
+c4b153eb0	• Зміни вашого імені та юзернейму (історія імен)
+3a1de66af	• Кількість ваших повідомлень у групах (для рейтингів і статистики); вміст повідомлень постійно не зберігається
+630660602	• Записи про попередження, мути, бани та скарги
+9a8e2c224	• Короткочасна копія видалених і змінених повідомлень (для захисту від спаму та редагувань)
+0b8e28ab0	• Статус AFK, підписка на розсилки, кількість запрошень і участь у розіграшах
+5a4e6fa28	<b>2. Скільки ми зберігаємо</b>
+d1ad0ee51	• Кеш повідомлень: 2 дні · історія редагувань: ⟨0⟩ дн.
+ef9969356	• Подробиці повідомлень: ⟨0⟩ дн.; загальна кількість повідомлень та історія імен — безстроково
+0045612df	• Історія покарань: ⟨0⟩ дн. · резервні копії: ⟨1⟩ дн.
+cd1453252	<b>3. Для чого використовуємо</b>
+8f2f14875	Лише для захисту груп, статистики та функцій бота. Ваші дані не продаються, не використовуються для реклами й не передаються третім особам.
+0408a81a6	<b>4. Хто може бачити</b>
+2aaa04410	Власник бота та адміністратори груп; адміністратори бачать записи лише своїх груп.
+4b16ec584	<b>5. Ваші права</b>
+70886128b	Через /deletemydata можна запросити видалення даних; запит розглядає власник бота. Записи про попередження, мути, бани та спам-список не видаляються задля безпеки.
+5b9cbf99a	<b>6. Контакт</b>
+9b8234242	⏳ Ваш попередній запит ще в власника бота; я повідомлю, коли буде рішення.
+ca8f894d6	Ви вже надсилали запит за останні 7 днів; спробуйте пізніше.
+911be3749	🔒 Щоб запросити видалення даних, напишіть мені /deletemydata в особисті.
+7880b45fe	🗑 <b>Запит на видалення даних</b>
+e83b4c167	<b>У разі схвалення видаляються:</b> профіль, історія імен, статистика повідомлень, AFK, мова, запрошення та налаштування розсилок.
+c287e5d8c	<b>Залишаються (безпека):</b> записи про попередження, мути, бани та спам-список.
+06cc2c9b5	Запит розглядає власник бота; результат прийде сюди. Якщо продовжите писати в групах, нові дані знову записуватимуться.
+8b20a58ab	✅ Надіслати запит
+e6a5e85cd	❌ Скасувати
+0a57e684e	Груп: ⟨0⟩ · записів про покарання: ⟨1⟩ · активних банів: ⟨2⟩
+e2af94e61	Скасовано; ваші дані не змінено.
+3b1fe6568	Запит надіслано.
+522ba7cdb	✅ Запит надіслано власнику бота. Результат прийде сюди.
+82b141f80	🗑 <b>Запит на видалення даних</b> #⟨0⟩
+51a7b41f2	У разі схвалення видаляються профіль, історія імен, статистика й налаштування; записи про попередження, мути, бани та спам залишаються.
+7269890c3	Це може зробити лише власник бота.
+0847d1a9f	Цей запит уже оброблено.
+40df18e4c	✅ Схвалено, дані видалено (записів: ⟨0⟩).
+7dd6a6e74	✅ Ваш запит на видалення даних схвалено: профіль, історію імен, статистику та налаштування видалено. Записи про попередження, мути, бани та спам-список збережено задля безпеки.
+8b725edd3	❌ Відхилено.
+3fa4a528b	❌ Власник бота відхилив ваш запит на видалення даних. З питань: ⟨0⟩
 367b6aa51	Дії з клоном виконуються в особистому чаті з ботом.
 a51f7d30f	Цю заявку вже оброблено.
 c862658b2	Заявка зі старої версії; користувач має надіслати токен через /clone.
@@ -55138,7 +55992,6 @@ ba7f6e886	✅ Схвалено, бота запущено
 90edeb341	Для назви, тексту привітання й посилання підтримки: /clone
 172a66fda	❌ Вашу заявку на бота-клона @⟨0⟩ відхилено.
 dffc58eb3	Більше не потрібно просити дозволу: надішліть токен, бот запуститься після схвалення власника.
-7269890c3	Це може зробити лише власник бота.
 741c29704	У вас немає заявки, що очікує.
 a353b8903	↩️ Користувач відкликав заявку
 cb7da55c2	↩️ Заявку відкликано
@@ -56286,7 +57139,6 @@ b5ad3a8e7	Ruxsat yo‘q yoki nusxa yo‘q.
 0644770db	♻️ ⟨0⟩ nusxasidagi adminlar tiklanadi:
 700b3ac82	Tasdiqlaysizmi?
 1ca35b0e1	✅ Ha, tiklash
-e6a5e85cd	❌ Bekor qilish
 805c38798	Tiklanmoqda...
 cf63ea900	♻️ ⟨0⟩ ta admin tiklandi.⟨1⟩
 b8058c528	❌ Muvaffaqiyatsiz: ⟨0⟩
@@ -56446,6 +57298,7 @@ b0d9549b8	/coin — Tanga tashlash
 b4031dc89	/help — Shu menyu
 6467c9dbe	/id — ID ni ko‘rsatish
 0af5bde71	/appeal <izoh> — Ban ustidan shikoyat (botga shaxsiy)
+3642ffea5	/privacy — Maxfiylik siyosati · /deletemydata — Maʼlumotlarimni oʻchirishni soʻrash
 aff60c67d	/report [sabab] yoki @admin — Javob berilgan xabar ustidan xodimlarga shikoyat qilish
 15575b067	👮 Xodimlar buyruqlari — darajangiz: ⟨0⟩
 d955391ce	Darajalar tartibi: 👑 Asoschi > 🔱 Hammuassis > ⭐ Katta admin > 🛡 Admin
@@ -56580,6 +57433,8 @@ fcea72bad	Tanlangan guruh uchun tezkor sozlash
 333895635	Adminga yozish (yordam liniyasi)
 de94cd9e4	Kanal posti tayyorlash
 7ffee2a93	Siz tayyorlagan kanal postlari
+d27eff5c8	Maxfiylik siyosati
+eb96aa2f5	Maʼlumotlarimni oʻchirishni soʻrash
 0d0187ac4	Botingiz guruhlari va statistikasi
 8938961a5	Guruhlar, kanallar, odamlarga e’lonlar
 be4f2dea9	E’lonlar tarixi
@@ -57490,6 +58345,46 @@ e211ffa2a	💎 Premium: Yoqilgan
 60c71135b	💎 Premium: O‘chirilgan
 783d8db23	Holat: ⟨0⟩ · Egasi <code>⟨1⟩</code>
 1a2ec4716	↩️ Ro‘yxat
+2f704a8f0	🔒 <b>⟨0⟩ — Maxfiylik siyosati</b>
+d9d9ac1f8	<b>1. Qanday maʼlumotlarni saqlaymiz</b>
+996ce26b2	• Telegram maʼlumotlaringiz: ID, ism, foydalanuvchi nomi va til tanlovi
+c4b153eb0	• Ism va foydalanuvchi nomi oʻzgarishlari (ismlar tarixi)
+3a1de66af	• Guruhlardagi xabarlaringiz soni (reyting va statistika uchun); xabarlar mazmuni doimiy saqlanmaydi
+630660602	• Ogohlantirish, ovozsizlantirish, ban va shikoyat yozuvlari
+9a8e2c224	• Oʻchirilgan va tahrirlangan xabarlarning qisqa muddatli nusxasi (spam va tahrir himoyasi uchun)
+0b8e28ab0	• AFK holati, eʼlonlarga obuna, takliflar soni va oʻyinlarda ishtirok
+5a4e6fa28	<b>2. Qancha saqlaymiz</b>
+d1ad0ee51	• Xabar keshi: 2 kun · tahrir tarixi: ⟨0⟩ kun
+ef9969356	• Xabar tafsilotlari: ⟨0⟩ kun; umumiy xabarlar soni va ismlar tarixi muddatsiz
+0045612df	• Jazo tarixi: ⟨0⟩ kun · zaxira nusxalar: ⟨1⟩ kun
+cd1453252	<b>3. Nima uchun ishlatamiz</b>
+8f2f14875	Faqat guruh himoyasi, statistika va bot funksiyalari uchun. Maʼlumotlaringiz sotilmaydi, reklama uchun ishlatilmaydi va uchinchi shaxslarga berilmaydi.
+0408a81a6	<b>4. Kim koʻra oladi</b>
+2aaa04410	Bot egasi va guruh adminlari; adminlar faqat oʻz guruhlaridagi yozuvlarni koʻradi.
+4b16ec584	<b>5. Huquqlaringiz</b>
+70886128b	/deletemydata orqali maʼlumotlaringizni oʻchirishni soʻrashingiz mumkin; soʻrovni bot egasi koʻrib chiqadi. Ogohlantirish, ovozsizlantirish, ban va spam roʻyxati yozuvlari xavfsizlik uchun oʻchirilmaydi.
+5b9cbf99a	<b>6. Aloqa</b>
+9b8234242	⏳ Oldingi soʻrovingiz hali bot egasida; qaror chiqqanda xabar beraman.
+ca8f894d6	Soʻnggi 7 kunda allaqachon soʻrov yuborgansiz; keyinroq qayta urinib koʻring.
+911be3749	🔒 Maʼlumotlarni oʻchirishni soʻrash uchun menga shaxsiyda /deletemydata yozing.
+7880b45fe	🗑 <b>Maʼlumotlarni oʻchirish soʻrovi</b>
+e83b4c167	<b>Tasdiqlansa oʻchiriladi:</b> profilingiz, ismlar tarixi, xabar statistikasi, AFK, til, taklif va eʼlon sozlamalari.
+c287e5d8c	<b>Qoladi (xavfsizlik):</b> ogohlantirish, ovozsizlantirish, ban va spam roʻyxati yozuvlari.
+06cc2c9b5	Soʻrovni bot egasi koʻrib chiqadi; natija shu yerga keladi. Guruhlarda yozishda davom etsangiz, yangi maʼlumotlar yana yoziladi.
+8b20a58ab	✅ Soʻrov yuborish
+e6a5e85cd	❌ Bekor qilish
+0a57e684e	Guruh: ⟨0⟩ · jazo yozuvi: ⟨1⟩ · faol ban: ⟨2⟩
+e2af94e61	Bekor qilindi; maʼlumotlaringizga tegilmadi.
+3b1fe6568	Soʻrovingiz yuborildi.
+522ba7cdb	✅ Soʻrovingiz bot egasiga yuborildi. Natija shu yerga keladi.
+82b141f80	🗑 <b>Maʼlumotlarni oʻchirish soʻrovi</b> #⟨0⟩
+51a7b41f2	Tasdiqlasangiz profil, ismlar tarixi, statistika va sozlamalar oʻchiriladi; ogohlantirish, ovozsizlantirish, ban va spam yozuvlari qoladi.
+7269890c3	Buni faqat bot egasi qila oladi.
+0847d1a9f	Bu soʻrov allaqachon koʻrib chiqilgan.
+40df18e4c	✅ Tasdiqlandi, maʼlumotlar oʻchirildi (⟨0⟩ yozuv).
+7dd6a6e74	✅ Maʼlumotlarni oʻchirish soʻrovingiz tasdiqlandi: profilingiz, ismlar tarixi, statistika va sozlamalar oʻchirildi. Ogohlantirish, ovozsizlantirish, ban va spam roʻyxati yozuvlari xavfsizlik uchun saqlanadi.
+8b725edd3	❌ Rad etildi.
+3fa4a528b	❌ Maʼlumotlarni oʻchirish soʻrovingiz bot egasi tomonidan rad etildi. Savollar uchun: ⟨0⟩
 367b6aa51	Klon amallari bot bilan shaxsiy chatda bajariladi.
 a51f7d30f	Bu so‘rov allaqachon ko‘rib chiqilgan.
 c862658b2	Eski versiyadagi so‘rov; foydalanuvchi /clone bilan token yuborishi kerak.
@@ -57506,7 +58401,6 @@ ba7f6e886	✅ Tasdiqlandi, bot ishga tushdi
 90edeb341	Nom, xush kelibsiz matni va yordam havolasi uchun: /clone
 172a66fda	❌ @⟨0⟩ uchun klon bot so‘rovingiz rad etildi.
 dffc58eb3	Endi ruxsat so‘rashingiz shart emas: tokenni yuboring, bot egasi tasdiqlagach botingiz ishga tushadi.
-7269890c3	Buni faqat bot egasi qila oladi.
 741c29704	Sizda kutilayotgan so‘rov yo‘q.
 a353b8903	↩️ Foydalanuvchi so‘rovni qaytarib oldi
 cb7da55c2	↩️ So‘rov qaytarib olindi
