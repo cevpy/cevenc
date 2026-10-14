@@ -21,7 +21,8 @@ from telegram import (
     Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions, Bot, MessageEntity,
     ReplyKeyboardMarkup, KeyboardButton, KeyboardButtonRequestChat, ForceReply, BotCommand,
     BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators,
-    BotCommandScopeChat, WebAppInfo, MenuButtonWebApp,
+    BotCommandScopeChat, WebAppInfo, MenuButtonWebApp, InputMedia, InputMediaPhoto, InputMediaVideo,
+    InputMediaAnimation, InputMediaAudio, InputMediaDocument, LinkPreviewOptions,
 )
 from telegram.constants import ParseMode, KeyboardButtonStyle
 from telegram.ext import ContextTypes
@@ -46,6 +47,7 @@ import re
 import signal
 import sys
 import threading
+from urllib.parse import quote as url_quote
 
 from dotenv import load_dotenv
 
@@ -722,6 +724,14 @@ def i18n_request(endpoint: str, data: dict, lang: str) -> dict:
                     t = t[:200]
                 if len(t) <= limit:
                     new[key] = t
+        med = new.get('media')
+        if isinstance(med, InputMedia) and isinstance(med.caption, str) and not med.caption_entities:
+            t = tr_text(med.caption, lang)  # editMessageMedia: açıklama media nesnesinin içinde
+            if t != med.caption and len(t) <= _TR_SEND_KEYS['caption']:
+                m2 = copy.copy(med)
+                with m2._unfrozen():
+                    m2.caption = t
+                new['media'] = m2
     if new.get('reply_markup') is not None:
         new['reply_markup'] = _tr_markup(new['reply_markup'], lang)
     if endpoint == 'setMyCommands' and new.get('commands'):
@@ -804,6 +814,13 @@ def _pe_markup(markup, m: dict, rx):
         rows.append(r2)
     return InlineKeyboardMarkup(rows) if changed else markup
 
+def _media_with_caption(med, caption: str):
+    """InputMedia'nın açıklaması değişmiş kopyası (özgün nesne değişmez; HTML olarak gönderilir)."""
+    m2 = copy.copy(med)
+    with m2._unfrozen():
+        m2.caption, m2.parse_mode = caption, ParseMode.HTML
+    return m2
+
 def premium_request(endpoint: str, data: dict, bot_id: int) -> dict:
     """Giden isteğe premium emoji teması uygular (yeni sözlük; değişiklik yoksa aynısı)."""
     if not endpoint.startswith(('send', 'edit', 'copyMessage')) or endpoint in ('sendPoll', 'sendChatAction') \
@@ -825,6 +842,14 @@ def premium_request(endpoint: str, data: dict, bot_id: int) -> dict:
                 continue  # Markdown'a dokunulmaz
             if t2 != t and len(t2) <= limit:
                 new[key], new['parse_mode'] = t2, ParseMode.HTML
+    med = data.get('media')
+    if isinstance(med, InputMedia) and isinstance(med.caption, str) and not med.caption_entities and rx.search(med.caption):
+        # editMessageMedia: açıklama üst düzeyde değil, media nesnesinin içinde
+        pm = med.parse_mode
+        if pm is None or str(pm).upper() == 'HTML':
+            t2 = _pe_html(med.caption if pm is not None else html.escape(med.caption, quote=False), m, rx)
+            if t2 != med.caption and len(t2) <= _TR_SEND_KEYS['caption']:
+                new['media'] = _media_with_caption(med, t2)
     if data.get('reply_markup') is not None:
         new['reply_markup'] = _pe_markup(data['reply_markup'], m, rx)
     return new if any(new.get(k) is not data.get(k) for k in new) else data
@@ -914,7 +939,7 @@ CMD_ALIASES = {
     'yeniuye': 'newbie', 'linkizin': 'allowlink', 'captchasure': 'captchatime', 'kanalsettings': 'channelsettings',
     'oylama': 'votemute', 'kanalzorunlu': 'forcesub', 'spamkoruma': 'antispam', 'veda': 'goodbye',
     'setveda': 'setgoodbye', 'yenile': 'reload', 'rapor': 'report', 'dil': 'setlang',
-    'komutkapat': 'disablecmd', 'komutac': 'enablecmd',
+    'komutkapat': 'disablecmd', 'komutac': 'enablecmd', 'gonderi': 'post', 'gonderiler': 'posts',
 }
 ALIAS_TO_TR = {v: k for k, v in CMD_ALIASES.items()}
 
@@ -1799,6 +1824,24 @@ def init_db():
                 created_at REAL,
                 PRIMARY KEY (bot_id, name)
             );
+            CREATE TABLE IF NOT EXISTS channel_posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bot_id INTEGER NOT NULL,
+                owner_id INTEGER NOT NULL,
+                channel_id TEXT NOT NULL,
+                code TEXT,
+                content TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'draft',
+                multi_use INTEGER NOT NULL DEFAULT 0,
+                created_at REAL,
+                used_at REAL,
+                used_msg_id INTEGER,
+                run_at REAL,
+                pin INTEGER DEFAULT 0,
+                delete_after INTEGER,
+                UNIQUE (bot_id, code)
+            );
+            CREATE INDEX IF NOT EXISTS idx_cposts_owner ON channel_posts(bot_id, owner_id);
             CREATE INDEX IF NOT EXISTS idx_announce ON announcements(bot_id, status);
 
             CREATE INDEX IF NOT EXISTS idx_forward_ts ON forward_history(timestamp);
@@ -11324,6 +11367,7 @@ PRIVATE_COMMANDS = [
     ("webpanel", "Web panel (tüm ayarlar tek sayfada)"), ("duyurukapat", "Bot duyurularını kapat"),
     ("setlang", "Dil / Language"),
     ("destek", "Yöneticiye yaz (destek hattı)"),
+    ("gonderi", "Kanal gönderisi hazırla"), ("gonderiler", "Hazırladığın kanal gönderileri"),
 ]
 CLONE_OWNER_COMMANDS = [
     ("panel", "Botunun grupları ve istatistikleri"), ("duyuru", "Gruplara, kanallara, kişilere duyuru"),
@@ -12517,6 +12561,11 @@ def _make_btn(label: str, target: str, color: str | None = None) -> dict | None:
     tl = target.lower()
     if tl in ('rules', 'kurallar', 'kural'):
         return {'t': label, 'k': 'rules', 'v': '', 'c': c}
+    if tl in ('share', 'paylaş', 'paylas'):  # paylaş: gönderinin kendi linki (kanal gönderisinde)
+        return {'t': label, 'k': 'share', 'v': '', 'c': c}
+    if tl.startswith(('share:', 'paylaş:', 'paylas:')):
+        txt = target.split(':', 1)[1].strip()
+        return {'t': label, 'k': 'share', 'v': txt[:300], 'c': c} if txt else None
     if tl.startswith(('popup:', 'uyari:', 'uyarı:')):
         txt = target.split(':', 1)[1].strip()
         return {'t': label, 'k': 'popup', 'v': txt[:190], 'c': c} if txt else None
@@ -12669,13 +12718,18 @@ def rich_action_id(chat_id: str, kind: str, value: str) -> int:
         conn.commit()
         return rid
 
-def rich_markup(chat_id: str, rows: list) -> InlineKeyboardMarkup | None:
+def rich_markup(chat_id: str, rows: list, share_url: str | None = None) -> InlineKeyboardMarkup | None:
+    """share_url: 'paylaş' butonunun paylaşacağı link (kanal gönderisinin adresi); yoksa hedefsiz paylaş butonu atlanır."""
     out = []
     for row in rows or []:
         r = []
         for b in row:
             if b['k'] == 'url':
                 r.append(ibtn(b['t'], url=b['v'], style=b.get('c')))
+            elif b['k'] == 'share':
+                target = b.get('v') or share_url
+                if target:
+                    r.append(ibtn(b['t'], url="https://t.me/share/url?url=" + url_quote(target, safe=''), style=b.get('c')))
             else:  # kurallar / not / popup: ra|id → bot özelden gösterir ya da uyarı penceresi açar
                 r.append(ibtn(b['t'], f"ra|{rich_action_id(chat_id, b['k'], b['v'])}", b.get('c')))
         if r:
@@ -12916,6 +12970,666 @@ RICH_HELP = (
     "<b>Değişkenler:</b> <code>{kullanıcı}</code> <code>{ad}</code> <code>{soyad}</code> <code>{username}</code> "
     "<code>{id}</code> <code>{grup}</code> <code>{uye_sayisi}</code> <code>{tarih}</code> <code>{saat}</code>\n"
     "<b>Rastgele:</b> birden fazla mesajı tek başına <code>%%%</code> satırıyla ayır.")
+
+# ═══════════════════════════ GÖNDERİ STÜDYOSU (kanal gönderisi) ═══════════════════════════
+# Kanal sahibi/yöneticisi gönderiyi bota özelden hazırlar (/gonderi) ve bir kod alır (#g12). Kanala KENDİ hesabından
+# sadece kodu yazınca bot o mesajı hazırlanan gönderiye çevirir (editMessageText / editMessageMedia): gönderi kişinin
+# imzasıyla kalır, butonlar eklenir. Bunun için bot kanalda "Mesajları düzenle" (can_edit_messages) yetkisine sahip olmalı.
+# channel_posts.content (JSON):
+#   text: HTML (premium emoji <tg-emoji> etiketleri korunur) · buttons: zengin mesaj buton satırları (url/popup/share/…)
+#   media: {'type': photo|video|animation|audio|document, 'id': file_id, 'name': dosya adı,
+#           'baked': logolu yüklenmiş belgenin file_id'si, 'baked_thumb': o logonun file_id'si} | None
+#   thumb: dosya logosu (fotoğraf file_id) | None · spoiler · caption_above · preview: off|small|large|above
+#   preview_url · silent (otomatik gönderimde sessiz)
+# Yöneticinin yazdığı içerik çevrilmez (_TR_SKIP + Türkçe dil zorlaması).
+POST_MEDIA_TYPES = ('photo', 'video', 'animation', 'audio', 'document')
+POST_INPUT_MEDIA = {'photo': InputMediaPhoto, 'video': InputMediaVideo, 'animation': InputMediaAnimation,
+                    'audio': InputMediaAudio, 'document': InputMediaDocument}
+POST_SPOILER_TYPES = ('photo', 'video', 'animation')
+POST_PREVIEW_MODES = ('off', 'small', 'large', 'above')
+POST_PREVIEW_LABELS = {'off': "kapalı", 'small': "küçük", 'large': "büyük", 'above': "metnin üstünde"}
+POST_STATUS_LABELS = {'draft': "✏️ Taslak", 'ready': "✅ Hazır", 'used': "📤 Yayınlandı"}
+POST_THUMB_MAX, POST_THUMB_BYTES = 320, 200 * 1024   # Telegram: JPEG, en fazla 320×320 ve 200 kB
+POST_INPUT_TTL = 600
+_POST_CODE = re.compile(r'#g(\d{1,9})', re.I)
+_POST_INVISIBLE = re.compile(r'[\s​-‏⁠﻿]+')
+POST_PROMPTS = {
+    't': ("gönderinin metnini yaz. Kalın, italik, link, alıntı, spoiler ve premium emoji olduğu gibi korunur.",
+          "Gönderi metni"),
+    'm': ("fotoğraf, video, GIF, müzik ya da dosya gönder. Açıklaması varsa gönderi metni olur. Medyayı kaldırmak için: sil",
+          "Medya gönder"),
+    'th': ("dosyanın logosu (küçük resmi) olacak fotoğrafı gönder. Kaldırmak için: sil", "Logo fotoğrafı"),
+    'b': ("butonları yaz (her satır bir sıra, && ile yan yana):\n"
+          "Kanalımız - https://t.me/kanal && Paylaş - share\nBilgi - popup:Kısa açıklama #mavi\n"
+          "Renk: satır sonuna #yeşil #kırmızı #mavi · Butonları kaldırmak için: sil", "Butonlar"),
+    'pu': ("önizlemesi gösterilecek linki yaz. Kaldırmak için: sil", "https://…"),
+}
+
+def post_default_content() -> dict:
+    return {'text': '', 'buttons': [], 'media': None, 'thumb': None, 'spoiler': False, 'caption_above': False,
+            'preview': 'off', 'preview_url': None, 'silent': False}
+
+def post_get(pid) -> dict | None:
+    """Gönderi kaydı (content sözlük olarak); yoksa None."""
+    if not isinstance(pid, int) or not 0 < pid < 10 ** 9:
+        return None
+    with get_db() as conn:
+        row = conn.execute("SELECT * FROM channel_posts WHERE id = ?", (pid,)).fetchone()
+    if not row:
+        return None
+    post = dict(row)
+    try:
+        c = json.loads(post.get('content') or '{}')
+    except (TypeError, ValueError):
+        c = {}
+    post['content'] = {**post_default_content(), **(c if isinstance(c, dict) else {})}
+    return post
+
+def post_update(pid: int, content: dict | None = None, **cols):
+    if content is not None:
+        cols['content'] = json.dumps(content, ensure_ascii=False)
+    if not cols:
+        return
+    with get_db() as conn:
+        conn.execute(f"UPDATE channel_posts SET {', '.join(f'{k} = ?' for k in cols)} WHERE id = ?", (*cols.values(), pid))
+        conn.commit()
+
+def post_create(owner_id: int, channel_id: str) -> int:
+    with get_db() as conn:
+        pid = conn.execute("INSERT INTO channel_posts (bot_id, owner_id, channel_id, content, status, created_at) "
+                           "VALUES (?, ?, ?, ?, 'draft', ?)",
+                           (cur_bot_id(), owner_id, str(channel_id), json.dumps(post_default_content()), time.time())).lastrowid
+        conn.execute("UPDATE channel_posts SET code = ? WHERE id = ?", (f"g{pid}", pid))
+        conn.commit()
+    return pid
+
+def post_code_of(text) -> int | None:
+    """Mesaj tam olarak bir gönderi kodu mu (#g12, boşluk/büyük harf önemsiz)? Gönderi numarası ya da None."""
+    if not isinstance(text, str) or len(text) > 40:
+        return None
+    m = _POST_CODE.fullmatch(_POST_INVISIBLE.sub('', text))
+    return int(m.group(1)) if m else None
+
+def post_mine(post: dict | None, uid: int) -> bool:
+    return bool(post) and post['owner_id'] == uid and post['bot_id'] == cur_bot_id()
+
+async def post_user_manages(cid: str, uid: int) -> bool:
+    """Bu botun kayıtlı kanalı mı ve kişi orada yönetici mi (bot sahibi her kanalda)?"""
+    if not re.fullmatch(r'-100\d{5,14}', str(cid or '')):
+        return False
+    with get_db() as conn:
+        row = conn.execute("SELECT 1 FROM channels WHERE chat_id = ? AND chat_type = 'channel' AND mybot(bot_id)",
+                           (str(cid),)).fetchone()
+    if not row:
+        return False
+    return is_bot_owner(uid) or has_permission(cid, uid, LVL_ADMIN) or await repair_rank(cid, uid)
+
+async def post_channels(uid: int) -> list:
+    """Kişinin gönderi hazırlayabileceği kanallar: [(chat_id, başlık)]."""
+    with get_db() as conn:
+        rows = conn.execute("SELECT chat_id, title FROM channels WHERE chat_type = 'channel' AND mybot(bot_id) "
+                            "ORDER BY title").fetchall()
+    sem = asyncio.Semaphore(8)
+
+    async def _check(cid):
+        async with sem:
+            return await post_user_manages(cid, uid)
+    oks = await asyncio.gather(*(_check(r['chat_id']) for r in rows))
+    return [(r['chat_id'], r['title'] or r['chat_id']) for r, okk in zip(rows, oks) if okk][:40]
+
+async def post_bot_can_edit(cid: str) -> bool | None:
+    """Bot kanalda başkalarının gönderilerini düzenleyebilir mi? (None: öğrenilemedi)"""
+    try:
+        me = await bot.get_chat_member(cid, bot_id_for(cid))
+    except Exception as e:
+        logger.debug(f"Kanal yetkisi okunamadı {cid}: {e}")
+        return None
+    if getattr(me, 'status', None) == 'creator':
+        return True
+    return getattr(me, 'status', None) == 'administrator' and bool(getattr(me, 'can_edit_messages', False))
+
+async def _post_chan_title(cid: str) -> str:
+    with get_db() as conn:
+        row = conn.execute("SELECT title FROM channels WHERE chat_id = ?", (str(cid),)).fetchone()
+    return (row['title'] if row and row['title'] else None) or await _chat_title(cid)
+
+def post_problem(c: dict) -> str | None:
+    """Gönderi yayınlanamayacak durumdaysa nedeni."""
+    n = len(_strip_html(c.get('text') or ''))
+    if not (c.get('text') or '').strip() and not c.get('media'):
+        return "Gönderi boş: önce ✏️ Metin ya da 🖼 Medya ekle."
+    if c.get('media') and n > 1024:
+        return f"Medyalı gönderide metin en fazla 1024 karakter olabilir (şu an {n})."
+    if n > 4096:
+        return f"Metin en fazla 4096 karakter olabilir (şu an {n})."
+    return None
+
+def post_link_preview(c: dict) -> LinkPreviewOptions:
+    mode = c.get('preview') if c.get('preview') in POST_PREVIEW_MODES else 'off'
+    url = c.get('preview_url') or None
+    if mode == 'off':
+        return LinkPreviewOptions(is_disabled=True)
+    if mode == 'small':
+        return LinkPreviewOptions(url=url, prefer_small_media=True)
+    if mode == 'above':
+        return LinkPreviewOptions(url=url, prefer_large_media=True, show_above_text=True)
+    return LinkPreviewOptions(url=url, prefer_large_media=True)
+
+def post_thumb_jpeg(raw: bytes) -> bytes | None:
+    """Fotoğrafı Telegram'ın belge küçük resmi kurallarına uydurur (JPEG, ≤320 px, <200 kB)."""
+    try:
+        from PIL import Image
+    except ImportError:  # Pillow yoksa: Telegram'ın 320 px'lik fotoğraf boyutu zaten JPEG'dir
+        return bytes(raw) if raw and len(raw) < POST_THUMB_BYTES else None
+    import io
+    try:
+        im = Image.open(io.BytesIO(raw)).convert('RGB')
+        im.thumbnail((POST_THUMB_MAX, POST_THUMB_MAX))
+        for q in (90, 80, 70, 60, 45, 30):
+            buf = io.BytesIO()
+            im.save(buf, 'JPEG', quality=q)
+            if buf.tell() < POST_THUMB_BYTES:
+                return buf.getvalue()
+    except Exception as e:
+        logger.debug(f"Logo dönüştürülemedi: {e}")
+    return None
+
+async def post_file_bytes(file_id: str) -> bytes | None:
+    """Telegram'daki dosyayı indirir (botlar en fazla 20 MB indirebilir)."""
+    try:
+        f = await bot.get_file(file_id)
+        return bytes(await f.download_as_bytearray())
+    except Exception as e:
+        logger.debug(f"Dosya indirilemedi {file_id}: {e}")
+        return None
+
+async def _post_media_payload(c: dict):
+    """(gönderilecek medya, logo baytları, dosya adı, logolu yükleme mi). Logolu belge bir kez yeniden yüklenir; sonra
+    oluşan file_id (logosu içinde) kullanılır — Telegram file_id ile gönderilen belgenin logosunu değiştirmez."""
+    media = c['media']
+    payload, thumb, name = media['id'], None, media.get('name') or None
+    if media['type'] == 'document' and c.get('thumb'):
+        if media.get('baked') and media.get('baked_thumb') == c['thumb']:
+            return media['baked'], None, name, False
+        thumb = post_thumb_jpeg(await post_file_bytes(c['thumb']) or b'')
+        if thumb:
+            raw = await post_file_bytes(media['id'])
+            if raw is not None:
+                return raw, thumb, name or 'dosya', True
+    return payload, thumb, name, False
+
+async def _post_do(chat_id, c: dict, text: str, markup, edit_msg_id):
+    media = c.get('media')
+    if not media:
+        if edit_msg_id:
+            return await bot.edit_message_text(text, chat_id=chat_id, message_id=edit_msg_id, parse_mode=ParseMode.HTML,
+                                               link_preview_options=post_link_preview(c), reply_markup=markup), False
+        return await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, link_preview_options=post_link_preview(c),
+                                      reply_markup=markup, disable_notification=bool(c.get('silent')) or None), False
+    typ = media['type']
+    payload, thumb, name, uploaded = await _post_media_payload(c)
+    kw = {'caption': text or None, 'parse_mode': ParseMode.HTML if text else None}
+    if typ in POST_SPOILER_TYPES:
+        kw['has_spoiler'] = bool(c.get('spoiler')) or None
+        kw['show_caption_above_media'] = bool(c.get('caption_above')) or None
+    if typ == 'document':
+        kw['thumbnail'] = thumb
+        if uploaded:
+            kw['filename'] = name
+    if edit_msg_id:
+        if kw['parse_mode'] is None:
+            kw['parse_mode'] = ParseMode.HTML
+        res = await bot.edit_message_media(media=POST_INPUT_MEDIA[typ](payload, **kw), chat_id=chat_id,
+                                           message_id=edit_msg_id, reply_markup=markup)
+    else:
+        res = await getattr(bot, f"send_{typ}")(chat_id, payload, reply_markup=markup,
+                                                disable_notification=bool(c.get('silent')) or None, **kw)
+    return res, uploaded
+
+async def post_publish(chat_id, post: dict, *, edit_msg_id: int | None = None, share_url: str | None = None):
+    """Gönderiyi chat_id'ye gönderir (önizleme / otomatik gönderim) ya da edit_msg_id mesajını ona çevirir.
+    Yöneticinin içeriği çevrilmez; premium emoji reddedilirse etiketsiz tekrar denenir. Telegram hatası yükseltilir."""
+    c = post['content']
+    text = c.get('text') or ''
+    markup = rich_markup(post['channel_id'], c.get('buttons') or [], share_url=share_url)
+    tok = _TR_SKIP.set(True)
+    try:
+        with lang_override(DEFAULT_LANG):
+            try:
+                res, uploaded = await _post_do(chat_id, c, text, markup, edit_msg_id)
+            except BadRequest as e:
+                if '<tg-emoji' not in text or not any(w in str(e).lower() for w in ('emoji', 'entit', 'parse')):
+                    raise
+                logger.debug(f"Gönderi premium emojisiz deneniyor (#{post['id']}): {e}")
+                res, uploaded = await _post_do(chat_id, c, _strip_custom_emoji_tags(text), markup, edit_msg_id)
+    finally:
+        _TR_SKIP.reset(tok)
+    doc = getattr(res, 'document', None)
+    if uploaded and getattr(doc, 'file_id', None):  # logolu belge: bundan sonra bu file_id kullanılır
+        c['media'] = {**c['media'], 'baked': doc.file_id, 'baked_thumb': c.get('thumb')}
+        post_update(post['id'], c)
+    return res
+
+def post_message_link(chat, message_id: int) -> str:
+    uname = getattr(chat, 'username', None)
+    if uname:
+        return f"https://t.me/{uname}/{message_id}"
+    return f"https://t.me/c/{str(getattr(chat, 'id', chat)).removeprefix('-100')}/{message_id}"
+
+async def _post_notify(post: dict, text: str):
+    try:
+        await bot.send_message(post['owner_id'], text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    except Exception as e:
+        logger.debug(f"Gönderi sahibine bildirilemedi {post['owner_id']}: {e}")
+
+def _post_edit_error(e: Exception, trigger_has_media: bool, post_has_media: bool) -> str:
+    low = str(e).lower()
+    if trigger_has_media and not post_has_media:
+        return ("Kod bir medyanın açıklamasına yazılmış; metin gönderisi medyaya uygulanamaz. "
+                "Kodu kanala düz metin olarak yaz.")
+    if any(w in low for w in ("not enough rights", "can't be edited", "rights", "chat_admin_required", "not an administrator")):
+        return ("Botun bu kanalda <b>Mesajları düzenle</b> yetkisi yok. Kanal ayarları → Yöneticiler → bot → "
+                "Mesajları düzenle'yi aç, sonra kodu tekrar yaz.")
+    if "not found" in low or "to edit not found" in low:
+        return "Kod mesajı bulunamadı (silinmiş olabilir). Kodu tekrar yaz."
+    if "caption is too long" in low or "too long" in low:
+        return "Metin Telegram sınırını aşıyor; gönderiyi kısalt."
+    return html.escape(friendly_error(e).removeprefix("❌ "))
+
+async def channel_post_code_handler(update: Update, context):
+    """Kanala yazılan '#g12' kodunu hazırlanan gönderiye çevirir (mesaj yöneticinin gönderisi olarak kalır, düzenlenir).
+    Koruma handler'larından önce çalışır; kod işlenirse başka handler (link koruması vb.) mesaja dokunmaz."""
+    msg = update.channel_post or update.edited_channel_post
+    if msg is None:
+        return
+    pid = post_code_of(msg.text if msg.text is not None else msg.caption)
+    if pid is None:
+        return
+    cid = str(msg.chat_id)
+    post = post_get(pid)
+    if not post or post['channel_id'] != cid or post['bot_id'] != cur_bot_id() or post['status'] not in ('ready', 'used'):
+        return
+    if post['status'] == 'used' and not post['multi_use']:
+        return
+    claimed = False
+    if not post['multi_use']:  # aynı kod iki kez hızlıca yazılırsa sadece biri dönüşür
+        with get_db() as conn:
+            claimed = conn.execute("UPDATE channel_posts SET status = 'used' WHERE id = ? AND status = 'ready'",
+                                   (pid,)).rowcount == 1
+            conn.commit()
+        if not claimed:
+            return
+    c = post['content']
+    trig_media = any(getattr(msg, k, None) for k in ('photo', 'video', 'animation', 'audio', 'document', 'voice'))
+    try:
+        if trig_media and not c.get('media'):
+            raise BadRequest("there is no text in the message to edit")
+        await post_publish(cid, post, edit_msg_id=msg.message_id, share_url=post_message_link(msg.chat, msg.message_id))
+    except TelegramError as e:
+        logger.info(f"Gönderi #{pid} kanala uygulanamadı ({cid}): {e}")
+        if claimed:
+            post_update(pid, status='ready')
+        await _post_notify(post, f"❌ <code>#g{pid}</code> kanala uygulanamadı.\n"
+                                 f"{_post_edit_error(e, trig_media, bool(c.get('media')))}\n\nGönderi hâlâ hazır.")
+        raise ApplicationHandlerStop
+    post_update(pid, used_at=time.time(), used_msg_id=msg.message_id,
+                **({} if post['multi_use'] else {'status': 'used'}))
+    link = post_message_link(msg.chat, msg.message_id)
+    await _post_notify(post, f"✅ <code>#g{pid}</code> yayınlandı: <a href=\"{html.escape(link)}\">gönderiye git</a>"
+                             + ("\n♻️ Çok kullanımlık: kod tekrar kullanılabilir." if post['multi_use'] else ''))
+    raise ApplicationHandlerStop
+
+# ── Özel sohbette düzenleyici ──
+async def post_editor_view(post: dict, note: str = '') -> tuple:
+    pid, c = post['id'], post['content']
+    title = await _post_chan_title(post['channel_id'])
+    media = c.get('media')
+    plain = _strip_html(c.get('text') or '').strip()
+    lines = [note] if note else []
+    lines += [f"📝 <b>Gönderi</b> <code>#g{pid}</code> · 📢 <b>{html.escape(title)}</b>",
+              f"Durum: {POST_STATUS_LABELS.get(post['status'], post['status'])}"
+              + (" · ♻️ çok kullanımlık" if post['multi_use'] else ''), '']
+    lines.append("✏️ Metin: " + (f"<i>{html.escape(plain[:300])}{'…' if len(plain) > 300 else ''}</i>" if plain else "yok"))
+    lines.append("🖼 Medya: " + (RICH_MEDIA_LABELS.get(media['type'], media['type']) if media else "yok"))
+    if media and media['type'] == 'document':
+        lines.append("📎 Dosya logosu: " + ("var" if c.get('thumb') else "yok"))
+    nb = sum(len(r) for r in c.get('buttons') or [])
+    lines.append(f"🔘 Butonlar: {nb}")
+    opts = []
+    if media and media['type'] in POST_SPOILER_TYPES and c.get('spoiler'):
+        opts.append("spoiler")
+    if media and c.get('caption_above'):
+        opts.append("açıklama üstte")
+    if not media:
+        opts.append(f"link önizleme: {POST_PREVIEW_LABELS.get(c.get('preview'), 'kapalı')}")
+    lines.append("⚙️ " + (" · ".join(opts) or "varsayılan seçenekler"))
+    problem = post_problem(c)
+    if problem and (plain or media):
+        lines.append(f"\n⚠️ {html.escape(problem)}")
+    if await post_bot_can_edit(post['channel_id']) is False:
+        lines.append("\n⚠️ <b>Bot bu kanalda “Mesajları düzenle” yetkisine sahip değil.</b> Kod yazınca gönderi "
+                     "oluşamaz: kanal ayarlarından bota bu yetkiyi ver.")
+    if post['status'] == 'ready':
+        lines.append(f"\n👉 Kanala kendi hesabından sadece <code>#g{pid}</code> yaz; bot onu bu gönderiye çevirecek.")
+    rows = [[ibtn("✏️ Metin", f"gp|t|{pid}", BLUE), ibtn("🖼 Medya", f"gp|m|{pid}", BLUE)]]
+    if media and media['type'] == 'document':
+        rows.append([ibtn("📎 Dosya logosu", f"gp|th|{pid}", BLUE)])
+    rows.append([ibtn("🔘 Butonlar", f"gp|b|{pid}", BLUE), ibtn("⚙️ Seçenekler", f"gp|o|{pid}")])
+    rows.append([ibtn("👁 Önizle", f"gp|v|{pid}"), ibtn("✅ Hazır", f"gp|r|{pid}", GREEN)])
+    rows.append([ibtn("🗑 Sil", f"gp|d|{pid}", RED), ibtn("📋 Gönderilerim", "gp|l")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+def post_options_view(post: dict) -> tuple:
+    pid, c = post['id'], post['content']
+    media = c.get('media')
+    lines = [f"⚙️ <b>Seçenekler</b> · <code>#g{pid}</code>", '']
+    rows = []
+    if media and media['type'] in POST_SPOILER_TYPES:
+        rows.append([toggle_btn("Spoiler (bulanık medya)", c.get('spoiler'), f"gp|op|{pid}|sp")])
+    if media and media['type'] in POST_SPOILER_TYPES:
+        rows.append([toggle_btn("Açıklama medyanın üstünde", c.get('caption_above'), f"gp|op|{pid}|ca")])
+    if not media:
+        mode = POST_PREVIEW_LABELS.get(c.get('preview'), 'kapalı')
+        rows.append([ibtn(f"🔗 Link önizleme: {mode}", f"gp|op|{pid}|pv", BLUE)])
+        rows.append([ibtn("🔗 Önizleme linki" + (" ✓" if c.get('preview_url') else ''), f"gp|pu|{pid}")])
+        lines.append("🔗 Link önizleme: kapalı → küçük → büyük → metnin üstünde. Önizleme linki verilmezse "
+                     "metindeki ilk link kullanılır.")
+        if c.get('preview_url'):
+            lines.append(f"Önizleme linki: {html.escape(c['preview_url'])}")
+    rows.append([toggle_btn("Çok kullanımlık kod", post['multi_use'], f"gp|op|{pid}|mu")])
+    lines.append("♻️ Çok kullanımlık: kod her yazıldığında gönderiye dönüşür (kapalıysa bir kez).")
+    rows.append([ibtn("↩️ Geri", f"gp|e|{pid}")])
+    return "\n".join(lines), InlineKeyboardMarkup(rows)
+
+async def post_picker_view(uid: int) -> tuple:
+    chans = await post_channels(uid)
+    if not chans:
+        return ("📢 Gönderi hazırlayabileceğin bir kanal bulunamadı.\n\nBotu kanalına yönetici olarak ekle "
+                "(<b>Mesajları düzenle</b> yetkisiyle), sonra tekrar dene."), add_to_chat_markup(bot.username)
+    rows = [[ibtn(f"📢 {title}", f"gp|ch|{cid}", BLUE)] for cid, title in chans]
+    rows.append([ibtn("📋 Gönderilerim", "gp|l")])
+    return "📝 <b>Gönderi stüdyosu</b>\nGönderiyi hangi kanal için hazırlıyorsun?", InlineKeyboardMarkup(rows)
+
+async def post_list_view(uid: int) -> tuple:
+    with get_db() as conn:
+        rows = conn.execute("SELECT id, channel_id, status FROM channel_posts WHERE bot_id = ? AND owner_id = ? "
+                            "ORDER BY id DESC LIMIT 30", (cur_bot_id(), uid)).fetchall()
+    kb = []
+    for r in rows:
+        title = await _post_chan_title(r['channel_id'])
+        kb.append([ibtn(f"{POST_STATUS_LABELS.get(r['status'], '')} #g{r['id']} · {title}"[:60], f"gp|e|{r['id']}")])
+    kb.append([ibtn("➕ Yeni gönderi", "gp|n", GREEN)])
+    text = ("📋 <b>Gönderilerin</b>\nDüzenlemek için birine dokun." if rows
+            else "📋 Henüz gönderin yok. ➕ Yeni gönderi ile başla.")
+    return text, InlineKeyboardMarkup(kb)
+
+async def _post_edit_query(query, text: str, markup):
+    try:
+        await query.edit_message_text(text, reply_markup=markup, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    except BadRequest as e:
+        if 'not modified' not in str(e).lower():
+            raise
+
+async def cmd_gonderi(update: Update, context):
+    """/gonderi [#g12] — kanal gönderisi hazırla (özelden)."""
+    msg, user = update.effective_message, update.effective_user
+    if update.effective_chat.type != 'private':
+        await msg.reply_text("📝 Gönderi stüdyosu özel sohbette çalışır: bana özelden /gonderi yaz.")
+        return
+    if context.user_data is not None:
+        context.user_data.pop('post_input', None)
+    arg = (context.args[0] if context.args else '').strip()
+    m = re.fullmatch(r'#?g?(\d{1,9})', arg, re.I)
+    if m:
+        post = post_get(int(m.group(1)))
+        if not post_mine(post, user.id):
+            await msg.reply_text("Bu gönderi bulunamadı.")
+            return
+        text, mk = await post_editor_view(post)
+    else:
+        text, mk = await post_picker_view(user.id)
+    await msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=mk, disable_web_page_preview=True)
+
+async def cmd_gonderiler(update: Update, context):
+    """/gonderiler — hazırladığın kanal gönderileri."""
+    msg = update.effective_message
+    if update.effective_chat.type != 'private':
+        await msg.reply_text("📝 Gönderilerini görmek için bana özelden /gonderiler yaz.")
+        return
+    text, mk = await post_list_view(update.effective_user.id)
+    await msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=mk)
+
+async def _post_ask(query, context, post: dict, kind: str):
+    """ForceReply ile giriş ister; cevap post_input_handler'a düşer."""
+    prompt_text, placeholder = POST_PROMPTS[kind]
+    extra = ''
+    if kind == 'b' and post['content'].get('buttons'):
+        cur = "\n".join(" && ".join(_btn_source(b) for b in row) for row in post['content']['buttons'])
+        extra = f"\n\nŞu anki butonlar:\n<code>{html.escape(cur)}</code>"
+    prompt = await query.message.reply_text(
+        f"<code>#g{post['id']}</code>: {html.escape(prompt_text)}{extra}\n\n<i>Vazgeçmek için: iptal</i>",
+        parse_mode=ParseMode.HTML, reply_markup=ForceReply(selective=True, input_field_placeholder=placeholder[:64]))
+    for k in ('await_input', 'await_premium', 'await_clone'):
+        context.user_data.pop(k, None)  # aynı anda tek giriş beklenir
+    context.user_data['post_input'] = {
+        'pid': post['id'], 'kind': kind, 'chat': query.message.chat_id, 'prompt_id': prompt.message_id,
+        'editor_id': query.message.message_id, 'expires': time.time() + POST_INPUT_TTL}
+
+def _post_msg_media(msg) -> dict | None:
+    for ft in POST_MEDIA_TYPES:
+        obj = getattr(msg, ft, None)
+        if obj:
+            if ft == 'photo':
+                return {'type': ft, 'id': max(obj, key=lambda p: getattr(p, 'width', 0) or 0).file_id}
+            return {'type': ft, 'id': obj.file_id, 'name': getattr(obj, 'file_name', None)}
+    return None
+
+def post_apply_input(kind: str, c: dict, msg) -> str:
+    """Girişi gönderi içeriğine uygular (c yerinde değişir). Dönüş: kişiye HTML bildirim (❌ ile başlıyorsa kaydedilmez)."""
+    raw = (msg.text or '').strip()
+    clear = raw.lower() in ('sil', 'kaldır', 'kaldir', 'temizle')
+    if kind == 't':
+        text = msg_html(msg).strip()
+        if not text:
+            return "❌ Metin boş. Gönderinin metnini yaz."
+        n = len(_strip_html(text))
+        if n > 4096:
+            return f"❌ Metin çok uzun ({n} karakter; en fazla 4096)."
+        c['text'] = text
+        return "✅ Metin kaydedildi" + (" (medyalı gönderide en fazla 1024 karakter gösterilebilir!)"
+                                       if c.get('media') and n > 1024 else '') + "."
+    if kind == 'm':
+        if clear:
+            c['media'], c['thumb'] = None, None
+            return "✅ Medya kaldırıldı."
+        if getattr(msg, 'voice', None) or getattr(msg, 'video_note', None):
+            return "❌ Sesli mesaj ve yuvarlak video düzenlemeyle eklenemiyor (Telegram sınırı). Müzik ya da dosya olarak gönder."
+        if getattr(msg, 'sticker', None):
+            return "❌ Sticker gönderiye eklenemiyor. Fotoğraf, video, GIF, müzik ya da dosya gönder."
+        media = _post_msg_media(msg)
+        if not media:
+            return "❌ Medya bulunamadı. Fotoğraf, video, GIF, müzik ya da dosya gönder (kaldırmak için: sil)."
+        c['media'] = media
+        if media['type'] != 'document':
+            c['thumb'] = None
+        note = f"✅ {RICH_MEDIA_LABELS.get(media['type'], media['type'])} eklendi"
+        if getattr(msg, 'caption', None):
+            c['text'] = msg_html(msg).strip()
+            note += ", açıklaması gönderi metni oldu"
+        return note + "."
+    if kind == 'th':
+        if clear:
+            c['thumb'] = None
+            return "✅ Dosya logosu kaldırıldı."
+        if not c.get('media') or c['media']['type'] != 'document':
+            return "❌ Dosya logosu sadece dosya (belge) medyasında olur."
+        photos = getattr(msg, 'photo', None)
+        if not photos:
+            return "❌ Logo için bir fotoğraf gönder (kaldırmak için: sil)."
+        small = [p for p in photos if max(getattr(p, 'width', 0) or 0, getattr(p, 'height', 0) or 0) <= POST_THUMB_MAX]
+        c['thumb'] = max(small or photos, key=lambda p: getattr(p, 'width', 0) or 0).file_id
+        return "✅ Dosya logosu kaydedildi (320 px JPEG'e küçültülür)."
+    if kind == 'b':
+        if clear:
+            c['buttons'] = []
+            return "✅ Butonlar kaldırıldı."
+        left, rows = parse_buttons(html.escape(msg.text or '', quote=False))
+        if not rows or left.strip():
+            bad = html.escape(html.unescape(left).strip()[:300])
+            return ("❌ Buton biçimi anlaşılamadı" + (f":\n<code>{bad}</code>" if bad else '.') +
+                    "\nÖrnek: <code>Kanalımız - https://t.me/kanal &amp;&amp; Paylaş - share</code>")
+        c['buttons'] = rows
+        return f"✅ {sum(len(r) for r in rows)} buton kaydedildi."
+    if kind == 'pu':
+        if clear:
+            c['preview_url'] = None
+            return "✅ Önizleme linki kaldırıldı."
+        url = _norm_url(raw)
+        if not url or not url.lower().startswith(('http://', 'https://')):
+            return "❌ Geçerli bir link yaz (ör. https://ornek.com)."
+        c['preview_url'] = url
+        if c.get('preview', 'off') == 'off':
+            c['preview'] = 'large'
+        return "✅ Önizleme linki kaydedildi."
+    return "❌ Bilinmeyen giriş."
+
+async def post_input_handler(update: Update, context):
+    """Gönderi düzenleyicisinin istediği metni/medyayı yakalar (sadece bekleyen giriş varsa)."""
+    st = context.user_data.get('post_input') if context.user_data is not None else None
+    msg = update.message
+    if not st or not msg or msg.chat.type != 'private' or msg.chat_id != st['chat']:
+        return
+    if msg.text and menu_key(msg.text):
+        context.user_data.pop('post_input', None)
+        return  # menü butonu: giriş iptal, menü işleyicisi devam etsin
+    context.user_data.pop('post_input', None)
+    try:
+        await bot.delete_message(st['chat'], st['prompt_id'])
+    except Exception as e:
+        logger.debug(f"Gönderi istemi silinemedi: {e}")
+    if time.time() > st['expires']:
+        await msg.reply_text("⏰ Süre doldu, düzenleyiciden tekrar dene.")
+        raise ApplicationHandlerStop
+    post = post_get(st['pid'])
+    if not post_mine(post, update.effective_user.id):
+        await msg.reply_text("Bu gönderi artık yok.")
+        raise ApplicationHandlerStop
+    if (msg.text or '').strip().lower() in ('iptal', 'vazgeç', 'vazgec'):
+        note = "İptal edildi."
+    else:
+        c = post['content']
+        note = post_apply_input(st['kind'], c, msg)
+        if not note.startswith("❌"):
+            post_update(post['id'], c)
+    text, mk = await post_editor_view(post_get(post['id']), note)
+    try:
+        await bot.delete_message(st['chat'], st['editor_id'])
+    except Exception as e:
+        logger.debug(f"Eski düzenleyici silinemedi: {e}")
+    await bot.send_message(msg.chat_id, text, parse_mode=ParseMode.HTML, reply_markup=mk, disable_web_page_preview=True)
+    raise ApplicationHandlerStop
+
+async def _post_cb(query, context) -> tuple:
+    """post_callback'in işi; yanıtı (metin, uyarı mı) döndürür, kendisi yanıt vermez."""
+    parts = (query.data or '').split('|')
+    op = parts[1] if len(parts) > 1 else ''
+    uid = query.from_user.id
+    if query.message is None or getattr(query.message.chat, 'type', 'private') != 'private':
+        return "Gönderi stüdyosu özel sohbette çalışır.", True
+    if op == 'n':
+        await _post_edit_query(query, *await post_picker_view(uid))
+        return '', False
+    if op == 'l':
+        await _post_edit_query(query, *await post_list_view(uid))
+        return '', False
+    if op == 'ch':
+        cid = parts[2] if len(parts) > 2 else ''
+        if not await post_user_manages(cid, uid):
+            return "Bu kanal bulunamadı ya da orada yönetici değilsin.", True
+        post = post_get(post_create(uid, cid))
+        await _post_edit_query(query, *await post_editor_view(post, "📝 Yeni taslak oluşturuldu."))
+        return "📝 Taslak oluşturuldu", False
+    pid = int(parts[2]) if len(parts) > 2 and re.fullmatch(r'\d{1,9}', parts[2]) else 0
+    post = post_get(pid)
+    if not post_mine(post, uid):
+        return "Bu gönderi bulunamadı.", True
+    c = post['content']
+    if op == 'e':
+        await _post_edit_query(query, *await post_editor_view(post))
+        return '', False
+    if op in POST_PROMPTS:
+        if op == 'th' and not (c.get('media') and c['media']['type'] == 'document'):
+            return "Dosya logosu sadece dosya (belge) medyasında olur.", True
+        await _post_ask(query, context, post, op)
+        return "Cevabını açılan mesaja yaz 👇", False
+    if op == 'o':
+        await _post_edit_query(query, *post_options_view(post))
+        return '', False
+    if op == 'op':
+        key = parts[3] if len(parts) > 3 else ''
+        if key == 'mu':
+            post['multi_use'] = 0 if post['multi_use'] else 1
+            post_update(pid, multi_use=post['multi_use'])
+        elif key in ('sp', 'ca'):
+            name = 'spoiler' if key == 'sp' else 'caption_above'
+            c[name] = not c.get(name)
+            post_update(pid, c)
+        elif key == 'pv':
+            cur = c.get('preview') if c.get('preview') in POST_PREVIEW_MODES else 'off'
+            c['preview'] = POST_PREVIEW_MODES[(POST_PREVIEW_MODES.index(cur) + 1) % len(POST_PREVIEW_MODES)]
+            post_update(pid, c)
+        else:
+            return '', False
+        await _post_edit_query(query, *post_options_view(post))
+        return "Kaydedildi", False
+    if op == 'v':
+        problem = post_problem(c)
+        if problem:
+            return problem, True
+        try:
+            chat = await bot.get_chat(post['channel_id'])
+            share = f"https://t.me/{chat.username}" if getattr(chat, 'username', None) else None
+        except Exception:
+            share = None
+        try:
+            await post_publish(uid, post, share_url=share)
+        except TelegramError as e:
+            return f"Önizleme gönderilemedi. {friendly_error(e).removeprefix('❌ ')}", True
+        try:  # düzenleyici önizlemenin altına taşınır
+            await query.message.delete()
+        except Exception as e:
+            logger.debug(f"Düzenleyici silinemedi: {e}")
+        text, mk = await post_editor_view(post_get(pid), "👆 Önizleme: kanalda böyle görünecek.")
+        await bot.send_message(uid, text, parse_mode=ParseMode.HTML, reply_markup=mk, disable_web_page_preview=True)
+        return "👁 Önizleme gönderildi", False
+    if op == 'r':
+        problem = post_problem(c)
+        if problem:
+            return problem, True
+        if not await post_user_manages(post['channel_id'], uid):
+            return "Bu kanalda artık yönetici değilsin.", True
+        post_update(pid, status='ready')
+        post['status'] = 'ready'
+        await _post_edit_query(query, *await post_editor_view(post, f"✅ <b>Gönderi hazır:</b> <code>#g{pid}</code>"))
+        return f"✅ Hazır: #g{pid}", False
+    if op == 'd':
+        await _post_edit_query(query, f"🗑 <code>#g{pid}</code> silinsin mi?", InlineKeyboardMarkup([[
+            ibtn("🗑 Evet, sil", f"gp|dd|{pid}", RED), ibtn("↩️ Vazgeç", f"gp|e|{pid}")]]))
+        return '', False
+    if op == 'dd':
+        with get_db() as conn:
+            conn.execute("DELETE FROM channel_posts WHERE id = ?", (pid,))
+            conn.commit()
+        await _post_edit_query(query, f"🗑 <code>#g{pid}</code> silindi.", InlineKeyboardMarkup([[
+            ibtn("📋 Gönderilerim", "gp|l"), ibtn("➕ Yeni gönderi", "gp|n", GREEN)]]))
+        return "Silindi", False
+    return '', False
+
+async def post_callback(update: Update, context):
+    """gp|… — gönderi stüdyosu butonları."""
+    query = update.callback_query
+    note, alert = await _post_cb(query, context)
+    await query.answer(note[:190] if note else None, show_alert=alert)
 
 # ── Hoş geldin / veda gönderimi ──
 WELCOME_BATCH_DELAY = 4      # sn: bu süre içinde katılanlar tek mesajda karşılanır
@@ -14716,7 +15430,8 @@ def web_schema() -> list:
     ]
 
 def _btn_source(b: dict) -> str:
-    target = {'url': b['v'], 'rules': 'rules', 'note': f"#{b['v']}", 'popup': f"popup:{b['v']}"}.get(b['k'], b['v'])
+    target = {'url': b['v'], 'rules': 'rules', 'note': f"#{b['v']}", 'popup': f"popup:{b['v']}",
+              'share': f"share:{b['v']}" if b['v'] else 'share'}.get(b['k'], b['v'])
     color = {str(GREEN): ' #yeşil', str(RED): ' #kırmızı', str(BLUE): ' #mavi'}.get(str(b.get('c')), '')
     return f"{b['t']} - {target}{color}"
 
@@ -17723,6 +18438,17 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(CallbackQueryHandler(kanal_cfg_callback, pattern=r'^kcfg'))
     app.add_handler(CallbackQueryHandler(lockdown_restore_callback, pattern=r'^lockdown_restore'))
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL & ~filters.COMMAND, handle_channel_post_protection), group=1)
+    # Gönderi stüdyosu: kanala yazılan #g12 kodu, korumalardan (link/medya/spam) önce gönderiye çevrilir
+    app.add_handler(MessageHandler(filters.ChatType.CHANNEL & (filters.Regex(r'(?i)^\s*#g\d{1,9}\s*$')
+                                                               | filters.CaptionRegex(r'(?i)^\s*#g\d{1,9}\s*$')),
+                                   channel_post_code_handler), group=-30)
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.UpdateType.MESSAGE & ~filters.COMMAND
+                                   & (filters.TEXT | filters.PHOTO | filters.VIDEO | filters.ANIMATION | filters.Document.ALL
+                                      | filters.AUDIO | filters.VOICE | filters.Sticker.ALL | filters.VIDEO_NOTE),
+                                   post_input_handler), group=-49)
+    app.add_handler(CommandHandler('gonderi', cmd_gonderi))
+    app.add_handler(CommandHandler('gonderiler', cmd_gonderiler))
+    app.add_handler(CallbackQueryHandler(post_callback, pattern=r'^gp\|'))
     app.add_handler(MessageHandler(filters.ChatType.CHANNEL, kanal_admin_spam_check), group=2)
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, handle_bot_added), group=0)
     app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member_handler), group=1)
