@@ -915,6 +915,7 @@ CMD_ALIASES = {
     'oylama': 'votemute', 'kanalzorunlu': 'forcesub', 'spamkoruma': 'antispam', 'veda': 'goodbye',
     'setveda': 'setgoodbye', 'yenile': 'reload', 'rapor': 'report', 'dil': 'setlang',
     'komutkapat': 'disablecmd', 'komutac': 'enablecmd',
+    'gonderiplan': 'scheduled',
 }
 ALIAS_TO_TR = {v: k for k, v in CMD_ALIASES.items()}
 
@@ -1800,6 +1801,19 @@ def init_db():
                 PRIMARY KEY (bot_id, name)
             );
             CREATE INDEX IF NOT EXISTS idx_announce ON announcements(bot_id, status);
+            CREATE TABLE IF NOT EXISTS channel_posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bot_id INTEGER,
+                owner_id INTEGER,
+                channel_id TEXT,
+                code TEXT,
+                content TEXT,
+                status TEXT DEFAULT 'draft',
+                multi_use INTEGER DEFAULT 0,
+                created_at REAL,
+                used_at REAL,
+                used_msg_id INTEGER
+            );
 
             CREATE INDEX IF NOT EXISTS idx_forward_ts ON forward_history(timestamp);
             CREATE INDEX IF NOT EXISTS idx_media_ts ON media_flood_history(timestamp);
@@ -1917,6 +1931,11 @@ def _migrate_installer():
         for col in ('filters', 'poll_id', 'poll_result'):
             if col not in acols:
                 conn.execute(f"ALTER TABLE announcements ADD COLUMN {col} TEXT")
+        pcols = {r[1] for r in conn.execute("PRAGMA table_info(channel_posts)")}
+        for col, typedef in (('run_at', 'REAL'), ('sched_mode', 'TEXT'), ('pin', 'INTEGER DEFAULT 0'),
+                             ('delete_after', 'INTEGER'), ('sched_done', 'INTEGER DEFAULT 0'), ('del_at', 'REAL')):
+            if col not in pcols:  # gönderi planlama: zaman, kip (remind/auto), sabitle, süreli sil
+                conn.execute(f"ALTER TABLE channel_posts ADD COLUMN {col} {typedef}")
         rcols = {r[1] for r in conn.execute("PRAGMA table_info(clone_requests)")}
         for col, typedef in (('bot_id', 'INTEGER'), ('token', 'TEXT'), ('bot_username', 'TEXT'), ('bot_name', 'TEXT'),
                              ('admin_msg_id', 'INTEGER')):
@@ -13255,6 +13274,475 @@ async def scheduled_msgs_job(context):
             conn.commit()
 
 
+# ═══════════════════════════ GÖNDERİ PLANLAMA (zamanlama, sabitleme, süreli silme) ═══════════════════════════
+# /gonderi ile hazırlanan kanal gönderisi (channel_posts) belli bir zamanda yayınlanır:
+#   'remind' → zamanı gelince sahibine özelden hatırlatılır; sahibi kanala kendi hesabından #g<id> yazar (gönderi onun adıyla kalır)
+#   'auto'   → bot gönderiyi kanala kendisi atar (kanalda imza açıksa bot adı görünür)
+# Yayından sonra (bot attıysa da, #g<id> düzenlemesiyle yayınlandıysa da) post_after_publish: pin → sessizce sabitlenir;
+# delete_after (sn) → del_at zamanında kanaldan silinir. Butonlar: gs|op|id (post_sched_callback).
+PS_MODES = {'remind': "🔔 Hatırlat", 'auto': "🤖 Bot atsın"}
+PS_DELETE_STEPS = (0, 6 * 3600, 12 * 3600, 86400, 3 * 86400, 7 * 86400)
+PS_MAX_AHEAD = 90 * 86400
+PS_MEDIA = ('photo', 'video', 'animation', 'audio', 'document', 'voice')
+PS_BACK_DATA = None  # gönderi düzenleyicisine dönüş butonu verisi, ör. "gp|o|{id}" (düzenleyici bağlanınca ayarlanır)
+_PS_DAYWORDS = {'bugün': 0, 'bugun': 0, 'today': 0, 'yarın': 1, 'yarin': 1, 'tomorrow': 1}
+PS_TIME_HELP = ("<code>20:30</code> · <code>yarın 09:00</code> · <code>14.10 20:30</code> · <code>+2s</code> · "
+                "<code>+30dk</code>")
+
+def _ps_row(pid) -> dict | None:
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return None
+    if not 0 < pid < 2 ** 62:
+        return None
+    with get_db() as conn:
+        r = conn.execute("SELECT * FROM channel_posts WHERE id = ?", (pid,)).fetchone()
+    return dict(r) if r else None
+
+def _ps_code(r: dict) -> str:
+    return '#' + str(r.get('code') or f"g{r.get('id')}").lstrip('#')
+
+def _ps_chat(cid):
+    s = str(cid)
+    return int(s) if s.lstrip('-').isdigit() else s
+
+def _ps_fmt(ts) -> str:
+    return datetime.fromtimestamp(ts, TZ_TR).strftime('%d.%m %H:%M')
+
+def _ps_del_label(sec) -> str:
+    return human_duration(int(sec)) if sec else "kapalı"
+
+def _ps_chan_label(cid) -> str:
+    with get_db() as conn:
+        r = conn.execute("SELECT title FROM channels WHERE chat_id = ?", (str(cid),)).fetchone()
+    return (r['title'] if r and r['title'] else str(cid))
+
+def _ps_bot(bot_id):
+    """Gönderiyi hazırlayan bot (ana bot ya da çalışan klon); çalışmıyorsa None."""
+    b = RUNNING_BOTS.get(bot_id)
+    if b is None and (not bot_id or bot_id == BOT_ID):
+        b = MAIN_BOT
+    return b
+
+def _ps_can_edit(r: dict, uid: int) -> bool:
+    """Planı sadece gönderinin sahibi ya da (aynı botta) bot sahibi değiştirir."""
+    if uid == FOUNDER_ID:
+        return True
+    if (r.get('bot_id') or BOT_ID) != cur_bot_id():
+        return False
+    return uid == r.get('owner_id') or is_bot_owner(uid)
+
+def _ps_parse_time(text: str, now: float | None = None) -> tuple:
+    """Türkiye saatiyle zaman: 20:30 · yarın 09:00 · 14.10 20:30 · 14.10.2026 20:30 · +2s (saat) · +30dk · +1g.
+    Dönüş: (zaman damgası, None) ya da (None, hata metni)."""
+    t = re.sub(r'\s+', ' ', (text or '').strip().lower())
+    base = datetime.fromtimestamp(now if now is not None else time.time(), TZ_TR)
+    bad = "Zamanı anlayamadım. Örnek: " + PS_TIME_HELP
+    rel = re.fullmatch(r'\+ ?(\d{1,4}) ?([a-zçğıöşü]+)', t)
+    date = re.fullmatch(r'(\d{1,2})[./](\d{1,2})(?:[./](\d{4}|\d{2}))? (\d{1,2})[:.](\d{2})', t)
+    clock = re.fullmatch(r'(?:(\S+) )?(\d{1,2})[:.](\d{2})', t)
+    if rel:
+        sec = parse_interval(rel.group(1) + ('sa' if rel.group(2) == 's' else rel.group(2)))
+        if sec is None:
+            return None, bad
+        when = base + timedelta(seconds=sec)
+    elif date:
+        day, mon, yr, hh, mm = (int(x) if x else None for x in date.groups())
+        if hh > 23 or mm > 59:
+            return None, bad
+        year = (yr + 2000 if yr < 100 else yr) if yr else base.year
+        try:
+            when = datetime(year, mon, day, hh, mm, tzinfo=TZ_TR)
+        except ValueError:
+            return None, "Geçersiz tarih. Örnek: " + PS_TIME_HELP
+        if not yr and when < base - timedelta(days=180):  # aralıkta "05.01" yazıldı → gelecek yıl
+            when = when.replace(year=year + 1)
+    elif clock and (clock.group(1) is None or clock.group(1) in _PS_DAYWORDS):
+        hh, mm = int(clock.group(2)), int(clock.group(3))
+        if hh > 23 or mm > 59:
+            return None, bad
+        when = base.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if clock.group(1):
+            when += timedelta(days=_PS_DAYWORDS[clock.group(1)])
+        elif when <= base:
+            when += timedelta(days=1)
+    else:
+        return None, bad
+    if when <= base:
+        return None, "Bu zaman geçmişte kaldı."
+    if (when - base).total_seconds() > PS_MAX_AHEAD:
+        return None, "En fazla 90 gün sonrası zamanlanabilir."
+    return when.timestamp(), None
+
+def post_sched_text(post_row) -> str:
+    """Planın durumu (HTML)."""
+    r = dict(post_row or {})
+    if not r:
+        return "Gönderi bulunamadı."
+    code = _ps_code(r)
+    mode = r.get('sched_mode') if r.get('sched_mode') in PS_MODES else 'remind'
+    lines = [f"⏰ <b>Yayın planı</b> — <code>{code}</code>"]
+    if r.get('channel_id'):
+        lines.append(f"📢 Kanal: {html.escape(_ps_chan_label(r['channel_id']))}")
+    if r.get('run_at'):
+        done = " · ✅ işlendi" if r.get('sched_done') else ""
+        lines.append(f"🕒 Zaman: <b>{_ps_fmt(r['run_at'])}</b> (Türkiye saati){done}")
+    else:
+        lines.append("🕒 Zaman: yok — ⏰ Zamanla'ya bas")
+    lines.append(f"Kip: {PS_MODES[mode]}")
+    if mode == 'auto':
+        lines.append("<i>Zamanı gelince bot gönderiyi kanala kendisi atar; kanalda imza açıksa bot adı görünür.</i>")
+        if not r.get('channel_id'):
+            lines.append("⚠️ Bot atsın için gönderide kanal seçili olmalı; seçili değilse sadece hatırlatırım.")
+    else:
+        lines.append(f"<i>Zamanı gelince sana özelden hatırlatırım; kanala kendi hesabından <code>{code}</code> yazarsın, "
+                     "gönderi senin adınla kalır.</i>")
+    lines.append(f"📌 Sabitle: {'açık' if r.get('pin') else 'kapalı'}")
+    lines.append(f"🗑 Süreli sil: {_ps_del_label(r.get('delete_after'))}")
+    if r.get('pin') or r.get('delete_after'):
+        lines.append("<i>Sabitleme ve silme için bot kanalda yönetici olmalı (mesaj düzenleme / silme yetkisi).</i>")
+    if r.get('del_at'):
+        lines.append(f"🗑 Silinecek: {_ps_fmt(r['del_at'])}")
+    if r.get('status') == 'draft':
+        lines.append("📝 Gönderi henüz taslak: hazır olarak kaydedilince zamanlama çalışır.")
+    elif r.get('status') == 'used':
+        lines.append("✅ Gönderi yayınlandı.")
+    return "\n".join(lines)
+
+def post_sched_markup(post_id) -> InlineKeyboardMarkup:
+    """Plan butonları: zamanla · kip · sabitle · süreli sil · kaldır · liste (gs|…)."""
+    r = _ps_row(post_id)
+    last = [ibtn("📋 Planlananlar", "gs|l|0", BLUE)]
+    if not r:
+        return InlineKeyboardMarkup([last])
+    pid = r['id']
+    mode = r.get('sched_mode') if r.get('sched_mode') in PS_MODES else 'remind'
+    rows = [[ibtn("⏰ Zamanı değiştir" if r.get('run_at') else "⏰ Zamanla", f"gs|w|{pid}", BLUE)],
+            [ibtn(("✅ " if mode == 'remind' else "") + PS_MODES['remind'], f"gs|m|{pid}|remind",
+                  GREEN if mode == 'remind' else None),
+             ibtn(("✅ " if mode == 'auto' else "") + PS_MODES['auto'], f"gs|m|{pid}|auto",
+                  GREEN if mode == 'auto' else None)],
+            [ibtn(f"📌 Sabitle: {'açık' if r.get('pin') else 'kapalı'}", f"gs|p|{pid}", GREEN if r.get('pin') else None)],
+            [ibtn(f"🗑 Süreli sil: {_ps_del_label(r.get('delete_after'))}", f"gs|d|{pid}",
+                  GREEN if r.get('delete_after') else None)]]
+    if r.get('run_at'):
+        rows.append([ibtn("❌ Zamanlamayı kaldır", f"gs|x|{pid}", RED)])
+    if PS_BACK_DATA:
+        back = PS_BACK_DATA.format(id=pid)
+        last.insert(0, ibtn("‹ Gönderiye dön", back))
+    rows.append(last)
+    return InlineKeyboardMarkup(rows)
+
+def _ps_plan_view(uid: int) -> tuple:
+    """/gonderiplan: yaklaşan planlı gönderiler (bot sahibi bu botun hepsini, diğerleri kendininkini görür)."""
+    bid = cur_bot_id()
+    q = ("SELECT * FROM channel_posts WHERE run_at IS NOT NULL AND COALESCE(sched_done, 0) = 0 "
+         "AND status != 'used' AND (bot_id = ? OR (? AND (bot_id IS NULL OR bot_id = 0)))")
+    args = [bid, int(bid == BOT_ID)]
+    if not is_bot_owner(uid):
+        q += " AND owner_id = ?"
+        args.append(uid)
+    with get_db() as conn:
+        rows = [dict(r) for r in conn.execute(q + " ORDER BY run_at LIMIT 30", args)]
+    if not rows:
+        return ("📅 <b>Planlı gönderiler</b>\n\nYaklaşan planlı gönderi yok. /gonderi ile hazırla, "
+                "sonra ⏰ Zamanla'ya bas."), None
+    lines, btns = ["📅 <b>Planlı gönderiler</b>", ""], []
+    for r in rows:
+        mode = r.get('sched_mode') if r.get('sched_mode') in PS_MODES else 'remind'
+        extra = (" · 📌" if r.get('pin') else "") + (f" · 🗑 {_ps_del_label(r['delete_after'])}" if r.get('delete_after') else "")
+        chan = html.escape(_ps_chan_label(r['channel_id'])) if r.get('channel_id') else "kanal seçilmedi"
+        draft = " · 📝 taslak" if r.get('status') == 'draft' else ""
+        lines.append(f"• <code>{_ps_code(r)}</code> → {chan}\n   🕒 {_ps_fmt(r['run_at'])} · {PS_MODES[mode]}{extra}{draft}")
+        btns.append(ibtn(f"⏰ {_ps_code(r)}", f"gs|o|{r['id']}", BLUE))
+    return "\n".join(lines), InlineKeyboardMarkup([btns[i:i + 2] for i in range(0, len(btns), 2)])
+
+async def _ps_edit(query, text: str, markup) -> None:
+    try:
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=markup,
+                                      disable_web_page_preview=True)
+    except BadRequest as e:
+        if 'not modified' in str(e).lower():
+            return
+        try:  # medyalı mesaj (düzenleyici önizlemesi) metinle düzenlenemez → yeni mesaj
+            await bot.send_message(query.from_user.id, text, parse_mode=ParseMode.HTML, reply_markup=markup)
+        except TelegramError as e2:
+            logger.debug(f"Plan paneli gösterilemedi: {e2}")
+
+async def post_sched_callback(update: Update, context):
+    """gs|op|id — o aç · w zaman sor · m kip · p sabitle · d süreli sil · x kaldır · l liste"""
+    query = update.callback_query
+    parts = (query.data or '').split('|')
+    op = parts[1] if len(parts) > 1 else ''
+    uid = query.from_user.id
+    if op == 'l':
+        text, mk = _ps_plan_view(uid)
+        await query.answer()
+        await _ps_edit(query, text, mk)
+        return
+    r = _ps_row(parts[2]) if len(parts) > 2 and re.fullmatch(r'\d{1,15}', parts[2]) else None
+    if not r or not _ps_can_edit(r, uid):
+        await query.answer("Gönderi bulunamadı ya da yetkin yok.", show_alert=True)
+        return
+    pid, note = r['id'], None
+    if op in ('w', 'm') and r.get('status') == 'used' and not r.get('multi_use'):
+        await query.answer("Bu gönderi zaten yayınlandı.", show_alert=True)
+        return
+    if op == 'w':
+        context.user_data['await_post_sched'] = {'post_id': pid, 'expires': time.time() + 600}
+        await query.answer()
+        try:
+            await bot.send_message(uid, f"⏰ <code>{_ps_code(r)}</code> ne zaman yayınlansın? (Türkiye saati)\n"
+                                        f"Örnek: {PS_TIME_HELP}\nVazgeçmek için: iptal", parse_mode=ParseMode.HTML,
+                                   reply_markup=ForceReply(selective=True, input_field_placeholder="yarın 09:00"))
+        except TelegramError as e:
+            logger.debug(f"Zaman istemi gönderilemedi: {e}")
+        return
+    with get_db() as conn:
+        if op == 'm':
+            mode = parts[3] if len(parts) > 3 and parts[3] in PS_MODES else 'remind'
+            conn.execute("UPDATE channel_posts SET sched_mode = ? WHERE id = ?", (mode, pid))
+            note = PS_MODES[mode]
+        elif op == 'p':
+            conn.execute("UPDATE channel_posts SET pin = ? WHERE id = ?", (0 if r.get('pin') else 1, pid))
+            note = "📌 Sabitlenmeyecek" if r.get('pin') else "📌 Sabitlenecek"
+        elif op == 'd':
+            cur = int(r.get('delete_after') or 0)
+            steps = PS_DELETE_STEPS
+            nxt = steps[(steps.index(cur) + 1) % len(steps)] if cur in steps else steps[1]
+            conn.execute("UPDATE channel_posts SET delete_after = ? WHERE id = ?", (nxt or None, pid))
+            note = f"🗑 Süreli sil: {_ps_del_label(nxt)}"
+        elif op == 'x':
+            conn.execute("UPDATE channel_posts SET run_at = NULL, sched_done = 0 WHERE id = ?", (pid,))
+            note = "❌ Zamanlama kaldırıldı"
+        conn.commit()
+    await query.answer(note)
+    await _ps_edit(query, post_sched_text(_ps_row(pid)), post_sched_markup(pid))
+
+async def post_sched_input_handler(update: Update, context):
+    """⏰ Zamanla'dan sonra yazılan zamanı alır (sadece özelden ve bekleyen giriş varsa)."""
+    pend = context.user_data.get('await_post_sched') if context.user_data is not None else None
+    msg = update.effective_message
+    if not pend or not msg or not msg.text or update.effective_chat.type != 'private':
+        return
+    if time.time() > pend['expires'] or menu_key(msg.text):
+        context.user_data.pop('await_post_sched', None)
+        return
+    text = msg.text.strip()
+    if text.lower() in ('iptal', 'vazgeç', 'vazgec'):
+        context.user_data.pop('await_post_sched', None)
+        await msg.reply_text("Vazgeçildi.")
+        raise ApplicationHandlerStop
+    r = _ps_row(pend['post_id'])
+    if not r or not _ps_can_edit(r, update.effective_user.id):
+        context.user_data.pop('await_post_sched', None)
+        raise ApplicationHandlerStop
+    ts, err = _ps_parse_time(text)
+    if err:
+        await msg.reply_text(f"❌ {err}\nTekrar yaz ya da iptal.", parse_mode=ParseMode.HTML)
+        raise ApplicationHandlerStop
+    with get_db() as conn:
+        conn.execute("UPDATE channel_posts SET run_at = ?, sched_done = 0, sched_mode = COALESCE(sched_mode, 'remind') "
+                     "WHERE id = ?", (ts, r['id']))
+        conn.commit()
+    context.user_data.pop('await_post_sched', None)
+    await msg.reply_text(f"✅ <code>{_ps_code(r)}</code> zamanlandı: <b>{_ps_fmt(ts)}</b>\n\n" + post_sched_text(_ps_row(r['id'])),
+                         parse_mode=ParseMode.HTML, reply_markup=post_sched_markup(r['id']))
+    raise ApplicationHandlerStop
+
+async def cmd_gonderiplan(update: Update, context):
+    """/gonderiplan — yaklaşan planlı kanal gönderileri (özelden)."""
+    msg, user = update.effective_message, update.effective_user
+    if not msg or not user or update.effective_chat.type != 'private':
+        return
+    text, mk = _ps_plan_view(user.id)
+    await msg.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=mk)
+
+def _ps_preview_opts(content: dict):
+    from telegram import LinkPreviewOptions
+    mode, url = content.get('preview'), content.get('preview_url') or None
+    if mode == 'off':
+        return LinkPreviewOptions(is_disabled=True)
+    if mode in ('small', 'large', 'above') or url:
+        return LinkPreviewOptions(url=url, prefer_small_media=True if mode == 'small' else None,
+                                  prefer_large_media=True if mode in ('large', 'above') else None,
+                                  show_above_text=True if mode == 'above' else None)
+    return None
+
+async def _ps_thumb(b, file_id: str) -> bytes | None:
+    """Dosya önizlemesi: fotoğraf ≤320 px, ≤200 kB JPEG'e çevrilir (Pillow yoksa önizlemesiz gönderilir)."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    import io
+    try:
+        data = bytes(await (await b.get_file(file_id)).download_as_bytearray())
+        img = Image.open(io.BytesIO(data)).convert('RGB')
+        img.thumbnail((320, 320))
+        for q in (90, 80, 70, 55, 40, 25):
+            out = io.BytesIO()
+            img.save(out, 'JPEG', quality=q)
+            if out.tell() <= 200 * 1024:
+                return out.getvalue()
+    except (TelegramError, OSError, ValueError) as e:
+        logger.debug(f"Gönderi önizlemesi hazırlanamadı: {e}")
+    return None
+
+async def post_send_as_bot(bot, chat_id, content: dict, silent: bool = False):
+    """Hazır gönderiyi botun kendisi olarak atar (metin ya da medya + açıklama, butonlar, önizleme). Dönüş: Message.
+    Sahibin yazdığı içerik çevrilmez."""
+    content = content if isinstance(content, dict) else {}
+    text = content.get('text') or ''
+    media = content.get('media') if isinstance(content.get('media'), dict) else None
+    fid = (media.get('file_id') or media.get('id')) if media else None
+    kind = media.get('type') if media else None
+    kw = {'parse_mode': ParseMode.HTML, 'disable_notification': bool(silent)}
+    markup = rich_markup(str(chat_id), content.get('buttons') or [])
+    if markup is not None:
+        kw['reply_markup'] = markup
+    tok = _TR_SKIP.set(True)
+    try:
+        with lang_override(DEFAULT_LANG):  # butonlar dahil hiçbir şey çevrilmez
+            if not fid or kind not in PS_MEDIA:
+                lp = _ps_preview_opts(content)
+                if lp is not None:
+                    kw['link_preview_options'] = lp
+                return await bot.send_message(chat_id, text or "👇", **kw)
+            if text:
+                kw['caption'] = text
+            if kind in ('photo', 'video', 'animation'):
+                if content.get('spoiler'):
+                    kw['has_spoiler'] = True
+                if content.get('caption_above') and text:
+                    kw['show_caption_above_media'] = True
+            if kind == 'document' and content.get('thumb'):
+                th = await _ps_thumb(bot, content['thumb'])
+                if th:
+                    kw['thumbnail'] = th
+            return await getattr(bot, f"send_{kind}")(chat_id, fid, **kw)
+    finally:
+        _TR_SKIP.reset(tok)
+
+async def post_after_publish(bot, post_row, chat_id, message_id) -> list:
+    """Kanalda yayınlanan gönderi için: sabitle (sessiz) ve süreli silmeyi kur. Dönüş: sahibine gösterilecek notlar."""
+    r = dict(post_row or {})
+    r = (_ps_row(r['id']) if r.get('id') else None) or r
+    notes = []
+    if r.get('pin'):
+        try:
+            await bot.pin_chat_message(_ps_chat(chat_id), message_id, disable_notification=True)
+            notes.append("📌 Sabitlendi.")
+        except TelegramError as e:
+            logger.debug(f"Gönderi sabitlenemedi {chat_id}: {e}")
+            notes.append("⚠️ Sabitlenemedi: botun kanalda yönetici ve mesaj düzenleme yetkisi olmalı.")
+    sec = int(r.get('delete_after') or 0)
+    if sec > 0:
+        if r.get('multi_use') or not r.get('id'):  # çok kullanımlık: her yayın ayrı silinir
+            schedule_delete(chat_id, [message_id], sec)
+        else:
+            with get_db() as conn:
+                conn.execute("UPDATE channel_posts SET del_at = ?, used_msg_id = ? WHERE id = ?",
+                             (time.time() + sec, message_id, r['id']))
+                conn.commit()
+        notes.append(f"🗑 {human_duration(sec)} sonra silinecek.")
+    return notes
+
+async def _ps_dm(b, uid, text: str) -> None:
+    try:
+        await b.send_message(uid, text, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
+    except TelegramError as e:
+        logger.debug(f"Gönderi sahibine yazılamadı {uid}: {e}")
+
+def _ps_link(sent, cid, mid) -> str | None:
+    uname = getattr(getattr(sent, 'chat', None), 'username', None)
+    if isinstance(uname, str) and uname:
+        return f"https://t.me/{uname}/{mid}"
+    s = str(cid)
+    return f"https://t.me/c/{s[4:]}/{mid}" if s.startswith('-100') else None
+
+async def _ps_fire(b, r: dict) -> None:
+    """Zamanı gelen tek gönderi: 'auto' → bot kanala atar; 'remind' (ya da kanal seçilmemişse) → sahibine hatırlatma."""
+    code, owner = _ps_code(r), r['owner_id']
+    chan = html.escape(_ps_chan_label(r['channel_id'])) if r.get('channel_id') else ''
+    auto = r.get('sched_mode') == 'auto'
+    if not auto or not r.get('channel_id'):
+        text = f"⏰ Yayın zamanı: kanala kendi hesabından <code>{code}</code> yaz."
+        if chan:
+            text += f"\n📢 Kanal: {chan}"
+        if auto:
+            text += "\n⚠️ Gönderide kanal seçili olmadığı için bot kendisi atamadı."
+        await _ps_dm(b, owner, text)
+        return
+    try:
+        content = json.loads(r.get('content') or '{}')
+    except (ValueError, TypeError):
+        content = None
+    head = f"⚠️ <code>{code}</code> zamanında yayınlanamadı ({chan}).\n"
+    tail = (f"\nGönderi hazır duruyor: kanala kendi hesabından <code>{code}</code> yazabilir ya da /gonderiplan ile "
+            "yeniden zamanlayabilirsin.")
+    if not isinstance(content, dict):
+        await _ps_dm(b, owner, head + "Gönderinin içeriği okunamadı." + tail)
+        return
+    try:
+        sent = await post_send_as_bot(b, _ps_chat(r['channel_id']), content, silent=bool(content.get('silent')))
+    except TelegramError as e:
+        logger.info(f"Planlı gönderi {code} atılamadı {r['channel_id']}: {e}")
+        await _ps_dm(b, owner, head + html.escape(friendly_error(e)) + "\nBotun kanalda yönetici olduğundan ve mesaj "
+                     "gönderme yetkisi olduğundan emin ol." + tail)
+        return
+    mid = sent.message_id
+    with get_db() as conn:
+        conn.execute("UPDATE channel_posts SET status = ?, used_at = ?, used_msg_id = ? WHERE id = ?",
+                     ('ready' if r.get('multi_use') else 'used', time.time(), mid, r['id']))
+        conn.commit()
+    notes = await post_after_publish(b, r, r['channel_id'], mid)
+    link = _ps_link(sent, r['channel_id'], mid)
+    text = f"✅ <b>{code}</b> zamanında yayınlandı" + (f" ({chan})." if chan else ".")
+    if link:
+        text += f"\n🔗 {link}"
+    await _ps_dm(b, owner, "\n".join([text] + notes))
+
+async def post_schedule_job(context):
+    """30 sn'de bir: zamanı gelen gönderileri yayınlar/hatırlatır; süresi dolan kanal gönderilerini siler (klonlar dahil)."""
+    now = time.time()
+    with get_db() as conn:
+        due = [dict(r) for r in conn.execute(
+            "SELECT * FROM channel_posts WHERE status = 'ready' AND run_at IS NOT NULL AND run_at <= ? "
+            "AND COALESCE(sched_done, 0) = 0 ORDER BY run_at LIMIT 100", (now,))]
+        dels = [dict(r) for r in conn.execute(
+            "SELECT * FROM channel_posts WHERE del_at IS NOT NULL AND del_at <= ? ORDER BY del_at LIMIT 100", (now,))]
+    for r in ([] if maintenance_on() else due):
+        b = _ps_bot(r['bot_id'])
+        if b is None and r['bot_id'] in CLONES:
+            continue  # klon şu an çalışmıyor: açılınca işlenir
+        with get_db() as conn:  # aynı gönderi iki kez işlenmesin
+            claimed = conn.execute("UPDATE channel_posts SET sched_done = 1 WHERE id = ? AND COALESCE(sched_done, 0) = 0",
+                                   (r['id'],)).rowcount
+            conn.commit()
+        if not claimed or b is None:
+            continue
+        tok = _ctx_bot.set(b)
+        try:
+            await _ps_fire(b, r)
+        except Exception as e:
+            logger.error(f"Planlı gönderi #{r['id']} işlenemedi: {e!r}")
+        finally:
+            _ctx_bot.reset(tok)
+    for r in dels:
+        b = _ps_bot(r['bot_id'])
+        if b is None and r['bot_id'] in CLONES:
+            continue
+        if b is not None and r.get('used_msg_id') and r.get('channel_id'):
+            try:
+                await b.delete_message(_ps_chat(r['channel_id']), r['used_msg_id'])
+            except TelegramError as e:
+                logger.debug(f"Süreli gönderi silinemedi {r['channel_id']}/{r['used_msg_id']}: {e}")
+        with get_db() as conn:
+            conn.execute("UPDATE channel_posts SET del_at = NULL WHERE id = ?", (r['id'],))
+            conn.commit()
+
 # ── Panel: karşılama / veda / zamanlanmış mesaj sayfaları ──
 def render_rich_page(cid: str, base: str, s: dict, title: str):
     if base == 'sched':
@@ -17871,6 +18359,10 @@ def register_handlers(app, main_bot: bool = True):
     app.add_handler(PollHandler(duyuru_poll_handler))
     app.add_handler(CommandHandler(['duyurukapat', 'duyuruac'], cmd_duyurukapat, filters=filters.ChatType.PRIVATE))
     app.add_handler(CallbackQueryHandler(duyuru_callback, pattern=r'^dy\|'))
+    app.add_handler(CommandHandler('gonderiplan', cmd_gonderiplan, filters=filters.ChatType.PRIVATE))
+    app.add_handler(CallbackQueryHandler(post_sched_callback, pattern=r'^gs\|'))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.TEXT & ~filters.COMMAND, post_sched_input_handler),
+                    group=-62)
     app.add_handler(CommandHandler('profil', profil))
     app.add_handler(CommandHandler('wordlist', wordlist))
     app.add_handler(CommandHandler('nightmod', cmd_nightmod))
@@ -18019,6 +18511,7 @@ def main():
     job_queue.run_repeating(auto_delete_job, interval=20, first=20)
     job_queue.run_repeating(scheduled_msgs_job, interval=60, first=45)
     job_queue.run_repeating(duyuru_job, interval=30, first=25)
+    job_queue.run_repeating(post_schedule_job, interval=30, first=35)
     job_queue.run_repeating(setup_reminder_job, interval=3600, first=300)
     job_queue.run_daily(audit_daily_job, time=dtime(AUDIT_HOUR, 0, tzinfo=TZ_TR))
     job_queue.run_daily(weekly_report_job, time=dtime(10, 0, tzinfo=TZ_TR))
