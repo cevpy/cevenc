@@ -19528,7 +19528,6 @@ a1ce809b5	⚠️ Silindi + uyarıldı
 4d4d20ba3	🔇 Silindi + 1 saat susturuldu
 3a4a2408d	🚫 Silindi + banlandı
 184e9ea25	✅ Görmezden gelindi
-1cd1dbdf9	🗑 Sil
 d193c645a	⚠️ Uyar
 bb7ad37ac	🔇 Sustur 1s
 ebe01fecc	🚫 Banla
@@ -20055,7 +20054,6 @@ f41c17d41	Bu paneli kullanmak için grupta yönetici olmalısın.
 8213d6575	<i>Vazgeçmek için: iptal</i>
 1465f36fd	Cevabını açılan mesaja yanıt olarak yaz.
 3035a6b30	⏰ Süre doldu, panelden tekrar dene.
-18363eae4	İptal edildi.
 3a22b8f74	❌ Kurallar boş olamaz.
 fa98ef9b6	Hoş geldin mesajı
 a9e0c5b00	✏️ ⟨0⟩ güncellendi | ⟨1⟩
@@ -20088,7 +20086,6 @@ e4b73af2e	🚫 Engelli medya listesi ›
 a5265e3d7	🔓 Medya kilidini aç
 c1a903ce0	🔒 Medyayı şimdi kilitle
 678507459	açık
-c293fc85c	kapalı
 8dd94c76e	kurulu değil (sunucuda <code>pip install nudenet</code>)
 043b96df1	🔒 Medya kilidi aktif: ⟨0⟩'e kadar
 059a31b37	Yapay zeka taraması: ⟨0⟩
@@ -20213,7 +20210,6 @@ c3eded236	🔕 Bildirimsiz
 cffb2a880	👆 Buton tıklamaları sayılacak
 716ef3839	↪️ Mesaj iletilecek (üstünde "İletildi" yazar, premium emojiler korunur)
 251fac5c6	🗳 Anket iletilecek; oylar bu ankette toplanır
-ba70fe09b	⏰ Zamanla
 8241e1495	✅ Gönder
 86f2e67ab	❌ İptal
 d53523fb6	Gönderilecek kimse yok.
@@ -20796,6 +20792,8 @@ fcea72bad	Seçili grup için hızlı kurulum
 9674953cf	Bot duyurularını kapat
 99ab93b21	Dil / Language
 333895635	Yöneticiye yaz (destek hattı)
+de94cd9e4	Kanal gönderisi hazırla
+7ffee2a93	Hazırladığın kanal gönderileri
 0d0187ac4	Botunun grupları ve istatistikleri
 8938961a5	Gruplara, kanallara, kişilere duyuru
 be4f2dea9	Duyuru geçmişi
@@ -20989,6 +20987,129 @@ a1c3d2c0b	<code>Kanalımız - https://t.me/kanal &amp;&amp; Destek - @destek</co
 dd3608634	Renk: satır sonuna <code>#yeşil</code> <code>#kırmızı</code> <code>#mavi</code> · Rose tarzı: <code>[Kanal](buttonurl://t.me/kanal)</code>
 90f26740a	<b>Değişkenler:</b> <code>{kullanıcı}</code> <code>{ad}</code> <code>{soyad}</code> <code>{username}</code> <code>{id}</code> <code>{grup}</code> <code>{uye_sayisi}</code> <code>{tarih}</code> <code>{saat}</code>
 23adc295f	<b>Rastgele:</b> birden fazla mesajı tek başına <code>%%%</code> satırıyla ayır.
+c293fc85c	kapalı
+4ffaa2134	küçük
+9ad8d8983	büyük
+65051db26	metnin üstünde
+79a8a1ed3	✏️ Taslak
+021eeb58e	✅ Hazır
+8dc576b65	📤 Yayınlandı
+e31d308d2	gönderinin metnini yaz. Kalın, italik, link, alıntı, spoiler ve premium emoji olduğu gibi korunur.
+e2bf41d44	Gönderi metni
+c2af2bb93	fotoğraf, video, GIF, müzik ya da dosya gönder. Açıklaması varsa gönderi metni olur. Medyayı kaldırmak için: sil
+71d627824	Medya gönder
+5c2538ae6	dosyanın logosu (küçük resmi) olacak fotoğrafı gönder. Kaldırmak için: sil
+a1c26cf23	Logo fotoğrafı
+282908438	butonları yaz (her satır bir sıra, && ile yan yana):
+c49a4d150	Kanalımız - https://t.me/kanal && Paylaş - share
+b69bb4ad2	Bilgi - popup:Kısa açıklama #mavi
+be890c755	Renk: satır sonuna #yeşil #kırmızı #mavi · Butonları kaldırmak için: sil
+5c8d1187c	Butonlar
+faa0b07d9	önizlemesi gösterilecek linki yaz. Kaldırmak için: sil
+72b362db5	Gönderi boş: önce ✏️ Metin ya da 🖼 Medya ekle.
+741bec6dc	Medyalı gönderide metin en fazla 1024 karakter olabilir (şu an ⟨0⟩).
+ed5e0a973	Metin en fazla 4096 karakter olabilir (şu an ⟨0⟩).
+7103829da	https://t.me/⟨0⟩/⟨1⟩
+b9b9ff299	https://t.me/c/⟨0⟩/⟨1⟩
+86691bbcb	Kod bir medyanın açıklamasına yazılmış; metin gönderisi medyaya uygulanamaz. Kodu kanala düz metin olarak yaz.
+67185f01e	not enough rights
+6578fa866	can't be edited
+2f75afec1	not an administrator
+03a2ea7b5	Botun bu kanalda <b>Mesajları düzenle</b> yetkisi yok. Kanal ayarları → Yöneticiler → bot → Mesajları düzenle'yi aç, sonra kodu tekrar yaz.
+115d827cd	Kod mesajı bulunamadı (silinmiş olabilir). Kodu tekrar yaz.
+a44085176	Metin Telegram sınırını aşıyor; gönderiyi kısalt.
+49701ee7d	there is no text in the message to edit
+71a61e10f	❌ <code>#g⟨0⟩</code> kanala uygulanamadı.
+e2fd3d196	Gönderi hâlâ hazır.
+263efcc87	✅ <code>#g⟨0⟩</code> yayınlandı: <a href="⟨1⟩">gönderiye git</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Çok kullanımlık: kod tekrar kullanılabilir.
+7b7e3ce57	📝 <b>Gönderi</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+df8be58ea	Durum: ⟨0⟩⟨1⟩
+bb2359256	· ♻️ çok kullanımlık
+af2b3830d	✏️ Metin: ⟨0⟩
+68b8326a2	yok
+a631ffe4f	🖼 Medya: ⟨0⟩
+a01316aed	📎 Dosya logosu: ⟨0⟩
+2d0e0586c	🔘 Butonlar: ⟨0⟩
+da02209e7	açıklama üstte
+072c286c7	link önizleme: ⟨0⟩
+b3742c9fc	varsayılan seçenekler
+75adccdaf	⚠️ <b>Bot bu kanalda “Mesajları düzenle” yetkisine sahip değil.</b> Kod yazınca gönderi oluşamaz: kanal ayarlarından bota bu yetkiyi ver.
+bcd754037	👉 Kanala kendi hesabından sadece <code>#g⟨0⟩</code> yaz; bot onu bu gönderiye çevirecek.
+69c3551fc	✏️ Metin
+a520fe1e8	🖼 Medya
+0d5bd871e	📎 Dosya logosu
+5f384f1e8	🔘 Butonlar
+74370f776	⚙️ Seçenekler
+894e0e55f	👁 Önizle
+4d52d4e82	⏰ Zamanla / 📌 Sabitle / 🗑 Süreli sil
+1cd1dbdf9	🗑 Sil
+89e868a25	📋 Gönderilerim
+dc6b96b25	⚙️ <b>Seçenekler</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (bulanık medya)
+10f55a4d2	Açıklama medyanın üstünde
+13cc9e2b1	🔗 Link önizleme: ⟨0⟩
+bc6d5abe6	🔗 Önizleme linki⟨0⟩
+d341358af	🔗 Link önizleme: kapalı → küçük → büyük → metnin üstünde. Önizleme linki verilmezse metindeki ilk link kullanılır.
+31c98d00a	Önizleme linki: ⟨0⟩
+9fbec9097	Çok kullanımlık kod
+7160ae248	♻️ Çok kullanımlık: kod her yazıldığında gönderiye dönüşür (kapalıysa bir kez).
+3deac8852	↩️ Geri
+ad3968817	📢 Gönderi hazırlayabileceğin bir kanal bulunamadı.
+6d383efc3	Botu kanalına yönetici olarak ekle (<b>Mesajları düzenle</b> yetkisiyle), sonra tekrar dene.
+7f8742403	📝 <b>Gönderi stüdyosu</b>
+170aee2de	Gönderiyi hangi kanal için hazırlıyorsun?
+3e05df453	➕ Yeni gönderi
+864aedf12	📋 <b>Gönderilerin</b>
+1318a9069	Düzenlemek için birine dokun.
+4d939cb89	📋 Henüz gönderin yok. ➕ Yeni gönderi ile başla.
+01632d43b	📝 Gönderi stüdyosu özel sohbette çalışır: bana özelden /gonderi yaz.
+3c5415709	📝 Gönderilerini görmek için bana özelden /gonderiler yaz.
+831dbaf68	Şu anki butonlar:
+f78631276	<code>#g⟨0⟩</code>: ⟨1⟩⟨2⟩
+bd542f721	❌ Metin boş. Gönderinin metnini yaz.
+ac9f5940e	❌ Metin çok uzun (⟨0⟩ karakter; en fazla 4096).
+3e6041c05	✅ Metin kaydedildi⟨0⟩.
+3f1817503	(medyalı gönderide en fazla 1024 karakter gösterilebilir!)
+805393212	✅ Medya kaldırıldı.
+42deb481c	❌ Sesli mesaj ve yuvarlak video düzenlemeyle eklenemiyor (Telegram sınırı). Müzik ya da dosya olarak gönder.
+0b8f18cda	❌ Sticker gönderiye eklenemiyor. Fotoğraf, video, GIF, müzik ya da dosya gönder.
+b1710547c	❌ Medya bulunamadı. Fotoğraf, video, GIF, müzik ya da dosya gönder (kaldırmak için: sil).
+a8d416edb	✅ ⟨0⟩ eklendi
+fe0741bc3	, açıklaması gönderi metni oldu
+0b86280c2	✅ Dosya logosu kaldırıldı.
+90964f332	❌ Dosya logosu sadece dosya (belge) medyasında olur.
+4d8ce7343	❌ Logo için bir fotoğraf gönder (kaldırmak için: sil).
+d8e07b1f2	✅ Dosya logosu kaydedildi (320 px JPEG'e küçültülür).
+dd65d93a0	✅ Butonlar kaldırıldı.
+d1cf8dc6e	❌ Buton biçimi anlaşılamadı⟨0⟩
+f9e98ab3e	Örnek: <code>Kanalımız - https://t.me/kanal &amp;&amp; Paylaş - share</code>
+70a88b575	✅ ⟨0⟩ buton kaydedildi.
+dfe50c705	✅ Önizleme linki kaldırıldı.
+53d15ba87	❌ Geçerli bir link yaz (ör. https://ornek.com).
+bf2d13067	✅ Önizleme linki kaydedildi.
+3febd3182	❌ Bilinmeyen giriş.
+4ec886fb2	⏰ Süre doldu, düzenleyiciden tekrar dene.
+c6f41a62e	Bu gönderi artık yok.
+18363eae4	İptal edildi.
+08c32666e	Gönderi stüdyosu özel sohbette çalışır.
+fc778b227	Bu kanal bulunamadı ya da orada yönetici değilsin.
+4d142fe56	📝 Yeni taslak oluşturuldu.
+22442b0b9	📝 Taslak oluşturuldu
+d085f4110	Bu gönderi bulunamadı.
+fe1b715bd	Dosya logosu sadece dosya (belge) medyasında olur.
+f3d1310bc	Cevabını açılan mesaja yaz 👇
+2b671f0ee	Önizleme gönderilemedi. ⟨0⟩
+55afcbd9c	👆 Önizleme: kanalda böyle görünecek.
+a6aea5676	👁 Önizleme gönderildi
+2ff4f7035	Bu kanalda artık yönetici değilsin.
+8be0b2234	✅ <b>Gönderi hazır:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Hazır: #g⟨0⟩
+99d68e3c3	🗑 <code>#g⟨0⟩</code> silinsin mi?
+e53f197f7	🗑 Evet, sil
+9b6fcea87	↩️ Vazgeç
+020fb42bf	🗑 <code>#g⟨0⟩</code> silindi.
+0c9eb6d46	Silindi
 7d75ab43e	Kanallarda bu mesaj kullanılamaz.
 93a792a44	Hoş geldin
 06ba336bf	Veda
@@ -21026,6 +21147,60 @@ b35d597c9	📌 Öncekini tut
 242c0f02c	Bulunamadı
 ec93a493c	⏸ Durduruldu
 e388dd558	▶️ Başlatıldı
+daa3d48d5	🔔 Hatırlat
+d1fb68397	🤖 Bot atsın
+fbc00ada9	gp|e|{id}
+bbbdcceb8	<code>20:30</code> · <code>yarın 09:00</code> · <code>14.10 20:30</code> · <code>+2s</code> · <code>+30dk</code>
+fd2dd8a7d	Zamanı anlayamadım. Örnek: ⟨0⟩
+a0933c889	Geçersiz tarih. Örnek: ⟨0⟩
+4314dd4ac	Bu zaman geçmişte kaldı.
+b326ab625	En fazla 90 gün sonrası zamanlanabilir.
+38fdf5e34	Gönderi bulunamadı.
+098340710	⏰ <b>Yayın planı</b> — <code>⟨0⟩</code>
+9d17d5fb8	📢 Kanal: ⟨0⟩
+8af503c12	· ✅ işlendi
+9537aa30a	🕒 Zaman: <b>⟨0⟩</b> (Türkiye saati)⟨1⟩
+438c53be8	🕒 Zaman: yok — ⏰ Zamanla'ya bas
+a7a2116ba	Kip: ⟨0⟩
+e669f0130	<i>Zamanı gelince bot gönderiyi kanala kendisi atar; kanalda imza açıksa bot adı görünür.</i>
+5648800a1	⚠️ Bot atsın için gönderide kanal seçili olmalı; seçili değilse sadece hatırlatırım.
+b5d451869	<i>Zamanı gelince sana özelden hatırlatırım; kanala kendi hesabından <code>⟨0⟩</code> yazarsın, gönderi senin adınla kalır.</i>
+d29490b79	📌 Sabitle: ⟨0⟩
+686c037f9	🗑 Süreli sil: ⟨0⟩
+bf912c737	<i>Sabitleme ve silme için bot kanalda yönetici olmalı (mesaj düzenleme / silme yetkisi).</i>
+767c7de80	🗑 Silinecek: ⟨0⟩
+cd509f96b	📝 Gönderi henüz taslak: hazır olarak kaydedilince zamanlama çalışır.
+cf0dd8c87	✅ Gönderi yayınlandı.
+cd40d1b96	📋 Planlananlar
+5bd6eeff5	⏰ Zamanı değiştir
+ba70fe09b	⏰ Zamanla
+ff57b73c7	❌ Zamanlamayı kaldır
+bef4fd8ba	‹ Gönderiye dön
+ef843946c	AND owner_id = ?
+af90e4911	📅 <b>Planlı gönderiler</b>
+6e0c2a826	Yaklaşan planlı gönderi yok. /gonderi ile hazırla, sonra ⏰ Zamanla'ya bas.
+edcf3ebe5	kanal seçilmedi
+e36785ac0	· 📝 taslak
+925a3e6fa	• <code>⟨0⟩</code> → ⟨1⟩
+82569ed5d	Gönderi bulunamadı ya da yetkin yok.
+6b7df2b07	Bu gönderi zaten yayınlandı.
+ce0755ac6	⏰ <code>⟨0⟩</code> ne zaman yayınlansın? (Türkiye saati)
+aa587326f	Örnek: ⟨0⟩
+f438c6eba	yarın 09:00
+7487c45bc	📌 Sabitlenmeyecek
+4b69a9ff3	📌 Sabitlenecek
+bd0c9b510	❌ Zamanlama kaldırıldı
+e31b7e154	Tekrar yaz ya da iptal.
+401b94bff	✅ <code>⟨0⟩</code> zamanlandı: <b>⟨1⟩</b>
+8492a1474	📌 Sabitlendi.
+f02c379f3	⚠️ Sabitlenemedi: botun kanalda yönetici ve mesaj düzenleme yetkisi olmalı.
+f820948f3	🗑 ⟨0⟩ sonra silinecek.
+78192eae9	⏰ Yayın zamanı: kanala kendi hesabından <code>⟨0⟩</code> yaz.
+7887a0192	⚠️ Gönderide kanal seçili olmadığı için bot kendisi atamadı.
+78c5e12de	⚠️ <code>⟨0⟩</code> zamanında yayınlanamadı (⟨1⟩).
+647007ee2	Gönderi hazır duruyor: kanala kendi hesabından <code>⟨0⟩</code> yazabilir ya da /gonderiplan ile yeniden zamanlayabilirsin.
+dc2a06d68	Botun kanalda yönetici olduğundan ve mesaj gönderme yetkisi olduğundan emin ol.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> zamanında yayınlandı⟨1⟩
 d08a36466	➕ Yeni zamanlanmış mesaj
 25cda8fe6	🚪 <b>Veda mesajı</b> — ⟨0⟩
 b61184fea	Durum: <b>⟨0⟩</b> · ⟨1⟩
@@ -21036,9 +21211,7 @@ a4530174c	📜 Kurallar: ⟨0⟩ · 🚪 Veda: ⟨1⟩ · ⏰ Zamanlı mesaj: �
 d0b1d849f	Medya, buton ve değişkenler için ✏️ Değiştir'e bas (ya da grupta /setwelcome yazıp yardımına bak).
 2b7ced272	Açık
 e5b4e786e	var
-68b8326a2	yok
 2bae1a721	✏️ Değiştir
-894e0e55f	👁 Önizle
 099ae3d9c	🖼 Medyayı kaldır
 8bb5bb494	↩️ Varsayılana dön
 adcf7aa93	🧹 Eskisini sil
@@ -21051,7 +21224,6 @@ b6669596d	🚪 Veda mesajı ›
 0c2dc5967	⏰ Zamanlı mesajlar ›
 9a8a538db	Kara liste: ⟨0⟩
 0eed14a22	Kural yok
-a6aea5676	👁 Önizleme gönderildi
 eb9f11f93	↩️ Varsayılana döndü
 14af210b4	🖼 Medya kaldırıldı
 a4439e0c5	<a href="tg://user?id=⟨0⟩">⟨1⟩</a>
@@ -21575,7 +21747,6 @@ f2ba0c77b	✅ Filtre silindi.
 b7301e99a	Bu grupta filtre yok.
 bd0505102	⚠️ Bu gruptaki <b>⟨0⟩</b> filtrenin hepsi silinsin mi?
 8d8252e68	🗑 Evet, hepsini sil
-9b6fcea87	↩️ Vazgeç
 cf9d69e94	🗑 ⟨0⟩ filtre silindi.
 13c07c249	🧹 Tüm filtreler silindi (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Marka adı
@@ -21652,7 +21823,6 @@ b248ddfb0	💎 Premium emoji kapatıldı
 8f8af330e	Geçersiz.
 6a47f34ed	Bu klon silinmiş.
 21d148b57	🗑 @⟨0⟩ klonu silinsin mi? Bot durur, gruplardaki ayarlar kalır.
-e53f197f7	🗑 Evet, sil
 cb1a5e233	🗑 Klon botun @⟨0⟩ bot sahibi tarafından silindi.
 19e55244e	Link https://t.me/ ile başlamalı. Tekrar yaz ya da iptal.
 6e97fcc27	✅ ⟨0⟩ güncellendi.
@@ -21863,7 +22033,6 @@ a1ce809b5	⚠️ حُذفت + تحذير
 4d4d20ba3	🔇 حُذفت + كتم لمدة ساعة
 3a4a2408d	🚫 حُذفت + حظر
 184e9ea25	✅ تم التجاهل
-1cd1dbdf9	🗑 حذف
 d193c645a	⚠️ تحذير
 bb7ad37ac	🔇 كتم ساعة
 ebe01fecc	🚫 حظر
@@ -22376,7 +22545,6 @@ f41c17d41	يجب أن تكون مشرفًا في المجموعة لاستخدا
 8213d6575	<i>للإلغاء: cancel</i>
 1465f36fd	اكتب إجابتك ردًا على الرسالة التي ظهرت.
 3035a6b30	⏰ انتهى الوقت، حاول مجددًا من اللوحة.
-18363eae4	تم الإلغاء.
 3a22b8f74	❌ لا يمكن أن تكون القوانين فارغة.
 fa98ef9b6	رسالة الترحيب
 a9e0c5b00	✏️ حُدّث ⟨0⟩ | ⟨1⟩
@@ -22409,7 +22577,6 @@ e4b73af2e	🚫 قائمة الوسائط المحظورة ›
 a5265e3d7	🔓 رفع قفل الوسائط
 c1a903ce0	🔒 قفل الوسائط الآن
 678507459	مفعّل
-c293fc85c	معطّل
 8dd94c76e	غير مثبّت (على الخادم: <code>pip install nudenet</code>)
 043b96df1	🔒 قفل الوسائط نشط حتى ⟨0⟩
 059a31b37	الفحص بالذكاء الاصطناعي: ⟨0⟩
@@ -22534,7 +22701,6 @@ c3eded236	🔕 بصمت
 cffb2a880	👆 ستُحسب نقرات الأزرار
 716ef3839	↪️ ستُعاد توجيه الرسالة (يظهر "معاد توجيهها"، وتبقى الإيموجي المميزة)
 251fac5c6	🗳 سيُعاد توجيه الاستطلاع؛ وتُجمع الأصوات فيه
-ba70fe09b	⏰ جدولة
 8241e1495	✅ إرسال
 86f2e67ab	❌ إلغاء
 d53523fb6	لا يوجد من يُرسل إليه.
@@ -23103,6 +23269,8 @@ fcea72bad	إعداد سريع للمجموعة المختارة
 9674953cf	إيقاف إعلانات البوت
 99ab93b21	اللغة
 333895635	مراسلة المشرف (خط الدعم)
+de94cd9e4	تحضير منشور للقناة
+7ffee2a93	منشورات القناة التي حضّرتها
 0d0187ac4	مجموعات بوتك وإحصائياته
 8938961a5	إعلانات للمجموعات والقنوات والأشخاص
 be4f2dea9	سجل الإعلانات
@@ -23286,6 +23454,104 @@ a1c3d2c0b	<code>قناتنا - https://t.me/channel &amp;&amp; الدعم - @sup
 dd3608634	اللون: في نهاية السطر <code>#green</code> <code>#red</code> <code>#blue</code> · بأسلوب Rose: <code>[قناة](buttonurl://t.me/channel)</code>
 90f26740a	<b>المتغيرات:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>عشوائي:</b> افصل عدة رسائل بسطر لا يحتوي إلا <code>%%%</code>.
+c293fc85c	معطّل
+4ffaa2134	صغيرة
+9ad8d8983	كبيرة
+65051db26	فوق النص
+021eeb58e	✅ جاهز
+8dc576b65	📤 منشور
+e31d308d2	اكتب نص المنشور. يُحفظ الخط العريض والمائل والروابط والاقتباسات والمحتوى المخفي والإيموجي المميز كما هي.
+e2bf41d44	نص المنشور
+c2af2bb93	أرسل صورة أو فيديو أو GIF أو موسيقى أو ملفًا. إن كان له وصف يصبح نص المنشور. لإزالة الوسائط: delete
+71d627824	أرسل الوسائط
+5c2538ae6	أرسل الصورة التي ستكون شعار الملف (صورته المصغرة). للإزالة: delete
+a1c26cf23	صورة الشعار
+282908438	اكتب الأزرار (كل سطر صف، وجنبًا إلى جنب بـ &&):
+c49a4d150	قناتنا - https://t.me/kanal && مشاركة - share
+b69bb4ad2	معلومة - popup:وصف قصير #blue
+be890c755	اللون: في آخر السطر #green #red #blue · لإزالة الأزرار: delete
+faa0b07d9	اكتب الرابط الذي ستظهر معاينته. للإزالة: delete
+72b362db5	المنشور فارغ: أضف أولًا ✏️ نصًا أو 🖼 وسائط.
+741bec6dc	في المنشور ذي الوسائط يمكن أن يكون النص 1024 حرفًا كحد أقصى (الآن ⟨0⟩).
+ed5e0a973	يمكن أن يكون النص 4096 حرفًا كحد أقصى (الآن ⟨0⟩).
+86691bbcb	كُتب الرمز في وصف وسائط؛ لا يمكن تطبيق منشور نصي على وسائط. اكتب الرمز في القناة كنص عادي.
+03a2ea7b5	ليس لدى البوت صلاحية <b>تعديل الرسائل</b> في هذه القناة. إعدادات القناة → المشرفون → البوت → فعّل تعديل الرسائل، ثم اكتب الرمز مجددًا.
+115d827cd	لم يُعثر على رسالة الرمز (ربما حُذفت). اكتب الرمز مجددًا.
+a44085176	النص يتجاوز حد تيليجرام؛ اختصر المنشور.
+71a61e10f	❌ تعذّر تطبيق <code>#g⟨0⟩</code> على القناة.
+e2fd3d196	المنشور ما زال جاهزًا.
+263efcc87	✅ نُشر <code>#g⟨0⟩</code>: <a href="⟨1⟩">اذهب إلى المنشور</a>⟨2⟩⟨3⟩
+7852257e0	♻️ متعدد الاستخدام: يمكن استخدام الرمز مرة أخرى.
+7b7e3ce57	📝 <b>منشور</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ متعدد الاستخدام
+68b8326a2	لا يوجد
+da02209e7	الوصف في الأعلى
+072c286c7	معاينة الرابط: ⟨0⟩
+b3742c9fc	الخيارات الافتراضية
+75adccdaf	⚠️ <b>ليس لدى البوت صلاحية “تعديل الرسائل” في هذه القناة.</b> لن يتكوّن المنشور عند كتابة الرمز: امنح البوت هذه الصلاحية من إعدادات القناة.
+bcd754037	👉 اكتب في القناة من حسابك <code>#g⟨0⟩</code> فقط؛ سيحوّله البوت إلى هذا المنشور.
+74370f776	⚙️ الخيارات
+894e0e55f	👁 معاينة
+4d52d4e82	⏰ جدولة / 📌 تثبيت / 🗑 حذف مؤقت
+1cd1dbdf9	🗑 حذف
+89e868a25	📋 منشوراتي
+dc6b96b25	⚙️ <b>الخيارات</b> · <code>#g⟨0⟩</code>
+f47ec3f57	محتوى مخفي (وسائط ضبابية)
+10f55a4d2	الوصف فوق الوسائط
+13cc9e2b1	🔗 معاينة الرابط: ⟨0⟩
+bc6d5abe6	🔗 رابط المعاينة⟨0⟩
+d341358af	🔗 معاينة الرابط: معطلة → صغيرة → كبيرة → فوق النص. إن لم يُحدَّد رابط للمعاينة يُستخدم أول رابط في النص.
+31c98d00a	رابط المعاينة: ⟨0⟩
+9fbec9097	رمز متعدد الاستخدام
+7160ae248	♻️ متعدد الاستخدام: يتحول الرمز إلى المنشور في كل مرة يُكتب فيها (مرة واحدة إن كان معطلًا).
+ad3968817	📢 لم يُعثر على قناة يمكنك تحضير منشور لها.
+6d383efc3	أضف البوت إلى قناتك كمشرف (بصلاحية <b>تعديل الرسائل</b>)، ثم حاول مجددًا.
+7f8742403	📝 <b>استوديو المنشورات</b>
+170aee2de	لأي قناة تحضّر المنشور؟
+3e05df453	➕ منشور جديد
+864aedf12	📋 <b>منشوراتك</b>
+1318a9069	اضغط على أحدها لتعديله.
+4d939cb89	📋 ليس لديك منشورات بعد. ابدأ بـ ➕ منشور جديد.
+01632d43b	📝 يعمل استوديو المنشورات في المحادثة الخاصة: أرسل لي /post في الخاص.
+3c5415709	📝 لرؤية منشوراتك أرسل لي /posts في الخاص.
+831dbaf68	الأزرار الحالية:
+bd542f721	❌ النص فارغ. اكتب نص المنشور.
+ac9f5940e	❌ النص طويل جدًا (⟨0⟩ حرفًا؛ الحد الأقصى 4096).
+3f1817503	(في المنشور ذي الوسائط يمكن عرض 1024 حرفًا كحد أقصى!)
+805393212	✅ أُزيلت الوسائط.
+42deb481c	❌ لا يمكن إضافة الرسائل الصوتية والفيديو الدائري بالتعديل (قيد تيليجرام). أرسلها كموسيقى أو ملف.
+0b8f18cda	❌ لا يمكن إضافة ملصق إلى المنشور. أرسل صورة أو فيديو أو GIF أو موسيقى أو ملفًا.
+b1710547c	❌ لم يُعثر على وسائط. أرسل صورة أو فيديو أو GIF أو موسيقى أو ملفًا (للإزالة: delete).
+fe0741bc3	، وأصبح وصفها نص المنشور
+0b86280c2	✅ أُزيل شعار الملف.
+90964f332	❌ شعار الملف يكون فقط مع وسائط الملف (المستند).
+4d8ce7343	❌ أرسل صورة للشعار (للإزالة: delete).
+d8e07b1f2	✅ حُفظ شعار الملف (يُصغَّر إلى JPEG بحجم 320 px).
+dd65d93a0	✅ أُزيلت الأزرار.
+d1cf8dc6e	❌ تعذّر فهم صيغة الأزرار⟨0⟩
+f9e98ab3e	مثال: <code>قناتنا - https://t.me/kanal &amp;&amp; مشاركة - share</code>
+dfe50c705	✅ أُزيل رابط المعاينة.
+53d15ba87	❌ اكتب رابطًا صحيحًا (مثل https://example.com).
+bf2d13067	✅ حُفظ رابط المعاينة.
+3febd3182	❌ إدخال غير معروف.
+4ec886fb2	⏰ انتهى الوقت، حاول مجددًا من المحرر.
+c6f41a62e	هذا المنشور لم يعد موجودًا.
+18363eae4	تم الإلغاء.
+08c32666e	يعمل استوديو المنشورات في المحادثة الخاصة.
+fc778b227	لم يُعثر على هذه القناة أو لست مشرفًا فيها.
+4d142fe56	📝 أُنشئت مسودة جديدة.
+22442b0b9	📝 أُنشئت مسودة
+d085f4110	لم يُعثر على هذا المنشور.
+fe1b715bd	شعار الملف يكون فقط مع وسائط الملف (المستند).
+f3d1310bc	اكتب ردك في الرسالة التي فُتحت 👇
+2b671f0ee	تعذّر إرسال المعاينة. ⟨0⟩
+55afcbd9c	👆 المعاينة: هكذا سيظهر في القناة.
+a6aea5676	👁 أُرسلت المعاينة
+2ff4f7035	لم تعد مشرفًا في هذه القناة.
+8be0b2234	✅ <b>المنشور جاهز:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ جاهز: #g⟨0⟩
+e53f197f7	🗑 نعم، احذف
+9b6fcea87	↩️ إلغاء
 7d75ab43e	لا يمكن استخدام هذه الرسالة في القنوات.
 93a792a44	الترحيب
 06ba336bf	الوداع
@@ -23321,6 +23587,47 @@ b35d597c9	📌 إبقاء السابقة
 242c0f02c	غير موجود
 ec93a493c	⏸ متوقف
 e388dd558	▶️ بدأ
+daa3d48d5	🔔 ذكّرني
+d1fb68397	🤖 البوت ينشره
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	لم أفهم الوقت. مثال: ⟨0⟩
+a0933c889	تاريخ غير صالح. مثال: ⟨0⟩
+4314dd4ac	هذا الوقت قد مضى.
+b326ab625	يمكن الجدولة حتى 90 يومًا كحد أقصى.
+38fdf5e34	لم يُعثر على المنشور.
+098340710	⏰ <b>خطة النشر</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ تمت المعالجة
+9537aa30a	🕒 الوقت: <b>⟨0⟩</b> (بتوقيت تركيا)⟨1⟩
+438c53be8	🕒 الوقت: لا يوجد — اضغط ⏰ جدولة
+e669f0130	<i>عند حلول الوقت ينشر البوت المنشور في القناة بنفسه؛ إن كان التوقيع مفعّلًا في القناة يظهر اسم البوت.</i>
+5648800a1	⚠️ لخيار “البوت ينشره” يجب اختيار قناة للمنشور؛ وإلا سأذكّرك فقط.
+b5d451869	<i>عند حلول الوقت أذكّرك في الخاص؛ تكتب <code>⟨0⟩</code> في القناة من حسابك ويبقى المنشور باسمك.</i>
+686c037f9	🗑 حذف مؤقت: ⟨0⟩
+bf912c737	<i>للتثبيت والحذف يجب أن يكون البوت مشرفًا في القناة (صلاحية تعديل / حذف الرسائل).</i>
+cd509f96b	📝 المنشور ما زال مسودة: تعمل الجدولة بعد حفظه كجاهز.
+cf0dd8c87	✅ نُشر المنشور.
+5bd6eeff5	⏰ تغيير الوقت
+ba70fe09b	⏰ جدولة
+ff57b73c7	❌ إلغاء الجدولة
+bef4fd8ba	‹ العودة إلى المنشور
+af90e4911	📅 <b>المنشورات المجدولة</b>
+6e0c2a826	لا توجد منشورات مجدولة قادمة. حضّر واحدًا بـ /post ثم اضغط ⏰ جدولة.
+edcf3ebe5	لم تُختر قناة
+82569ed5d	لم يُعثر على المنشور أو ليست لديك صلاحية.
+6b7df2b07	هذا المنشور نُشر بالفعل.
+ce0755ac6	⏰ متى يُنشر <code>⟨0⟩</code>؟ (بتوقيت تركيا)
+aa587326f	مثال: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ أُلغيت الجدولة
+e31b7e154	اكتب مجددًا أو cancel.
+401b94bff	✅ جُدول <code>⟨0⟩</code>: <b>⟨1⟩</b>
+f02c379f3	⚠️ تعذّر التثبيت: يجب أن يكون البوت مشرفًا في القناة بصلاحية تعديل الرسائل.
+78192eae9	⏰ وقت النشر: اكتب <code>⟨0⟩</code> في القناة من حسابك.
+7887a0192	⚠️ لم ينشره البوت بنفسه لأنه لم تُختر قناة للمنشور.
+78c5e12de	⚠️ تعذّر نشر <code>⟨0⟩</code> في موعده (⟨1⟩).
+647007ee2	المنشور ما زال جاهزًا: يمكنك كتابة <code>⟨0⟩</code> في القناة من حسابك أو إعادة جدولته بـ /scheduled.
+dc2a06d68	تأكد أن البوت مشرف في القناة ولديه صلاحية نشر الرسائل.⟨0⟩
+fee144017	✅ نُشر <b>⟨0⟩</b> في موعده⟨1⟩
 d08a36466	➕ رسالة مجدولة جديدة
 25cda8fe6	🚪 <b>رسالة الوداع</b> — ⟨0⟩
 b61184fea	الحالة: <b>⟨0⟩</b> · ⟨1⟩
@@ -23331,9 +23638,7 @@ a4530174c	📜 القوانين: ⟨0⟩ · 🚪 الوداع: ⟨1⟩ · ⏰ ا
 d0b1d849f	للوسائط والأزرار والمتغيرات اضغط ✏️ تعديل (أو اكتب /setwelcome في المجموعة لرؤية المساعدة).
 2b7ced272	مفعّل
 e5b4e786e	موجودة
-68b8326a2	لا يوجد
 2bae1a721	✏️ تعديل
-894e0e55f	👁 معاينة
 099ae3d9c	🖼 إزالة الوسائط
 8bb5bb494	↩️ إعادة للافتراضي
 adcf7aa93	🧹 حذف القديمة
@@ -23346,7 +23651,6 @@ b6669596d	🚪 رسالة الوداع ›
 0c2dc5967	⏰ الرسائل المجدولة ›
 9a8a538db	القائمة السوداء: ⟨0⟩
 0eed14a22	لا قوانين
-a6aea5676	👁 أُرسلت المعاينة
 eb9f11f93	↩️ أُعيد للافتراضي
 14af210b4	🖼 أُزيلت الوسائط
 f615cd8f5	⏹ أُوقفت الإشارة
@@ -23841,7 +24145,6 @@ f2ba0c77b	✅ حُذف الفلتر.
 b7301e99a	لا فلاتر في هذه المجموعة.
 bd0505102	⚠️ حذف كل الفلاتر (<b>⟨0⟩</b>) في هذه المجموعة؟
 8d8252e68	🗑 نعم، احذف الكل
-9b6fcea87	↩️ إلغاء
 cf9d69e94	🗑 حُذف ⟨0⟩ فلتر.
 13c07c249	🧹 حُذفت كل الفلاتر (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 اسم العلامة
@@ -23917,7 +24220,6 @@ b248ddfb0	💎 تم إيقاف الإيموجي المميزة
 8f8af330e	غير صالح.
 6a47f34ed	حُذفت هذه النسخة.
 21d148b57	🗑 حذف النسخة @⟨0⟩؟ سيتوقف البوت وتبقى الإعدادات في المجموعات.
-e53f197f7	🗑 نعم، احذف
 cb1a5e233	🗑 حذف مالك البوت بوتك المستنسخ @⟨0⟩.
 19e55244e	يجب أن يبدأ الرابط بـ https://t.me/. اكتبه مجددًا أو cancel.
 6e97fcc27	✅ حُدّث ⟨0⟩.
@@ -24613,7 +24915,6 @@ f41c17d41	Bu paneldən istifadə üçün qrupda admin olmalısan.
 8213d6575	<i>Ləğv etmək üçün: cancel</i>
 1465f36fd	Cavabını açılan mesaja cavab kimi yaz.
 3035a6b30	⏰ Vaxt bitdi, paneldən yenidən cəhd et.
-18363eae4	Ləğv edildi.
 3a22b8f74	❌ Qaydalar boş ola bilməz.
 fa98ef9b6	Xoş gəldin mesajı
 a9e0c5b00	✏️ ⟨0⟩ yeniləndi | ⟨1⟩
@@ -24646,7 +24947,6 @@ e4b73af2e	🚫 Bloklanmış media siyahısı ›
 a5265e3d7	🔓 Media kilidini aç
 c1a903ce0	🔒 Medianı indi kilidlə
 678507459	açıq
-c293fc85c	bağlı
 8dd94c76e	quraşdırılmayıb (serverdə: <code>pip install nudenet</code>)
 043b96df1	🔒 Media kilidi ⟨0⟩-dək aktivdir
 059a31b37	Sİ yoxlaması: ⟨0⟩
@@ -24770,7 +25070,6 @@ c3eded236	🔕 Səssiz
 cffb2a880	👆 Düymə klikləri sayılacaq
 716ef3839	↪️ Mesaj yönləndiriləcək (üstündə "Yönləndirildi" yazılır, premium emojilər qorunur)
 251fac5c6	🗳 Sorğu yönləndiriləcək; səslər bu sorğuda toplanır
-ba70fe09b	⏰ Planlaşdır
 8241e1495	✅ Göndər
 86f2e67ab	❌ Ləğv et
 d53523fb6	Göndəriləcək heç kim yoxdur.
@@ -25327,6 +25626,8 @@ fcea72bad	Seçilmiş qrup üçün sürətli quraşdırma
 9674953cf	Bot elanlarını söndür
 99ab93b21	Dil
 333895635	Adminə yaz (dəstək xətti)
+de94cd9e4	Kanal paylaşımı hazırla
+7ffee2a93	Hazırladığın kanal paylaşımları
 0d0187ac4	Botunun qrupları və statistikası
 8938961a5	Qruplara, kanallara, insanlara elanlar
 be4f2dea9	Elan tarixçəsi
@@ -25506,6 +25807,101 @@ a1c3d2c0b	<code>Kanalımız - https://t.me/channel &amp;&amp; Dəstək - @suppor
 dd3608634	Rəng: sətrin sonunda <code>#green</code> <code>#red</code> <code>#blue</code> · Rose üslubu: <code>[Kanal](buttonurl://t.me/channel)</code>
 90f26740a	<b>Dəyişənlər:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Təsadüfi:</b> bir neçə mesajı yalnız <code>%%%</code> olan sətirlə ayır.
+c293fc85c	bağlı
+4ffaa2134	kiçik
+9ad8d8983	böyük
+65051db26	mətnin üstündə
+8dc576b65	📤 Dərc olundu
+e31d308d2	paylaşımın mətnini yaz. Qalın, kursiv, link, sitat, spoiler və premium emoji olduğu kimi saxlanılır.
+e2bf41d44	Paylaşım mətni
+c2af2bb93	şəkil, video, GIF, musiqi və ya fayl göndər. Açıqlaması varsa paylaşım mətni olur. Medianı silmək üçün: delete
+71d627824	Media göndər
+5c2538ae6	faylın loqosu (kiçik şəkli) olacaq şəkli göndər. Silmək üçün: delete
+a1c26cf23	Loqo şəkli
+282908438	düymələri yaz (hər sətir bir sıra, && ilə yan-yana):
+b69bb4ad2	Məlumat - popup:Qısa izah #blue
+be890c755	Rəng: sətirin sonuna #green #red #blue · Düymələri silmək üçün: delete
+faa0b07d9	önizləməsi göstəriləcək linki yaz. Silmək üçün: delete
+72b362db5	Paylaşım boşdur: əvvəlcə ✏️ Mətn və ya 🖼 Media əlavə et.
+741bec6dc	Medialı paylaşımda mətn ən çox 1024 simvol ola bilər (indi ⟨0⟩).
+ed5e0a973	Mətn ən çox 4096 simvol ola bilər (indi ⟨0⟩).
+86691bbcb	Kod medianın açıqlamasına yazılıb; mətn paylaşımı mediaya tətbiq edilə bilməz. Kodu kanala adi mətn kimi yaz.
+03a2ea7b5	Botun bu kanalda <b>Mesajları redaktə et</b> icazəsi yoxdur. Kanal ayarları → Adminlər → bot → Mesajları redaktə et-i aç, sonra kodu yenidən yaz.
+115d827cd	Kod mesajı tapılmadı (silinmiş ola bilər). Kodu yenidən yaz.
+a44085176	Mətn Telegram limitini keçir; paylaşımı qısalt.
+71a61e10f	❌ <code>#g⟨0⟩</code> kanala tətbiq edilə bilmədi.
+e2fd3d196	Paylaşım hələ də hazırdır.
+263efcc87	✅ <code>#g⟨0⟩</code> dərc olundu: <a href="⟨1⟩">paylaşıma keç</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Çoxistifadəli: kod yenidən istifadə oluna bilər.
+7b7e3ce57	📝 <b>Paylaşım</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ çoxistifadəli
+68b8326a2	yoxdur
+da02209e7	açıqlama üstdə
+072c286c7	link önizləməsi: ⟨0⟩
+b3742c9fc	standart seçimlər
+75adccdaf	⚠️ <b>Botun bu kanalda “Mesajları redaktə et” icazəsi yoxdur.</b> Kodu yazanda paylaşım yaranmayacaq: kanal ayarlarından bota bu icazəni ver.
+bcd754037	👉 Kanala öz hesabından yalnız <code>#g⟨0⟩</code> yaz; bot onu bu paylaşıma çevirəcək.
+74370f776	⚙️ Seçimlər
+894e0e55f	👁 Önizləmə
+4d52d4e82	⏰ Planla / 📌 Sabitlə / 🗑 Vaxtlı sil
+89e868a25	📋 Paylaşımlarım
+dc6b96b25	⚙️ <b>Seçimlər</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (bulanıq media)
+10f55a4d2	Açıqlama medianın üstündə
+13cc9e2b1	🔗 Link önizləməsi: ⟨0⟩
+bc6d5abe6	🔗 Önizləmə linki⟨0⟩
+d341358af	🔗 Link önizləməsi: söndürülüb → kiçik → böyük → mətnin üstündə. Önizləmə linki verilməzsə mətndəki ilk link istifadə olunur.
+31c98d00a	Önizləmə linki: ⟨0⟩
+9fbec9097	Çoxistifadəli kod
+7160ae248	♻️ Çoxistifadəli: kod hər yazılanda paylaşıma çevrilir (söndürülübsə bir dəfə).
+ad3968817	📢 Paylaşım hazırlaya biləcəyin kanal tapılmadı.
+6d383efc3	Botu kanalına admin kimi əlavə et (<b>Mesajları redaktə et</b> icazəsi ilə), sonra yenidən yoxla.
+7f8742403	📝 <b>Paylaşım studiyası</b>
+170aee2de	Paylaşımı hansı kanal üçün hazırlayırsan?
+3e05df453	➕ Yeni paylaşım
+864aedf12	📋 <b>Paylaşımların</b>
+1318a9069	Redaktə etmək üçün birinə toxun.
+4d939cb89	📋 Hələ paylaşımın yoxdur. ➕ Yeni paylaşım ilə başla.
+01632d43b	📝 Paylaşım studiyası şəxsi çatda işləyir: mənə şəxsidən /post yaz.
+3c5415709	📝 Paylaşımlarını görmək üçün mənə şəxsidən /posts yaz.
+831dbaf68	Hazırkı düymələr:
+bd542f721	❌ Mətn boşdur. Paylaşımın mətnini yaz.
+ac9f5940e	❌ Mətn çox uzundur (⟨0⟩ simvol; ən çox 4096).
+3f1817503	(medialı paylaşımda ən çox 1024 simvol göstərilə bilər!)
+805393212	✅ Media silindi.
+42deb481c	❌ Səsli mesaj və dairəvi video redaktə ilə əlavə edilə bilməz (Telegram limiti). Musiqi və ya fayl kimi göndər.
+0b8f18cda	❌ Stiker paylaşıma əlavə edilə bilməz. Şəkil, video, GIF, musiqi və ya fayl göndər.
+b1710547c	❌ Media tapılmadı. Şəkil, video, GIF, musiqi və ya fayl göndər (silmək üçün: delete).
+fe0741bc3	, açıqlaması paylaşım mətni oldu
+0b86280c2	✅ Fayl loqosu silindi.
+90964f332	❌ Fayl loqosu yalnız fayl (sənəd) mediasında olur.
+4d8ce7343	❌ Loqo üçün şəkil göndər (silmək üçün: delete).
+d8e07b1f2	✅ Fayl loqosu saxlanıldı (320 px JPEG-ə kiçildilir).
+dd65d93a0	✅ Düymələr silindi.
+d1cf8dc6e	❌ Düymə formatı başa düşülmədi⟨0⟩
+f9e98ab3e	Nümunə: <code>Kanalımız - https://t.me/kanal &amp;&amp; Paylaş - share</code>
+dfe50c705	✅ Önizləmə linki silindi.
+53d15ba87	❌ Düzgün link yaz (məs. https://example.com).
+bf2d13067	✅ Önizləmə linki saxlanıldı.
+3febd3182	❌ Naməlum giriş.
+4ec886fb2	⏰ Vaxt bitdi, redaktordan yenidən yoxla.
+c6f41a62e	Bu paylaşım artıq yoxdur.
+18363eae4	Ləğv edildi.
+08c32666e	Paylaşım studiyası şəxsi çatda işləyir.
+fc778b227	Bu kanal tapılmadı və ya orada admin deyilsən.
+4d142fe56	📝 Yeni qaralama yaradıldı.
+22442b0b9	📝 Qaralama yaradıldı
+d085f4110	Bu paylaşım tapılmadı.
+fe1b715bd	Fayl loqosu yalnız fayl (sənəd) mediasında olur.
+f3d1310bc	Cavabını açılan mesaja yaz 👇
+2b671f0ee	Önizləmə göndərilə bilmədi. ⟨0⟩
+55afcbd9c	👆 Önizləmə: kanalda belə görünəcək.
+a6aea5676	👁 Önizləmə göndərildi
+2ff4f7035	Artıq bu kanalda admin deyilsən.
+8be0b2234	✅ <b>Paylaşım hazırdır:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Hazır: #g⟨0⟩
+e53f197f7	🗑 Bəli, sil
+9b6fcea87	↩️ Ləğv et
 7d75ab43e	Bu mesajı kanallarda istifadə etmək olmaz.
 93a792a44	Xoş gəldin
 06ba336bf	Vida
@@ -25541,6 +25937,47 @@ b35d597c9	📌 Əvvəlkini saxla
 242c0f02c	Tapılmadı
 ec93a493c	⏸ Dayandırıldı
 e388dd558	▶️ Başladıldı
+daa3d48d5	🔔 Xatırlat
+d1fb68397	🤖 Bot paylaşsın
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Vaxtı başa düşmədim. Nümunə: ⟨0⟩
+a0933c889	Yanlış tarix. Nümunə: ⟨0⟩
+4314dd4ac	Bu vaxt artıq keçib.
+b326ab625	Ən çox 90 gün sonrası planlana bilər.
+38fdf5e34	Paylaşım tapılmadı.
+098340710	⏰ <b>Dərc planı</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ icra olundu
+9537aa30a	🕒 Vaxt: <b>⟨0⟩</b> (Türkiyə vaxtı)⟨1⟩
+438c53be8	🕒 Vaxt: yoxdur — ⏰ Planla düyməsinə bas
+e669f0130	<i>Vaxt çatanda bot paylaşımı kanala özü atır; kanalda imza açıqdırsa botun adı görünür.</i>
+5648800a1	⚠️ “Bot paylaşsın” üçün paylaşımda kanal seçilməlidir; əks halda yalnız xatırladıram.
+b5d451869	<i>Vaxt çatanda sənə şəxsidən xatırladıram; kanala öz hesabından <code>⟨0⟩</code> yazırsan, paylaşım sənin adınla qalır.</i>
+686c037f9	🗑 Vaxtlı sil: ⟨0⟩
+bf912c737	<i>Sabitləmək və silmək üçün bot kanalda admin olmalıdır (mesaj redaktə / silmə icazəsi).</i>
+cd509f96b	📝 Paylaşım hələ qaralamadır: hazır kimi saxlananda planlama işləyəcək.
+cf0dd8c87	✅ Paylaşım dərc olundu.
+5bd6eeff5	⏰ Vaxtı dəyiş
+ba70fe09b	⏰ Planlaşdır
+ff57b73c7	❌ Planlamanı ləğv et
+bef4fd8ba	‹ Paylaşıma qayıt
+af90e4911	📅 <b>Planlı paylaşımlar</b>
+6e0c2a826	Yaxınlaşan planlı paylaşım yoxdur. /post ilə hazırla, sonra ⏰ Planla düyməsinə bas.
+edcf3ebe5	kanal seçilməyib
+82569ed5d	Paylaşım tapılmadı və ya icazən yoxdur.
+6b7df2b07	Bu paylaşım artıq dərc olunub.
+ce0755ac6	⏰ <code>⟨0⟩</code> nə vaxt dərc olunsun? (Türkiyə vaxtı)
+aa587326f	Nümunə: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Planlama ləğv edildi
+e31b7e154	Yenidən yaz və ya cancel.
+401b94bff	✅ <code>⟨0⟩</code> planlandı: <b>⟨1⟩</b>
+f02c379f3	⚠️ Sabitlənə bilmədi: bot kanalda admin olmalı və mesajları redaktə etmə icazəsi olmalıdır.
+78192eae9	⏰ Dərc vaxtı: kanala öz hesabından <code>⟨0⟩</code> yaz.
+7887a0192	⚠️ Paylaşımda kanal seçilmədiyi üçün bot özü atmadı.
+78c5e12de	⚠️ <code>⟨0⟩</code> vaxtında dərc oluna bilmədi (⟨1⟩).
+647007ee2	Paylaşım hazır durur: kanala öz hesabından <code>⟨0⟩</code> yaza və ya /scheduled ilə yenidən planlaya bilərsən.
+dc2a06d68	Botun kanalda admin olduğuna və mesaj göndərmə icazəsi olduğuna əmin ol.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> vaxtında dərc olundu⟨1⟩
 d08a36466	➕ Yeni planlaşdırılmış mesaj
 25cda8fe6	🚪 <b>Vida mesajı</b> — ⟨0⟩
 b61184fea	Status: <b>⟨0⟩</b> · ⟨1⟩
@@ -25550,9 +25987,7 @@ b0037f2fb	👋 <b>Xoş gəldin</b> — ⟨0⟩
 a4530174c	📜 Qaydalar: ⟨0⟩ · 🚪 Vida: ⟨1⟩ · ⏰ Planlaşdırılmış mesajlar: ⟨2⟩
 d0b1d849f	Media, düymələr və dəyişənlər üçün ✏️ Redaktə et düyməsini bas (və ya köməyi görmək üçün qrupda /setwelcome yaz).
 2b7ced272	Açıq
-68b8326a2	yoxdur
 2bae1a721	✏️ Redaktə et
-894e0e55f	👁 Önizləmə
 099ae3d9c	🖼 Medianı sil
 8bb5bb494	↩️ Standarta qaytar
 adcf7aa93	🧹 Köhnəni sil
@@ -25565,7 +26000,6 @@ b6669596d	🚪 Vida mesajı ›
 0c2dc5967	⏰ Planlaşdırılmış mesajlar ›
 9a8a538db	Qara siyahı: ⟨0⟩
 0eed14a22	Qayda yoxdur
-a6aea5676	👁 Önizləmə göndərildi
 eb9f11f93	↩️ Standarta qaytarıldı
 14af210b4	🖼 Media silindi
 f615cd8f5	⏹ Etiketləmə dayandırıldı
@@ -26049,7 +26483,6 @@ f2ba0c77b	✅ Filtr silindi.
 b7301e99a	Bu qrupda filtr yoxdur.
 bd0505102	⚠️ Bu qrupdakı bütün <b>⟨0⟩</b> filtr silinsin?
 8d8252e68	🗑 Bəli, hamısını sil
-9b6fcea87	↩️ Ləğv et
 cf9d69e94	🗑 ⟨0⟩ filtr silindi.
 13c07c249	🧹 Bütün filtrlər silindi (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Brend adı
@@ -26121,7 +26554,6 @@ b248ddfb0	💎 Premium emoji bağlandı
 8f8af330e	Yanlışdır.
 6a47f34ed	Bu klon silinib.
 21d148b57	🗑 @⟨0⟩ klonu silinsin? Bot dayanır, qruplardakı ayarlar qalır.
-e53f197f7	🗑 Bəli, sil
 cb1a5e233	🗑 @⟨0⟩ klon botun bot sahibi tərəfindən silindi.
 19e55244e	Link https://t.me/ ilə başlamalıdır. Yenidən yaz və ya cancel yaz.
 6e97fcc27	✅ ⟨0⟩ yeniləndi.
@@ -26324,7 +26756,6 @@ a1ce809b5	⚠️ Gelöscht + verwarnt
 4d4d20ba3	🔇 Gelöscht + 1 Stunde stummgeschaltet
 3a4a2408d	🚫 Gelöscht + gebannt
 184e9ea25	✅ Ignoriert
-1cd1dbdf9	🗑 Löschen
 d193c645a	⚠️ Verwarnen
 bb7ad37ac	🔇 1 Std. stumm
 ebe01fecc	🚫 Bannen
@@ -26828,7 +27259,6 @@ f41c17d41	Für dieses Panel musst du Admin der Gruppe sein.
 8213d6575	<i>Abbrechen: cancel</i>
 1465f36fd	Schreib deine Antwort als Antwort auf die geöffnete Nachricht.
 3035a6b30	⏰ Die Zeit ist abgelaufen, versuche es erneut über das Panel.
-18363eae4	Abgebrochen.
 3a22b8f74	❌ Die Regeln dürfen nicht leer sein.
 fa98ef9b6	Begrüßungsnachricht
 a9e0c5b00	✏️ ⟨0⟩ aktualisiert | ⟨1⟩
@@ -26861,7 +27291,6 @@ e4b73af2e	🚫 Liste gesperrter Medien ›
 a5265e3d7	🔓 Mediensperre aufheben
 c1a903ce0	🔒 Medien jetzt sperren
 678507459	an
-c293fc85c	aus
 8dd94c76e	nicht installiert (auf dem Server: <code>pip install nudenet</code>)
 043b96df1	🔒 Mediensperre aktiv bis ⟨0⟩
 059a31b37	KI-Scan: ⟨0⟩
@@ -26986,7 +27415,6 @@ c3eded236	🔕 Lautlos
 cffb2a880	👆 Button-Klicks werden gezählt
 716ef3839	↪️ Die Nachricht wird weitergeleitet (zeigt „Weitergeleitet“, Premium-Emojis bleiben erhalten)
 251fac5c6	🗳 Die Umfrage wird weitergeleitet; die Stimmen werden in dieser Umfrage gesammelt
-ba70fe09b	⏰ Planen
 8241e1495	✅ Senden
 86f2e67ab	❌ Abbrechen
 d53523fb6	Es gibt niemanden zum Senden.
@@ -27553,6 +27981,8 @@ fcea72bad	Schnelleinrichtung für die ausgewählte Gruppe
 9674953cf	Bot-Ankündigungen abschalten
 99ab93b21	Sprache
 333895635	Dem Admin schreiben (Support-Linie)
+de94cd9e4	Kanalbeitrag vorbereiten
+7ffee2a93	Deine vorbereiteten Kanalbeiträge
 0d0187ac4	Gruppen und Statistiken deines Bots
 8938961a5	Ankündigungen an Gruppen, Kanäle, Personen
 be4f2dea9	Ankündigungsverlauf
@@ -27733,6 +28163,104 @@ a1c3d2c0b	<code>Unser Kanal - https://t.me/channel &amp;&amp; Support - @support
 dd3608634	Farbe: am Zeilenende <code>#green</code> <code>#red</code> <code>#blue</code> · Rose-Stil: <code>[Kanal](buttonurl://t.me/channel)</code>
 90f26740a	<b>Variablen:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Zufall:</b> Trenne mehrere Nachrichten mit einer Zeile, die nur <code>%%%</code> enthält.
+c293fc85c	aus
+4ffaa2134	klein
+9ad8d8983	groß
+65051db26	über dem Text
+021eeb58e	✅ Bereit
+8dc576b65	📤 Veröffentlicht
+e31d308d2	schreibe den Text des Beitrags. Fett, kursiv, Links, Zitate, Spoiler und Premium-Emoji bleiben unverändert erhalten.
+e2bf41d44	Beitragstext
+c2af2bb93	sende ein Foto, Video, GIF, Musik oder eine Datei. Eine Bildunterschrift wird zum Beitragstext. Medium entfernen: delete
+71d627824	Medium senden
+5c2538ae6	sende das Foto, das zum Logo (Vorschaubild) der Datei wird. Entfernen: delete
+a1c26cf23	Logo-Foto
+282908438	schreibe die Buttons (jede Zeile eine Reihe, nebeneinander mit &&):
+c49a4d150	Unser Kanal - https://t.me/kanal && Teilen - share
+b69bb4ad2	Info - popup:Kurze Beschreibung #blue
+be890c755	Farbe: am Zeilenende #green #red #blue · Buttons entfernen: delete
+faa0b07d9	schreibe den Link, dessen Vorschau angezeigt werden soll. Entfernen: delete
+72b362db5	Der Beitrag ist leer: füge zuerst ✏️ Text oder 🖼 Medium hinzu.
+741bec6dc	In einem Beitrag mit Medium darf der Text höchstens 1024 Zeichen lang sein (jetzt ⟨0⟩).
+ed5e0a973	Der Text darf höchstens 4096 Zeichen lang sein (jetzt ⟨0⟩).
+86691bbcb	Der Code wurde als Bildunterschrift eines Mediums geschrieben; ein Textbeitrag kann nicht auf ein Medium angewendet werden. Schreibe den Code als normalen Text in den Kanal.
+03a2ea7b5	Der Bot hat in diesem Kanal nicht das Recht <b>Nachrichten bearbeiten</b>. Kanaleinstellungen → Administratoren → Bot → Nachrichten bearbeiten aktivieren, dann den Code erneut schreiben.
+115d827cd	Die Code-Nachricht wurde nicht gefunden (vielleicht gelöscht). Schreibe den Code erneut.
+a44085176	Der Text überschreitet das Telegram-Limit; kürze den Beitrag.
+71a61e10f	❌ <code>#g⟨0⟩</code> konnte nicht im Kanal angewendet werden.
+e2fd3d196	Der Beitrag ist weiterhin bereit.
+263efcc87	✅ <code>#g⟨0⟩</code> veröffentlicht: <a href="⟨1⟩">zum Beitrag</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Mehrfach verwendbar: der Code kann erneut benutzt werden.
+7b7e3ce57	📝 <b>Beitrag</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ mehrfach verwendbar
+68b8326a2	keine
+da02209e7	Bildunterschrift oben
+072c286c7	Linkvorschau: ⟨0⟩
+b3742c9fc	Standardoptionen
+75adccdaf	⚠️ <b>Der Bot hat in diesem Kanal nicht das Recht „Nachrichten bearbeiten“.</b> Wenn du den Code schreibst, entsteht kein Beitrag: gib dem Bot dieses Recht in den Kanaleinstellungen.
+bcd754037	👉 Schreibe von deinem eigenen Konto nur <code>#g⟨0⟩</code> in den Kanal; der Bot macht daraus diesen Beitrag.
+74370f776	⚙️ Optionen
+894e0e55f	👁 Vorschau
+4d52d4e82	⏰ Planen / 📌 Anheften / 🗑 Automatisch löschen
+1cd1dbdf9	🗑 Löschen
+89e868a25	📋 Meine Beiträge
+dc6b96b25	⚙️ <b>Optionen</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (verschwommenes Medium)
+10f55a4d2	Bildunterschrift über dem Medium
+13cc9e2b1	🔗 Linkvorschau: ⟨0⟩
+bc6d5abe6	🔗 Vorschau-Link⟨0⟩
+d341358af	🔗 Linkvorschau: aus → klein → groß → über dem Text. Ohne Vorschau-Link wird der erste Link im Text verwendet.
+31c98d00a	Vorschau-Link: ⟨0⟩
+9fbec9097	Mehrfach verwendbarer Code
+7160ae248	♻️ Mehrfach verwendbar: der Code wird jedes Mal, wenn er geschrieben wird, zum Beitrag (ausgeschaltet nur einmal).
+ad3968817	📢 Kein Kanal gefunden, für den du Beiträge vorbereiten kannst.
+6d383efc3	Füge den Bot als Administrator (mit dem Recht <b>Nachrichten bearbeiten</b>) zu deinem Kanal hinzu und versuche es erneut.
+7f8742403	📝 <b>Beitragsstudio</b>
+170aee2de	Für welchen Kanal bereitest du den Beitrag vor?
+3e05df453	➕ Neuer Beitrag
+864aedf12	📋 <b>Deine Beiträge</b>
+1318a9069	Tippe einen an, um ihn zu bearbeiten.
+4d939cb89	📋 Du hast noch keine Beiträge. Beginne mit ➕ Neuer Beitrag.
+01632d43b	📝 Das Beitragsstudio funktioniert im privaten Chat: schreib mir privat /post.
+3c5415709	📝 Um deine Beiträge zu sehen, schreib mir privat /posts.
+831dbaf68	Aktuelle Buttons:
+bd542f721	❌ Der Text ist leer. Schreibe den Beitragstext.
+ac9f5940e	❌ Der Text ist zu lang (⟨0⟩ Zeichen; höchstens 4096).
+3f1817503	(in einem Beitrag mit Medium können höchstens 1024 Zeichen angezeigt werden!)
+805393212	✅ Medium entfernt.
+42deb481c	❌ Sprachnachrichten und runde Videos können nicht per Bearbeitung hinzugefügt werden (Telegram-Limit). Sende sie als Musik oder Datei.
+0b8f18cda	❌ Ein Sticker kann nicht zum Beitrag hinzugefügt werden. Sende ein Foto, Video, GIF, Musik oder eine Datei.
+b1710547c	❌ Kein Medium gefunden. Sende ein Foto, Video, GIF, Musik oder eine Datei (entfernen: delete).
+fe0741bc3	, die Bildunterschrift wurde zum Beitragstext
+0b86280c2	✅ Datei-Logo entfernt.
+90964f332	❌ Ein Datei-Logo gibt es nur bei Datei-Medien (Dokument).
+4d8ce7343	❌ Sende ein Foto für das Logo (entfernen: delete).
+d8e07b1f2	✅ Datei-Logo gespeichert (wird auf ein 320-px-JPEG verkleinert).
+dd65d93a0	✅ Buttons entfernt.
+d1cf8dc6e	❌ Das Button-Format wurde nicht verstanden⟨0⟩
+f9e98ab3e	Beispiel: <code>Unser Kanal - https://t.me/kanal &amp;&amp; Teilen - share</code>
+dfe50c705	✅ Vorschau-Link entfernt.
+53d15ba87	❌ Schreibe einen gültigen Link (z. B. https://example.com).
+bf2d13067	✅ Vorschau-Link gespeichert.
+3febd3182	❌ Unbekannte Eingabe.
+4ec886fb2	⏰ Zeit abgelaufen, versuche es erneut im Editor.
+c6f41a62e	Diesen Beitrag gibt es nicht mehr.
+18363eae4	Abgebrochen.
+08c32666e	Das Beitragsstudio funktioniert im privaten Chat.
+fc778b227	Dieser Kanal wurde nicht gefunden oder du bist dort kein Administrator.
+4d142fe56	📝 Neuer Entwurf erstellt.
+22442b0b9	📝 Entwurf erstellt
+d085f4110	Dieser Beitrag wurde nicht gefunden.
+fe1b715bd	Ein Datei-Logo gibt es nur bei Datei-Medien (Dokument).
+f3d1310bc	Schreibe deine Antwort in die geöffnete Nachricht 👇
+2b671f0ee	Die Vorschau konnte nicht gesendet werden. ⟨0⟩
+55afcbd9c	👆 Vorschau: so wird es im Kanal aussehen.
+a6aea5676	👁 Vorschau gesendet
+2ff4f7035	Du bist in diesem Kanal kein Administrator mehr.
+8be0b2234	✅ <b>Beitrag bereit:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Bereit: #g⟨0⟩
+e53f197f7	🗑 Ja, löschen
+9b6fcea87	↩️ Abbrechen
 7d75ab43e	Diese Nachricht kann in Kanälen nicht verwendet werden.
 93a792a44	Begrüßung
 06ba336bf	Verabschiedung
@@ -27768,6 +28296,47 @@ b35d597c9	📌 Vorherige behalten
 242c0f02c	Nicht gefunden
 ec93a493c	⏸ Gestoppt
 e388dd558	▶️ Gestartet
+daa3d48d5	🔔 Erinnern
+d1fb68397	🤖 Bot postet
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Ich habe die Zeit nicht verstanden. Beispiel: ⟨0⟩
+a0933c889	Ungültiges Datum. Beispiel: ⟨0⟩
+4314dd4ac	Diese Zeit liegt bereits in der Vergangenheit.
+b326ab625	Es kann höchstens 90 Tage im Voraus geplant werden.
+38fdf5e34	Beitrag nicht gefunden.
+098340710	⏰ <b>Veröffentlichungsplan</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ erledigt
+9537aa30a	🕒 Zeit: <b>⟨0⟩</b> (türkische Zeit)⟨1⟩
+438c53be8	🕒 Zeit: keine — tippe auf ⏰ Planen
+e669f0130	<i>Zur geplanten Zeit postet der Bot den Beitrag selbst im Kanal; sind Signaturen im Kanal aktiv, ist der Bot-Name sichtbar.</i>
+5648800a1	⚠️ Für „Bot postet“ muss für den Beitrag ein Kanal gewählt sein; sonst erinnere ich nur.
+b5d451869	<i>Zur geplanten Zeit erinnere ich dich privat; du schreibst <code>⟨0⟩</code> von deinem Konto in den Kanal und der Beitrag bleibt unter deinem Namen.</i>
+686c037f9	🗑 Automatisch löschen: ⟨0⟩
+bf912c737	<i>Zum Anheften und Löschen muss der Bot im Kanal Administrator sein (Recht Nachrichten bearbeiten / löschen).</i>
+cd509f96b	📝 Der Beitrag ist noch ein Entwurf: die Planung greift, sobald er als bereit gespeichert ist.
+cf0dd8c87	✅ Beitrag veröffentlicht.
+5bd6eeff5	⏰ Zeit ändern
+ba70fe09b	⏰ Planen
+ff57b73c7	❌ Planung entfernen
+bef4fd8ba	‹ Zurück zum Beitrag
+af90e4911	📅 <b>Geplante Beiträge</b>
+6e0c2a826	Keine anstehenden geplanten Beiträge. Bereite einen mit /post vor und tippe dann auf ⏰ Planen.
+edcf3ebe5	kein Kanal gewählt
+82569ed5d	Beitrag nicht gefunden oder du hast keine Berechtigung.
+6b7df2b07	Dieser Beitrag wurde bereits veröffentlicht.
+ce0755ac6	⏰ Wann soll <code>⟨0⟩</code> veröffentlicht werden? (türkische Zeit)
+aa587326f	Beispiel: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Planung entfernt
+e31b7e154	Schreibe es erneut oder cancel.
+401b94bff	✅ <code>⟨0⟩</code> geplant: <b>⟨1⟩</b>
+f02c379f3	⚠️ Anheften fehlgeschlagen: der Bot muss im Kanal Administrator mit dem Recht Nachrichten bearbeiten sein.
+78192eae9	⏰ Veröffentlichungszeit: schreibe <code>⟨0⟩</code> von deinem eigenen Konto in den Kanal.
+7887a0192	⚠️ Der Bot hat nicht selbst gepostet, weil für den Beitrag kein Kanal gewählt ist.
+78c5e12de	⚠️ <code>⟨0⟩</code> konnte nicht pünktlich veröffentlicht werden (⟨1⟩).
+647007ee2	Der Beitrag ist weiterhin bereit: du kannst <code>⟨0⟩</code> von deinem Konto in den Kanal schreiben oder ihn mit /scheduled neu planen.
+dc2a06d68	Stelle sicher, dass der Bot im Kanal Administrator mit dem Recht Nachrichten senden ist.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> pünktlich veröffentlicht⟨1⟩
 d08a36466	➕ Neue geplante Nachricht
 25cda8fe6	🚪 <b>Abschiedsnachricht</b> — ⟨0⟩
 b61184fea	Status: <b>⟨0⟩</b> · ⟨1⟩
@@ -27778,9 +28347,7 @@ a4530174c	📜 Regeln: ⟨0⟩ · 🚪 Verabschiedung: ⟨1⟩ · ⏰ Geplante N
 d0b1d849f	Für Medien, Buttons und Variablen drücke ✏️ Bearbeiten (oder tippe /setwelcome in der Gruppe, um die Hilfe zu sehen).
 2b7ced272	An
 e5b4e786e	ja
-68b8326a2	keine
 2bae1a721	✏️ Bearbeiten
-894e0e55f	👁 Vorschau
 099ae3d9c	🖼 Medium entfernen
 8bb5bb494	↩️ Auf Standard zurücksetzen
 adcf7aa93	🧹 Alte löschen
@@ -27793,7 +28360,6 @@ b6669596d	🚪 Abschiedsnachricht ›
 0c2dc5967	⏰ Geplante Nachrichten ›
 9a8a538db	Schwarze Liste: ⟨0⟩
 0eed14a22	Keine Regeln
-a6aea5676	👁 Vorschau gesendet
 eb9f11f93	↩️ Auf Standard zurückgesetzt
 14af210b4	🖼 Medium entfernt
 f615cd8f5	⏹ Markieren gestoppt
@@ -28283,7 +28849,6 @@ f2ba0c77b	✅ Filter gelöscht.
 b7301e99a	In dieser Gruppe gibt es keine Filter.
 bd0505102	⚠️ Alle <b>⟨0⟩</b> Filter in dieser Gruppe löschen?
 8d8252e68	🗑 Ja, alle löschen
-9b6fcea87	↩️ Abbrechen
 cf9d69e94	🗑 ⟨0⟩ Filter gelöscht.
 13c07c249	🧹 Alle Filter gelöscht (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Markenname
@@ -28358,7 +28923,6 @@ b248ddfb0	💎 Premium-Emojis deaktiviert
 8f8af330e	Ungültig.
 6a47f34ed	Dieser Klon wurde gelöscht.
 21d148b57	🗑 Den Klon @⟨0⟩ löschen? Der Bot stoppt, die Einstellungen in den Gruppen bleiben.
-e53f197f7	🗑 Ja, löschen
 cb1a5e233	🗑 Dein Klon-Bot @⟨0⟩ wurde vom Bot-Besitzer gelöscht.
 19e55244e	Der Link muss mit https://t.me/ beginnen. Schreib ihn erneut oder cancel.
 6e97fcc27	✅ ⟨0⟩ aktualisiert.
@@ -28559,7 +29123,6 @@ a1ce809b5	⚠️ Deleted + warned
 4d4d20ba3	🔇 Deleted + muted for 1 hour
 3a4a2408d	🚫 Deleted + banned
 184e9ea25	✅ Ignored
-1cd1dbdf9	🗑 Delete
 d193c645a	⚠️ Warn
 bb7ad37ac	🔇 Mute 1h
 ebe01fecc	🚫 Ban
@@ -29059,7 +29622,6 @@ f41c17d41	You must be an admin in the group to use this panel.
 8213d6575	<i>To cancel: cancel</i>
 1465f36fd	Write your answer as a reply to the message that opened.
 3035a6b30	⏰ Time is up, try again from the panel.
-18363eae4	Cancelled.
 3a22b8f74	❌ The rules can't be empty.
 fa98ef9b6	Welcome message
 a9e0c5b00	✏️ ⟨0⟩ updated | ⟨1⟩
@@ -29092,7 +29654,6 @@ e4b73af2e	🚫 Blocked media list ›
 a5265e3d7	🔓 Lift media lock
 c1a903ce0	🔒 Lock media now
 678507459	on
-c293fc85c	off
 8dd94c76e	not installed (on the server: <code>pip install nudenet</code>)
 043b96df1	🔒 Media lock active until ⟨0⟩
 059a31b37	AI scan: ⟨0⟩
@@ -29217,7 +29778,6 @@ c3eded236	🔕 Silent
 cffb2a880	👆 Button clicks will be counted
 716ef3839	↪️ The message will be forwarded (shows "Forwarded", premium emojis are kept)
 251fac5c6	🗳 The poll will be forwarded; votes are collected in this poll
-ba70fe09b	⏰ Schedule
 8241e1495	✅ Send
 86f2e67ab	❌ Cancel
 d53523fb6	There's nobody to send to.
@@ -29779,6 +30339,8 @@ fcea72bad	Quick setup for the selected group
 9674953cf	Turn off bot announcements
 99ab93b21	Language
 333895635	Write to the admin (support line)
+de94cd9e4	Prepare a channel post
+7ffee2a93	Channel posts you prepared
 0d0187ac4	Your bot's groups and statistics
 8938961a5	Announcements to groups, channels, people
 be4f2dea9	Announcement history
@@ -29955,6 +30517,104 @@ a1c3d2c0b	<code>Our channel - https://t.me/channel &amp;&amp; Support - @support
 dd3608634	Color: at the end of the line <code>#green</code> <code>#red</code> <code>#blue</code> · Rose style: <code>[Channel](buttonurl://t.me/channel)</code>
 90f26740a	<b>Variables:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Random:</b> separate several messages with a line containing only <code>%%%</code>.
+c293fc85c	off
+4ffaa2134	small
+9ad8d8983	large
+65051db26	above the text
+021eeb58e	✅ Ready
+8dc576b65	📤 Published
+e31d308d2	write the post text. Bold, italic, links, quotes, spoilers and premium emoji are kept as they are.
+e2bf41d44	Post text
+c2af2bb93	send a photo, video, GIF, music or file. Its caption becomes the post text. To remove the media: delete
+71d627824	Send media
+5c2538ae6	send the photo that will be the file's logo (thumbnail). To remove it: delete
+a1c26cf23	Logo photo
+282908438	write the buttons (one row per line, side by side with &&):
+c49a4d150	Our channel - https://t.me/kanal && Share - share
+b69bb4ad2	Info - popup:Short description #blue
+be890c755	Color: add #green #red #blue at the end of the line · To remove the buttons: delete
+faa0b07d9	write the link whose preview will be shown. To remove it: delete
+72b362db5	The post is empty: add ✏️ Text or 🖼 Media first.
+741bec6dc	In a post with media the text can be at most 1024 characters (now ⟨0⟩).
+ed5e0a973	The text can be at most 4096 characters (now ⟨0⟩).
+86691bbcb	The code was written as a media caption; a text post can't be applied to media. Write the code to the channel as plain text.
+03a2ea7b5	The bot doesn't have the <b>Edit messages</b> right in this channel. Channel settings → Administrators → bot → turn on Edit messages, then write the code again.
+115d827cd	The code message was not found (it may have been deleted). Write the code again.
+a44085176	The text exceeds Telegram's limit; shorten the post.
+71a61e10f	❌ <code>#g⟨0⟩</code> couldn't be applied to the channel.
+e2fd3d196	The post is still ready.
+263efcc87	✅ <code>#g⟨0⟩</code> published: <a href="⟨1⟩">go to post</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Multi-use: the code can be used again.
+7b7e3ce57	📝 <b>Post</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ multi-use
+68b8326a2	none
+da02209e7	caption on top
+072c286c7	link preview: ⟨0⟩
+b3742c9fc	default options
+75adccdaf	⚠️ <b>The bot doesn't have the “Edit messages” right in this channel.</b> The post can't be created when you write the code: give the bot this right in the channel settings.
+bcd754037	👉 Write only <code>#g⟨0⟩</code> to the channel from your own account; the bot will turn it into this post.
+74370f776	⚙️ Options
+894e0e55f	👁 Preview
+4d52d4e82	⏰ Schedule / 📌 Pin / 🗑 Auto-delete
+1cd1dbdf9	🗑 Delete
+89e868a25	📋 My posts
+dc6b96b25	⚙️ <b>Options</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (blurred media)
+10f55a4d2	Caption above the media
+13cc9e2b1	🔗 Link preview: ⟨0⟩
+bc6d5abe6	🔗 Preview link⟨0⟩
+d341358af	🔗 Link preview: off → small → large → above the text. If no preview link is given, the first link in the text is used.
+31c98d00a	Preview link: ⟨0⟩
+9fbec9097	Multi-use code
+7160ae248	♻️ Multi-use: the code turns into the post every time it is written (once if off).
+ad3968817	📢 No channel found where you can prepare a post.
+6d383efc3	Add the bot to your channel as an administrator (with the <b>Edit messages</b> right), then try again.
+7f8742403	📝 <b>Post studio</b>
+170aee2de	Which channel are you preparing the post for?
+3e05df453	➕ New post
+864aedf12	📋 <b>Your posts</b>
+1318a9069	Tap one to edit it.
+4d939cb89	📋 You have no posts yet. Start with ➕ New post.
+01632d43b	📝 The post studio works in private chat: send me /post privately.
+3c5415709	📝 To see your posts, send me /posts privately.
+831dbaf68	Current buttons:
+bd542f721	❌ The text is empty. Write the post text.
+ac9f5940e	❌ The text is too long (⟨0⟩ characters; at most 4096).
+3f1817503	(in a post with media at most 1024 characters can be shown!)
+805393212	✅ Media removed.
+42deb481c	❌ Voice messages and round videos can't be added by editing (Telegram limit). Send it as music or a file.
+0b8f18cda	❌ A sticker can't be added to the post. Send a photo, video, GIF, music or file.
+b1710547c	❌ No media found. Send a photo, video, GIF, music or file (to remove: delete).
+fe0741bc3	, its caption became the post text
+0b86280c2	✅ File logo removed.
+90964f332	❌ A file logo only works with file (document) media.
+4d8ce7343	❌ Send a photo for the logo (to remove: delete).
+d8e07b1f2	✅ File logo saved (scaled down to a 320 px JPEG).
+dd65d93a0	✅ Buttons removed.
+d1cf8dc6e	❌ The button format couldn't be understood⟨0⟩
+f9e98ab3e	Example: <code>Our channel - https://t.me/kanal &amp;&amp; Share - share</code>
+dfe50c705	✅ Preview link removed.
+53d15ba87	❌ Write a valid link (e.g. https://example.com).
+bf2d13067	✅ Preview link saved.
+3febd3182	❌ Unknown input.
+4ec886fb2	⏰ Time is up, try again from the editor.
+c6f41a62e	This post no longer exists.
+18363eae4	Cancelled.
+08c32666e	The post studio works in private chat.
+fc778b227	This channel wasn't found or you aren't an administrator there.
+4d142fe56	📝 New draft created.
+22442b0b9	📝 Draft created
+d085f4110	This post wasn't found.
+fe1b715bd	A file logo only works with file (document) media.
+f3d1310bc	Write your answer in the message that opened 👇
+2b671f0ee	The preview couldn't be sent. ⟨0⟩
+55afcbd9c	👆 Preview: this is how it will look in the channel.
+a6aea5676	👁 Preview sent
+2ff4f7035	You are no longer an administrator in this channel.
+8be0b2234	✅ <b>Post ready:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Ready: #g⟨0⟩
+e53f197f7	🗑 Yes, delete
+9b6fcea87	↩️ Cancel
 7d75ab43e	This message can't be used in channels.
 93a792a44	Welcome
 06ba336bf	Goodbye
@@ -29990,6 +30650,47 @@ b35d597c9	📌 Keep previous
 242c0f02c	Not found
 ec93a493c	⏸ Stopped
 e388dd558	▶️ Started
+daa3d48d5	🔔 Remind me
+d1fb68397	🤖 Bot posts it
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	I couldn't understand the time. Example: ⟨0⟩
+a0933c889	Invalid date. Example: ⟨0⟩
+4314dd4ac	This time is already in the past.
+b326ab625	You can schedule at most 90 days ahead.
+38fdf5e34	Post not found.
+098340710	⏰ <b>Publishing plan</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ done
+9537aa30a	🕒 Time: <b>⟨0⟩</b> (Turkey time)⟨1⟩
+438c53be8	🕒 Time: none — press ⏰ Schedule
+e669f0130	<i>When the time comes the bot posts it to the channel itself; if signatures are on in the channel, the bot's name is shown.</i>
+5648800a1	⚠️ For “Bot posts it” a channel must be selected for the post; otherwise I only remind you.
+b5d451869	<i>When the time comes I remind you privately; you write <code>⟨0⟩</code> to the channel from your own account and the post stays under your name.</i>
+686c037f9	🗑 Auto-delete: ⟨0⟩
+bf912c737	<i>To pin and delete, the bot must be an administrator in the channel (edit / delete messages right).</i>
+cd509f96b	📝 The post is still a draft: scheduling works once it is saved as ready.
+cf0dd8c87	✅ Post published.
+5bd6eeff5	⏰ Change time
+ba70fe09b	⏰ Schedule
+ff57b73c7	❌ Remove schedule
+bef4fd8ba	‹ Back to post
+af90e4911	📅 <b>Scheduled posts</b>
+6e0c2a826	No upcoming scheduled posts. Prepare one with /post, then press ⏰ Schedule.
+edcf3ebe5	no channel selected
+82569ed5d	Post not found or you have no permission.
+6b7df2b07	This post has already been published.
+ce0755ac6	⏰ When should <code>⟨0⟩</code> be published? (Turkey time)
+aa587326f	Example: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Schedule removed
+e31b7e154	Write it again or cancel.
+401b94bff	✅ <code>⟨0⟩</code> scheduled: <b>⟨1⟩</b>
+f02c379f3	⚠️ Couldn't pin: the bot must be an administrator in the channel with the edit messages right.
+78192eae9	⏰ Publishing time: write <code>⟨0⟩</code> to the channel from your own account.
+7887a0192	⚠️ The bot didn't post it itself because no channel is selected for the post.
+78c5e12de	⚠️ <code>⟨0⟩</code> couldn't be published on time (⟨1⟩).
+647007ee2	The post is still ready: you can write <code>⟨0⟩</code> to the channel from your own account or reschedule it with /scheduled.
+dc2a06d68	Make sure the bot is an administrator in the channel with the right to post messages.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> published on time⟨1⟩
 d08a36466	➕ New scheduled message
 25cda8fe6	🚪 <b>Goodbye message</b> — ⟨0⟩
 b61184fea	Status: <b>⟨0⟩</b> · ⟨1⟩
@@ -30000,9 +30701,7 @@ a4530174c	📜 Rules: ⟨0⟩ · 🚪 Goodbye: ⟨1⟩ · ⏰ Scheduled messages
 d0b1d849f	For media, buttons and variables press ✏️ Edit (or type /setwelcome in the group to see its help).
 2b7ced272	On
 e5b4e786e	yes
-68b8326a2	none
 2bae1a721	✏️ Edit
-894e0e55f	👁 Preview
 099ae3d9c	🖼 Remove media
 8bb5bb494	↩️ Reset to default
 adcf7aa93	🧹 Delete the old one
@@ -30015,7 +30714,6 @@ b6669596d	🚪 Goodbye message ›
 0c2dc5967	⏰ Scheduled messages ›
 9a8a538db	Blacklist: ⟨0⟩
 0eed14a22	No rules
-a6aea5676	👁 Preview sent
 eb9f11f93	↩️ Reset to default
 14af210b4	🖼 Media removed
 f615cd8f5	⏹ Tagging stopped
@@ -30504,7 +31202,6 @@ f2ba0c77b	✅ Filter deleted.
 b7301e99a	There are no filters in this group.
 bd0505102	⚠️ Delete all <b>⟨0⟩</b> filters in this group?
 8d8252e68	🗑 Yes, delete all
-9b6fcea87	↩️ Cancel
 cf9d69e94	🗑 ⟨0⟩ filters deleted.
 13c07c249	🧹 All filters deleted (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Brand name
@@ -30580,7 +31277,6 @@ b248ddfb0	💎 Premium emoji turned off
 8f8af330e	Invalid.
 6a47f34ed	This clone was deleted.
 21d148b57	🗑 Delete the clone @⟨0⟩? The bot stops, settings in groups stay.
-e53f197f7	🗑 Yes, delete
 cb1a5e233	🗑 Your clone bot @⟨0⟩ was deleted by the bot owner.
 19e55244e	The link must start with https://t.me/. Write it again or cancel.
 6e97fcc27	✅ ⟨0⟩ updated.
@@ -30716,6 +31412,25 @@ f679032d2	• <code>/admin ⟨0⟩</code>
 ae44f58ab	• <code>/ban ⟨0⟩</code>
 29fa938c6	• <code>⟨0⟩</code> — ⟨1⟩ (⟨2⟩)
 1ea2795d4	https://t.me/⟨0⟩
+7103829da	https://t.me/⟨0⟩/⟨1⟩
+b9b9ff299	https://t.me/c/⟨0⟩/⟨1⟩
+df8be58ea	Durum: ⟨0⟩⟨1⟩
+af2b3830d	✏️ Metin: ⟨0⟩
+a631ffe4f	🖼 Medya: ⟨0⟩
+a01316aed	📎 Dosya logosu: ⟨0⟩
+2d0e0586c	🔘 Butonlar: ⟨0⟩
+f78631276	<code>#g⟨0⟩</code>: ⟨1⟩⟨2⟩
+3e6041c05	✅ Metin kaydedildi⟨0⟩.
+a8d416edb	✅ ⟨0⟩ eklendi
+70a88b575	✅ ⟨0⟩ buton kaydedildi.
+99d68e3c3	🗑 <code>#g⟨0⟩</code> silinsin mi?
+020fb42bf	🗑 <code>#g⟨0⟩</code> silindi.
+9d17d5fb8	📢 Kanal: ⟨0⟩
+a7a2116ba	Kip: ⟨0⟩
+d29490b79	📌 Sabitle: ⟨0⟩
+767c7de80	🗑 Silinecek: ⟨0⟩
+925a3e6fa	• <code>⟨0⟩</code> → ⟨1⟩
+f820948f3	🗑 ⟨0⟩ sonra silinecek.
 a4439e0c5	<a href="tg://user?id=⟨0⟩">⟨1⟩</a>
 04a2454bb	🌐 CAS: ⟨0⟩
 4b6ea2e22	https://api.telegram.org/bot⟨0⟩/⟨1⟩
@@ -30825,7 +31540,6 @@ a1ce809b5	⚠️ Borrado + advertido
 4d4d20ba3	🔇 Borrado + silenciado 1 hora
 3a4a2408d	🚫 Borrado + baneado
 184e9ea25	✅ Ignorado
-1cd1dbdf9	🗑 Borrar
 d193c645a	⚠️ Advertir
 bb7ad37ac	🔇 Silenciar 1 h
 ebe01fecc	🚫 Banear
@@ -31335,7 +32049,6 @@ f41c17d41	Debes ser admin del grupo para usar este panel.
 8213d6575	<i>Para cancelar: cancel</i>
 1465f36fd	Escribe tu respuesta respondiendo al mensaje que se abrió.
 3035a6b30	⏰ Se acabó el tiempo, inténtalo de nuevo desde el panel.
-18363eae4	Cancelado.
 3a22b8f74	❌ Las reglas no pueden estar vacías.
 fa98ef9b6	Mensaje de bienvenida
 a9e0c5b00	✏️ ⟨0⟩ actualizado | ⟨1⟩
@@ -31368,7 +32081,6 @@ e4b73af2e	🚫 Lista de multimedia bloqueada ›
 a5265e3d7	🔓 Quitar bloqueo de multimedia
 c1a903ce0	🔒 Bloquear multimedia ahora
 678507459	activado
-c293fc85c	desactivado
 8dd94c76e	no instalado (en el servidor: <code>pip install nudenet</code>)
 043b96df1	🔒 Bloqueo de multimedia activo hasta ⟨0⟩
 059a31b37	Análisis con IA: ⟨0⟩
@@ -31493,7 +32205,6 @@ c3eded236	🔕 Silencioso
 cffb2a880	👆 Se contarán los clics en botones
 716ef3839	↪️ El mensaje se reenviará (muestra "Reenviado", se conservan los emojis premium)
 251fac5c6	🗳 La encuesta se reenviará; los votos se reúnen en esta encuesta
-ba70fe09b	⏰ Programar
 8241e1495	✅ Enviar
 86f2e67ab	❌ Cancelar
 d53523fb6	No hay a quién enviar.
@@ -32060,6 +32771,8 @@ fcea72bad	Configuración rápida del grupo elegido
 9674953cf	Desactivar los anuncios del bot
 99ab93b21	Idioma
 333895635	Escribir al admin (línea de soporte)
+de94cd9e4	Preparar una publicación para el canal
+7ffee2a93	Publicaciones de canal que preparaste
 0d0187ac4	Grupos y estadísticas de tu bot
 8938961a5	Anuncios a grupos, canales y personas
 be4f2dea9	Historial de anuncios
@@ -32241,6 +32954,104 @@ a1c3d2c0b	<code>Nuestro canal - https://t.me/channel &amp;&amp; Soporte - @suppo
 dd3608634	Color: al final de la línea <code>#green</code> <code>#red</code> <code>#blue</code> · Estilo Rose: <code>[Canal](buttonurl://t.me/channel)</code>
 90f26740a	<b>Variables:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Aleatorio:</b> separa varios mensajes con una línea que solo contenga <code>%%%</code>.
+c293fc85c	desactivado
+4ffaa2134	pequeña
+9ad8d8983	grande
+65051db26	encima del texto
+021eeb58e	✅ Lista
+8dc576b65	📤 Publicada
+e31d308d2	escribe el texto de la publicación. Negrita, cursiva, enlaces, citas, spoilers y emoji premium se mantienen tal cual.
+e2bf41d44	Texto de la publicación
+c2af2bb93	envía una foto, video, GIF, música o archivo. Si tiene descripción, será el texto de la publicación. Para quitar el medio: delete
+71d627824	Envía el medio
+5c2538ae6	envía la foto que será el logo (miniatura) del archivo. Para quitarlo: delete
+a1c26cf23	Foto del logo
+282908438	escribe los botones (cada línea una fila, uno al lado de otro con &&):
+c49a4d150	Nuestro canal - https://t.me/kanal && Compartir - share
+b69bb4ad2	Info - popup:Descripción corta #blue
+be890c755	Color: al final de la línea #green #red #blue · Para quitar los botones: delete
+faa0b07d9	escribe el enlace cuya vista previa se mostrará. Para quitarlo: delete
+72b362db5	La publicación está vacía: primero añade ✏️ Texto o 🖼 Medio.
+741bec6dc	En una publicación con medio el texto puede tener como máximo 1024 caracteres (ahora ⟨0⟩).
+ed5e0a973	El texto puede tener como máximo 4096 caracteres (ahora ⟨0⟩).
+86691bbcb	El código se escribió como descripción de un medio; una publicación de texto no se puede aplicar a un medio. Escribe el código en el canal como texto normal.
+03a2ea7b5	El bot no tiene el permiso <b>Editar mensajes</b> en este canal. Ajustes del canal → Administradores → bot → activa Editar mensajes y vuelve a escribir el código.
+115d827cd	No se encontró el mensaje del código (puede que se haya borrado). Vuelve a escribir el código.
+a44085176	El texto supera el límite de Telegram; acorta la publicación.
+71a61e10f	❌ No se pudo aplicar <code>#g⟨0⟩</code> al canal.
+e2fd3d196	La publicación sigue lista.
+263efcc87	✅ <code>#g⟨0⟩</code> publicada: <a href="⟨1⟩">ir a la publicación</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Reutilizable: el código se puede volver a usar.
+7b7e3ce57	📝 <b>Publicación</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ reutilizable
+68b8326a2	no
+da02209e7	descripción arriba
+072c286c7	vista previa del enlace: ⟨0⟩
+b3742c9fc	opciones predeterminadas
+75adccdaf	⚠️ <b>El bot no tiene el permiso “Editar mensajes” en este canal.</b> Al escribir el código no se creará la publicación: dale este permiso al bot en los ajustes del canal.
+bcd754037	👉 Escribe en el canal desde tu propia cuenta solo <code>#g⟨0⟩</code>; el bot lo convertirá en esta publicación.
+74370f776	⚙️ Opciones
+894e0e55f	👁 Vista previa
+4d52d4e82	⏰ Programar / 📌 Fijar / 🗑 Borrado automático
+1cd1dbdf9	🗑 Borrar
+89e868a25	📋 Mis publicaciones
+dc6b96b25	⚙️ <b>Opciones</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (medio difuminado)
+10f55a4d2	Descripción encima del medio
+13cc9e2b1	🔗 Vista previa del enlace: ⟨0⟩
+bc6d5abe6	🔗 Enlace de vista previa⟨0⟩
+d341358af	🔗 Vista previa del enlace: desactivada → pequeña → grande → encima del texto. Si no se indica un enlace de vista previa, se usa el primer enlace del texto.
+31c98d00a	Enlace de vista previa: ⟨0⟩
+9fbec9097	Código reutilizable
+7160ae248	♻️ Reutilizable: el código se convierte en la publicación cada vez que se escribe (una sola vez si está desactivado).
+ad3968817	📢 No se encontró ningún canal para el que puedas preparar publicaciones.
+6d383efc3	Añade el bot a tu canal como administrador (con el permiso <b>Editar mensajes</b>) y vuelve a intentarlo.
+7f8742403	📝 <b>Estudio de publicaciones</b>
+170aee2de	¿Para qué canal preparas la publicación?
+3e05df453	➕ Nueva publicación
+864aedf12	📋 <b>Tus publicaciones</b>
+1318a9069	Toca una para editarla.
+4d939cb89	📋 Aún no tienes publicaciones. Empieza con ➕ Nueva publicación.
+01632d43b	📝 El estudio de publicaciones funciona en chat privado: escríbeme /post por privado.
+3c5415709	📝 Para ver tus publicaciones, escríbeme /posts por privado.
+831dbaf68	Botones actuales:
+bd542f721	❌ El texto está vacío. Escribe el texto de la publicación.
+ac9f5940e	❌ El texto es demasiado largo (⟨0⟩ caracteres; máximo 4096).
+3f1817503	(¡en una publicación con medio se pueden mostrar como máximo 1024 caracteres!)
+805393212	✅ Medio eliminado.
+42deb481c	❌ Los mensajes de voz y los videos redondos no se pueden añadir editando (límite de Telegram). Envíalo como música o archivo.
+0b8f18cda	❌ No se puede añadir un sticker a la publicación. Envía una foto, video, GIF, música o archivo.
+b1710547c	❌ No se encontró ningún medio. Envía una foto, video, GIF, música o archivo (para quitar: delete).
+fe0741bc3	, su descripción pasó a ser el texto de la publicación
+0b86280c2	✅ Logo del archivo eliminado.
+90964f332	❌ El logo del archivo solo existe en medios de tipo archivo (documento).
+4d8ce7343	❌ Envía una foto para el logo (para quitar: delete).
+d8e07b1f2	✅ Logo del archivo guardado (se reduce a un JPEG de 320 px).
+dd65d93a0	✅ Botones eliminados.
+d1cf8dc6e	❌ No se entendió el formato de los botones⟨0⟩
+f9e98ab3e	Ejemplo: <code>Nuestro canal - https://t.me/kanal &amp;&amp; Compartir - share</code>
+dfe50c705	✅ Enlace de vista previa eliminado.
+53d15ba87	❌ Escribe un enlace válido (p. ej. https://example.com).
+bf2d13067	✅ Enlace de vista previa guardado.
+3febd3182	❌ Entrada desconocida.
+4ec886fb2	⏰ Se acabó el tiempo, inténtalo de nuevo desde el editor.
+c6f41a62e	Esta publicación ya no existe.
+18363eae4	Cancelado.
+08c32666e	El estudio de publicaciones funciona en chat privado.
+fc778b227	No se encontró este canal o no eres administrador allí.
+4d142fe56	📝 Se creó un nuevo borrador.
+22442b0b9	📝 Borrador creado
+d085f4110	No se encontró esta publicación.
+fe1b715bd	El logo del archivo solo existe en medios de tipo archivo (documento).
+f3d1310bc	Escribe tu respuesta en el mensaje que se abrió 👇
+2b671f0ee	No se pudo enviar la vista previa. ⟨0⟩
+55afcbd9c	👆 Vista previa: así se verá en el canal.
+a6aea5676	👁 Vista previa enviada
+2ff4f7035	Ya no eres administrador en este canal.
+8be0b2234	✅ <b>Publicación lista:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Lista: #g⟨0⟩
+e53f197f7	🗑 Sí, borrar
+9b6fcea87	↩️ Cancelar
 7d75ab43e	Este mensaje no se puede usar en canales.
 93a792a44	Bienvenida
 06ba336bf	Despedida
@@ -32276,6 +33087,47 @@ b35d597c9	📌 Mantener el anterior
 242c0f02c	No encontrado
 ec93a493c	⏸ Detenido
 e388dd558	▶️ Iniciado
+daa3d48d5	🔔 Recordarme
+d1fb68397	🤖 Que publique el bot
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	No entendí la hora. Ejemplo: ⟨0⟩
+a0933c889	Fecha no válida. Ejemplo: ⟨0⟩
+4314dd4ac	Esa hora ya pasó.
+b326ab625	Se puede programar como máximo con 90 días de antelación.
+38fdf5e34	Publicación no encontrada.
+098340710	⏰ <b>Plan de publicación</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ procesada
+9537aa30a	🕒 Hora: <b>⟨0⟩</b> (hora de Turquía)⟨1⟩
+438c53be8	🕒 Hora: ninguna — pulsa ⏰ Programar
+e669f0130	<i>Cuando llegue la hora, el bot publicará en el canal por sí mismo; si las firmas están activadas en el canal, se verá el nombre del bot.</i>
+5648800a1	⚠️ Para “Que publique el bot” la publicación debe tener un canal elegido; si no, solo te lo recordaré.
+b5d451869	<i>Cuando llegue la hora te lo recordaré por privado; escribes <code>⟨0⟩</code> en el canal desde tu cuenta y la publicación queda a tu nombre.</i>
+686c037f9	🗑 Borrado automático: ⟨0⟩
+bf912c737	<i>Para fijar y borrar, el bot debe ser administrador del canal (permiso de editar / borrar mensajes).</i>
+cd509f96b	📝 La publicación aún es un borrador: la programación funcionará cuando se guarde como lista.
+cf0dd8c87	✅ Publicación publicada.
+5bd6eeff5	⏰ Cambiar la hora
+ba70fe09b	⏰ Programar
+ff57b73c7	❌ Quitar la programación
+bef4fd8ba	‹ Volver a la publicación
+af90e4911	📅 <b>Publicaciones programadas</b>
+6e0c2a826	No hay publicaciones programadas próximas. Prepara una con /post y pulsa ⏰ Programar.
+edcf3ebe5	sin canal elegido
+82569ed5d	Publicación no encontrada o no tienes permiso.
+6b7df2b07	Esta publicación ya se publicó.
+ce0755ac6	⏰ ¿Cuándo se publica <code>⟨0⟩</code>? (hora de Turquía)
+aa587326f	Ejemplo: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Programación quitada
+e31b7e154	Escríbelo de nuevo o cancel.
+401b94bff	✅ <code>⟨0⟩</code> programada: <b>⟨1⟩</b>
+f02c379f3	⚠️ No se pudo fijar: el bot debe ser administrador del canal con permiso para editar mensajes.
+78192eae9	⏰ Hora de publicar: escribe <code>⟨0⟩</code> en el canal desde tu propia cuenta.
+7887a0192	⚠️ El bot no la publicó por sí mismo porque la publicación no tiene canal elegido.
+78c5e12de	⚠️ <code>⟨0⟩</code> no se pudo publicar a tiempo (⟨1⟩).
+647007ee2	La publicación sigue lista: puedes escribir <code>⟨0⟩</code> en el canal desde tu cuenta o reprogramarla con /scheduled.
+dc2a06d68	Asegúrate de que el bot sea administrador del canal con permiso para publicar mensajes.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> publicada a tiempo⟨1⟩
 d08a36466	➕ Nuevo mensaje programado
 25cda8fe6	🚪 <b>Mensaje de despedida</b> — ⟨0⟩
 b61184fea	Estado: <b>⟨0⟩</b> · ⟨1⟩
@@ -32286,9 +33138,7 @@ a4530174c	📜 Reglas: ⟨0⟩ · 🚪 Despedida: ⟨1⟩ · ⏰ Mensajes progra
 d0b1d849f	Para multimedia, botones y variables pulsa ✏️ Editar (o escribe /setwelcome en el grupo para ver la ayuda).
 2b7ced272	Activado
 e5b4e786e	sí
-68b8326a2	no
 2bae1a721	✏️ Editar
-894e0e55f	👁 Vista previa
 099ae3d9c	🖼 Quitar multimedia
 8bb5bb494	↩️ Restablecer
 adcf7aa93	🧹 Borrar el anterior
@@ -32301,7 +33151,6 @@ b6669596d	🚪 Mensaje de despedida ›
 0c2dc5967	⏰ Mensajes programados ›
 9a8a538db	Lista negra: ⟨0⟩
 0eed14a22	Sin reglas
-a6aea5676	👁 Vista previa enviada
 eb9f11f93	↩️ Restablecido
 14af210b4	🖼 Multimedia quitada
 f615cd8f5	⏹ Menciones detenidas
@@ -32792,7 +33641,6 @@ f2ba0c77b	✅ Filtro borrado.
 b7301e99a	No hay filtros en este grupo.
 bd0505102	⚠️ ¿Borrar los <b>⟨0⟩</b> filtros de este grupo?
 8d8252e68	🗑 Sí, borrar todo
-9b6fcea87	↩️ Cancelar
 cf9d69e94	🗑 ⟨0⟩ filtros borrados.
 13c07c249	🧹 Todos los filtros borrados (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nombre de marca
@@ -32868,7 +33716,6 @@ b248ddfb0	💎 Emojis premium desactivados
 8f8af330e	No válido.
 6a47f34ed	Este clon fue borrado.
 21d148b57	🗑 ¿Borrar el clon @⟨0⟩? El bot se detiene; los ajustes en los grupos se mantienen.
-e53f197f7	🗑 Sí, borrar
 cb1a5e233	🗑 El dueño del bot borró tu bot clon @⟨0⟩.
 19e55244e	El enlace debe empezar con https://t.me/. Escríbelo de nuevo o cancel.
 6e97fcc27	✅ ⟨0⟩ actualizado.
@@ -33072,7 +33919,6 @@ a1ce809b5	⚠️ حذف + اخطار
 4d4d20ba3	🔇 حذف + سکوت ۱ ساعته
 3a4a2408d	🚫 حذف + بن
 184e9ea25	✅ نادیده گرفته شد
-1cd1dbdf9	🗑 حذف
 d193c645a	⚠️ اخطار
 bb7ad37ac	🔇 سکوت ۱ ساعت
 ebe01fecc	🚫 بن
@@ -33585,7 +34431,6 @@ f41c17d41	برای استفاده از این پنل باید ادمین گرو�
 8213d6575	<i>برای لغو: cancel</i>
 1465f36fd	پاسخ خود را به‌صورت ریپلای روی پیام بازشده بنویسید.
 3035a6b30	⏰ زمان تمام شد، دوباره از پنل امتحان کنید.
-18363eae4	لغو شد.
 3a22b8f74	❌ قوانین نمی‌تواند خالی باشد.
 fa98ef9b6	پیام خوشامد
 a9e0c5b00	✏️ ⟨0⟩ به‌روز شد | ⟨1⟩
@@ -33618,7 +34463,6 @@ e4b73af2e	🚫 فهرست رسانه‌های مسدود ›
 a5265e3d7	🔓 برداشتن قفل رسانه
 c1a903ce0	🔒 همین حالا رسانه را قفل کن
 678507459	روشن
-c293fc85c	خاموش
 8dd94c76e	نصب نشده (روی سرور: <code>pip install nudenet</code>)
 043b96df1	🔒 قفل رسانه تا ⟨0⟩ فعال است
 059a31b37	بررسی هوش مصنوعی: ⟨0⟩
@@ -33743,7 +34587,6 @@ c3eded236	🔕 بی‌صدا
 cffb2a880	👆 کلیک دکمه‌ها شمرده می‌شود
 716ef3839	↪️ پیام فوروارد خواهد شد (بالای آن «فورواردشده» نوشته می‌شود، ایموجی‌های پریمیوم حفظ می‌شوند)
 251fac5c6	🗳 نظرسنجی فوروارد می‌شود؛ رأی‌ها در همین نظرسنجی جمع می‌شوند
-ba70fe09b	⏰ زمان‌بندی
 8241e1495	✅ ارسال
 86f2e67ab	❌ لغو
 d53523fb6	کسی برای ارسال نیست.
@@ -34312,6 +35155,8 @@ fcea72bad	راه‌اندازی سریع گروه انتخاب‌شده
 9674953cf	خاموش کردن اعلان‌های ربات
 99ab93b21	زبان
 333895635	پیام به ادمین (پشتیبانی)
+de94cd9e4	آماده‌کردن پست کانال
+7ffee2a93	پست‌های کانالی که آماده کرده‌اید
 0d0187ac4	گروه‌ها و آمار ربات شما
 8938961a5	اعلان به گروه‌ها، کانال‌ها و افراد
 be4f2dea9	تاریخچه اعلان‌ها
@@ -34495,6 +35340,104 @@ a1c3d2c0b	<code>کانال ما - https://t.me/channel &amp;&amp; پشتیبان
 dd3608634	رنگ: در انتهای خط <code>#green</code> <code>#red</code> <code>#blue</code> · سبک Rose: <code>[کانال](buttonurl://t.me/channel)</code>
 90f26740a	<b>متغیرها:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>تصادفی:</b> چند پیام را با خطی که فقط <code>%%%</code> دارد جدا کنید.
+c293fc85c	خاموش
+4ffaa2134	کوچک
+9ad8d8983	بزرگ
+65051db26	بالای متن
+021eeb58e	✅ آماده
+8dc576b65	📤 منتشر شد
+e31d308d2	متن پست را بنویسید. پررنگ، کج، لینک، نقل‌قول، اسپویلر و ایموجی پریمیوم همان‌طور که هستند حفظ می‌شوند.
+e2bf41d44	متن پست
+c2af2bb93	عکس، ویدیو، GIF، موسیقی یا فایل بفرستید. اگر توضیح داشته باشد، متن پست می‌شود. برای حذف رسانه: delete
+71d627824	رسانه بفرستید
+5c2538ae6	عکسی را که لوگوی (تصویر کوچک) فایل خواهد بود بفرستید. برای حذف: delete
+a1c26cf23	عکس لوگو
+282908438	دکمه‌ها را بنویسید (هر خط یک ردیف، کنار هم با &&):
+c49a4d150	کانال ما - https://t.me/kanal && اشتراک‌گذاری - share
+b69bb4ad2	اطلاعات - popup:توضیح کوتاه #blue
+be890c755	رنگ: در انتهای خط #green #red #blue · برای حذف دکمه‌ها: delete
+faa0b07d9	لینکی را که پیش‌نمایش آن نشان داده می‌شود بنویسید. برای حذف: delete
+72b362db5	پست خالی است: ابتدا ✏️ متن یا 🖼 رسانه اضافه کنید.
+741bec6dc	در پست رسانه‌دار متن حداکثر ۱۰۲۴ نویسه می‌تواند باشد (اکنون ⟨0⟩).
+ed5e0a973	متن حداکثر ۴۰۹۶ نویسه می‌تواند باشد (اکنون ⟨0⟩).
+86691bbcb	کد در توضیح یک رسانه نوشته شده؛ پست متنی را نمی‌توان روی رسانه اعمال کرد. کد را به‌صورت متن ساده در کانال بنویسید.
+03a2ea7b5	ربات در این کانال دسترسی <b>ویرایش پیام‌ها</b> را ندارد. تنظیمات کانال ← مدیران ← ربات ← ویرایش پیام‌ها را روشن کنید، سپس کد را دوباره بنویسید.
+115d827cd	پیام کد پیدا نشد (شاید حذف شده باشد). کد را دوباره بنویسید.
+a44085176	متن از محدودیت تلگرام بیشتر است؛ پست را کوتاه کنید.
+71a61e10f	❌ <code>#g⟨0⟩</code> روی کانال اعمال نشد.
+e2fd3d196	پست هنوز آماده است.
+263efcc87	✅ <code>#g⟨0⟩</code> منتشر شد: <a href="⟨1⟩">رفتن به پست</a>⟨2⟩⟨3⟩
+7852257e0	♻️ چندبارمصرف: کد دوباره قابل استفاده است.
+7b7e3ce57	📝 <b>پست</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ چندبارمصرف
+68b8326a2	ندارد
+da02209e7	توضیح در بالا
+072c286c7	پیش‌نمایش لینک: ⟨0⟩
+b3742c9fc	گزینه‌های پیش‌فرض
+75adccdaf	⚠️ <b>ربات در این کانال دسترسی «ویرایش پیام‌ها» را ندارد.</b> با نوشتن کد پست ساخته نمی‌شود: از تنظیمات کانال این دسترسی را به ربات بدهید.
+bcd754037	👉 از حساب خودتان فقط <code>#g⟨0⟩</code> را در کانال بنویسید؛ ربات آن را به این پست تبدیل می‌کند.
+74370f776	⚙️ گزینه‌ها
+894e0e55f	👁 پیش‌نمایش
+4d52d4e82	⏰ زمان‌بندی / 📌 سنجاق / 🗑 حذف زمان‌دار
+1cd1dbdf9	🗑 حذف
+89e868a25	📋 پست‌های من
+dc6b96b25	⚙️ <b>گزینه‌ها</b> · <code>#g⟨0⟩</code>
+f47ec3f57	اسپویلر (رسانه مات)
+10f55a4d2	توضیح بالای رسانه
+13cc9e2b1	🔗 پیش‌نمایش لینک: ⟨0⟩
+bc6d5abe6	🔗 لینک پیش‌نمایش⟨0⟩
+d341358af	🔗 پیش‌نمایش لینک: خاموش ← کوچک ← بزرگ ← بالای متن. اگر لینک پیش‌نمایش داده نشود، اولین لینک متن استفاده می‌شود.
+31c98d00a	لینک پیش‌نمایش: ⟨0⟩
+9fbec9097	کد چندبارمصرف
+7160ae248	♻️ چندبارمصرف: کد هر بار که نوشته شود به پست تبدیل می‌شود (اگر خاموش باشد یک بار).
+ad3968817	📢 کانالی که بتوانید برایش پست آماده کنید پیدا نشد.
+6d383efc3	ربات را به‌عنوان مدیر (با دسترسی <b>ویرایش پیام‌ها</b>) به کانالتان اضافه کنید، سپس دوباره امتحان کنید.
+7f8742403	📝 <b>استودیوی پست</b>
+170aee2de	پست را برای کدام کانال آماده می‌کنید؟
+3e05df453	➕ پست جدید
+864aedf12	📋 <b>پست‌های شما</b>
+1318a9069	برای ویرایش روی یکی بزنید.
+4d939cb89	📋 هنوز پستی ندارید. با ➕ پست جدید شروع کنید.
+01632d43b	📝 استودیوی پست در چت خصوصی کار می‌کند: در خصوصی برایم /post بفرستید.
+3c5415709	📝 برای دیدن پست‌هایتان در خصوصی برایم /posts بفرستید.
+831dbaf68	دکمه‌های فعلی:
+bd542f721	❌ متن خالی است. متن پست را بنویسید.
+ac9f5940e	❌ متن خیلی طولانی است (⟨0⟩ نویسه؛ حداکثر ۴۰۹۶).
+3f1817503	(در پست رسانه‌دار حداکثر ۱۰۲۴ نویسه نمایش داده می‌شود!)
+805393212	✅ رسانه حذف شد.
+42deb481c	❌ پیام صوتی و ویدیوی دایره‌ای را نمی‌توان با ویرایش اضافه کرد (محدودیت تلگرام). به‌صورت موسیقی یا فایل بفرستید.
+0b8f18cda	❌ استیکر را نمی‌توان به پست اضافه کرد. عکس، ویدیو، GIF، موسیقی یا فایل بفرستید.
+b1710547c	❌ رسانه‌ای پیدا نشد. عکس، ویدیو، GIF، موسیقی یا فایل بفرستید (برای حذف: delete).
+fe0741bc3	، توضیح آن متن پست شد
+0b86280c2	✅ لوگوی فایل حذف شد.
+90964f332	❌ لوگوی فایل فقط برای رسانه‌ی فایل (سند) است.
+4d8ce7343	❌ برای لوگو یک عکس بفرستید (برای حذف: delete).
+d8e07b1f2	✅ لوگوی فایل ذخیره شد (به JPEG با ۳۲۰ پیکسل کوچک می‌شود).
+dd65d93a0	✅ دکمه‌ها حذف شدند.
+d1cf8dc6e	❌ قالب دکمه‌ها فهمیده نشد⟨0⟩
+f9e98ab3e	نمونه: <code>کانال ما - https://t.me/kanal &amp;&amp; اشتراک‌گذاری - share</code>
+dfe50c705	✅ لینک پیش‌نمایش حذف شد.
+53d15ba87	❌ یک لینک معتبر بنویسید (مثلاً https://example.com).
+bf2d13067	✅ لینک پیش‌نمایش ذخیره شد.
+3febd3182	❌ ورودی ناشناخته.
+4ec886fb2	⏰ زمان تمام شد، از ویرایشگر دوباره امتحان کنید.
+c6f41a62e	این پست دیگر وجود ندارد.
+18363eae4	لغو شد.
+08c32666e	استودیوی پست در چت خصوصی کار می‌کند.
+fc778b227	این کانال پیدا نشد یا شما آنجا مدیر نیستید.
+4d142fe56	📝 پیش‌نویس جدید ساخته شد.
+22442b0b9	📝 پیش‌نویس ساخته شد
+d085f4110	این پست پیدا نشد.
+fe1b715bd	لوگوی فایل فقط برای رسانه‌ی فایل (سند) است.
+f3d1310bc	پاسخ خود را در پیامی که باز شد بنویسید 👇
+2b671f0ee	پیش‌نمایش ارسال نشد. ⟨0⟩
+55afcbd9c	👆 پیش‌نمایش: در کانال این‌طور دیده می‌شود.
+a6aea5676	👁 پیش‌نمایش ارسال شد
+2ff4f7035	شما دیگر در این کانال مدیر نیستید.
+8be0b2234	✅ <b>پست آماده است:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ آماده: #g⟨0⟩
+e53f197f7	🗑 بله، حذف کن
+9b6fcea87	↩️ لغو
 7d75ab43e	این پیام در کانال‌ها قابل استفاده نیست.
 93a792a44	خوشامد
 06ba336bf	خداحافظی
@@ -34530,6 +35473,47 @@ b35d597c9	📌 نگه‌داشتن قبلی
 242c0f02c	پیدا نشد
 ec93a493c	⏸ متوقف شد
 e388dd558	▶️ شروع شد
+daa3d48d5	🔔 یادآوری کن
+d1fb68397	🤖 ربات منتشر کند
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	زمان را نفهمیدم. نمونه: ⟨0⟩
+a0933c889	تاریخ نامعتبر. نمونه: ⟨0⟩
+4314dd4ac	این زمان گذشته است.
+b326ab625	حداکثر تا ۹۰ روز بعد می‌توان زمان‌بندی کرد.
+38fdf5e34	پست پیدا نشد.
+098340710	⏰ <b>برنامه انتشار</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ انجام شد
+9537aa30a	🕒 زمان: <b>⟨0⟩</b> (به وقت ترکیه)⟨1⟩
+438c53be8	🕒 زمان: ندارد — ⏰ زمان‌بندی را بزنید
+e669f0130	<i>وقتی زمانش برسد ربات خودش پست را در کانال منتشر می‌کند؛ اگر امضا در کانال روشن باشد، نام ربات دیده می‌شود.</i>
+5648800a1	⚠️ برای «ربات منتشر کند» باید برای پست کانال انتخاب شده باشد؛ وگرنه فقط یادآوری می‌کنم.
+b5d451869	<i>وقتی زمانش برسد در خصوصی یادآوری می‌کنم؛ شما از حساب خودتان <code>⟨0⟩</code> را در کانال می‌نویسید و پست به نام شما می‌ماند.</i>
+686c037f9	🗑 حذف زمان‌دار: ⟨0⟩
+bf912c737	<i>برای سنجاق و حذف، ربات باید در کانال مدیر باشد (دسترسی ویرایش / حذف پیام).</i>
+cd509f96b	📝 پست هنوز پیش‌نویس است: پس از ذخیره به‌عنوان آماده، زمان‌بندی کار می‌کند.
+cf0dd8c87	✅ پست منتشر شد.
+5bd6eeff5	⏰ تغییر زمان
+ba70fe09b	⏰ زمان‌بندی
+ff57b73c7	❌ لغو زمان‌بندی
+bef4fd8ba	‹ بازگشت به پست
+af90e4911	📅 <b>پست‌های زمان‌بندی‌شده</b>
+6e0c2a826	پست زمان‌بندی‌شده‌ی پیش رو وجود ندارد. با /post آماده کنید، سپس ⏰ زمان‌بندی را بزنید.
+edcf3ebe5	کانال انتخاب نشده
+82569ed5d	پست پیدا نشد یا دسترسی ندارید.
+6b7df2b07	این پست قبلاً منتشر شده است.
+ce0755ac6	⏰ <code>⟨0⟩</code> چه زمانی منتشر شود؟ (به وقت ترکیه)
+aa587326f	نمونه: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ زمان‌بندی لغو شد
+e31b7e154	دوباره بنویسید یا cancel.
+401b94bff	✅ <code>⟨0⟩</code> زمان‌بندی شد: <b>⟨1⟩</b>
+f02c379f3	⚠️ سنجاق نشد: ربات باید در کانال مدیر و دارای دسترسی ویرایش پیام باشد.
+78192eae9	⏰ زمان انتشار: از حساب خودتان <code>⟨0⟩</code> را در کانال بنویسید.
+7887a0192	⚠️ چون برای پست کانال انتخاب نشده بود، ربات خودش آن را منتشر نکرد.
+78c5e12de	⚠️ <code>⟨0⟩</code> سر وقت منتشر نشد (⟨1⟩).
+647007ee2	پست آماده مانده است: می‌توانید از حساب خودتان <code>⟨0⟩</code> را در کانال بنویسید یا با /scheduled دوباره زمان‌بندی کنید.
+dc2a06d68	مطمئن شوید ربات در کانال مدیر است و دسترسی ارسال پیام دارد.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> سر وقت منتشر شد⟨1⟩
 d08a36466	➕ پیام زمان‌بندی‌شده جدید
 25cda8fe6	🚪 <b>پیام خداحافظی</b> — ⟨0⟩
 b61184fea	وضعیت: <b>⟨0⟩</b> · ⟨1⟩
@@ -34540,9 +35524,7 @@ a4530174c	📜 قوانین: ⟨0⟩ · 🚪 خداحافظی: ⟨1⟩ · ⏰ پ
 d0b1d849f	برای رسانه، دکمه و متغیرها ✏️ ویرایش را بزنید (یا در گروه /setwelcome بنویسید تا راهنما را ببینید).
 2b7ced272	روشن
 e5b4e786e	دارد
-68b8326a2	ندارد
 2bae1a721	✏️ ویرایش
-894e0e55f	👁 پیش‌نمایش
 099ae3d9c	🖼 حذف رسانه
 8bb5bb494	↩️ بازگشت به پیش‌فرض
 adcf7aa93	🧹 حذف قبلی
@@ -34555,7 +35537,6 @@ b6669596d	🚪 پیام خداحافظی ›
 0c2dc5967	⏰ پیام‌های زمان‌بندی‌شده ›
 9a8a538db	لیست سیاه: ⟨0⟩
 0eed14a22	قانونی نیست
-a6aea5676	👁 پیش‌نمایش ارسال شد
 eb9f11f93	↩️ به پیش‌فرض برگشت
 14af210b4	🖼 رسانه حذف شد
 f615cd8f5	⏹ منشن متوقف شد
@@ -35050,7 +36031,6 @@ f2ba0c77b	✅ فیلتر حذف شد.
 b7301e99a	در این گروه فیلتری نیست.
 bd0505102	⚠️ همه <b>⟨0⟩</b> فیلتر این گروه حذف شوند؟
 8d8252e68	🗑 بله، همه را حذف کن
-9b6fcea87	↩️ لغو
 cf9d69e94	🗑 ⟨0⟩ فیلتر حذف شد.
 13c07c249	🧹 همه فیلترها حذف شدند (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 نام برند
@@ -35126,7 +36106,6 @@ b248ddfb0	💎 ایموجی پریمیوم خاموش شد
 8f8af330e	نامعتبر.
 6a47f34ed	این کپی حذف شده است.
 21d148b57	🗑 کپی @⟨0⟩ حذف شود؟ ربات متوقف می‌شود، تنظیمات گروه‌ها می‌ماند.
-e53f197f7	🗑 بله، حذف کن
 cb1a5e233	🗑 ربات کپی شما @⟨0⟩ توسط مالک ربات حذف شد.
 19e55244e	لینک باید با https://t.me/ شروع شود. دوباره بنویسید یا cancel.
 6e97fcc27	✅ ⟨0⟩ به‌روز شد.
@@ -35329,7 +36308,6 @@ a1ce809b5	⚠️ Supprimé + averti
 4d4d20ba3	🔇 Supprimé + muet pendant 1 heure
 3a4a2408d	🚫 Supprimé + banni
 184e9ea25	✅ Ignoré
-1cd1dbdf9	🗑 Supprimer
 d193c645a	⚠️ Avertir
 bb7ad37ac	🔇 Muet 1 h
 ebe01fecc	🚫 Bannir
@@ -35839,7 +36817,6 @@ f41c17d41	Vous devez être admin du groupe pour utiliser ce panneau.
 8213d6575	<i>Pour annuler : cancel</i>
 1465f36fd	Écrivez votre réponse en répondant au message qui s’est ouvert.
 3035a6b30	⏰ Le temps est écoulé, réessayez depuis le panneau.
-18363eae4	Annulé.
 3a22b8f74	❌ Les règles ne peuvent pas être vides.
 fa98ef9b6	Message de bienvenue
 a9e0c5b00	✏️ ⟨0⟩ mis à jour | ⟨1⟩
@@ -35872,7 +36849,6 @@ e4b73af2e	🚫 Liste des médias bloqués ›
 a5265e3d7	🔓 Lever le verrouillage des médias
 c1a903ce0	🔒 Verrouiller les médias maintenant
 678507459	activé
-c293fc85c	désactivé
 8dd94c76e	non installée (sur le serveur : <code>pip install nudenet</code>)
 043b96df1	🔒 Verrouillage des médias actif jusqu’à ⟨0⟩
 059a31b37	Analyse IA : ⟨0⟩
@@ -35997,7 +36973,6 @@ c3eded236	🔕 Silencieux
 cffb2a880	👆 Les clics sur les boutons seront comptés
 716ef3839	↪️ Le message sera transféré (affiche « Transféré », emojis premium conservés)
 251fac5c6	🗳 Le sondage sera transféré ; les votes sont réunis dans ce sondage
-ba70fe09b	⏰ Programmer
 8241e1495	✅ Envoyer
 86f2e67ab	❌ Annuler
 d53523fb6	Il n’y a personne à qui envoyer.
@@ -36564,6 +37539,8 @@ fcea72bad	Configuration rapide du groupe sélectionné
 9674953cf	Désactiver les annonces du bot
 99ab93b21	Langue
 333895635	Écrire à l’admin (ligne d’assistance)
+de94cd9e4	Préparer une publication de canal
+7ffee2a93	Publications de canal que vous avez préparées
 0d0187ac4	Groupes et statistiques de votre bot
 8938961a5	Annonces aux groupes, canaux, personnes
 be4f2dea9	Historique des annonces
@@ -36746,6 +37723,104 @@ a1c3d2c0b	<code>Notre canal - https://t.me/channel &amp;&amp; Assistance - @supp
 dd3608634	Couleur : en fin de ligne <code>#green</code> <code>#red</code> <code>#blue</code> · Style Rose : <code>[Canal](buttonurl://t.me/channel)</code>
 90f26740a	<b>Variables :</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Aléatoire :</b> séparez plusieurs messages par une ligne contenant uniquement <code>%%%</code>.
+c293fc85c	désactivé
+4ffaa2134	petit
+9ad8d8983	grand
+65051db26	au-dessus du texte
+021eeb58e	✅ Prête
+8dc576b65	📤 Publiée
+e31d308d2	écrivez le texte de la publication. Gras, italique, liens, citations, spoilers et emoji premium sont conservés tels quels.
+e2bf41d44	Texte de la publication
+c2af2bb93	envoyez une photo, vidéo, GIF, musique ou un fichier. Sa légende devient le texte de la publication. Pour retirer le média : delete
+71d627824	Envoyez le média
+5c2538ae6	envoyez la photo qui servira de logo (miniature) au fichier. Pour la retirer : delete
+a1c26cf23	Photo du logo
+282908438	écrivez les boutons (une rangée par ligne, côte à côte avec &&) :
+c49a4d150	Notre canal - https://t.me/kanal && Partager - share
+b69bb4ad2	Info - popup:Courte description #blue
+be890c755	Couleur : en fin de ligne #green #red #blue · Pour retirer les boutons : delete
+faa0b07d9	écrivez le lien dont l’aperçu sera affiché. Pour le retirer : delete
+72b362db5	La publication est vide : ajoutez d’abord ✏️ Texte ou 🖼 Média.
+741bec6dc	Dans une publication avec média, le texte peut faire au maximum 1024 caractères (actuellement ⟨0⟩).
+ed5e0a973	Le texte peut faire au maximum 4096 caractères (actuellement ⟨0⟩).
+86691bbcb	Le code a été écrit en légende d’un média ; une publication texte ne peut pas être appliquée à un média. Écrivez le code dans le canal en texte simple.
+03a2ea7b5	Le bot n’a pas le droit <b>Modifier les messages</b> dans ce canal. Paramètres du canal → Administrateurs → bot → activez Modifier les messages, puis réécrivez le code.
+115d827cd	Le message du code est introuvable (il a peut-être été supprimé). Réécrivez le code.
+a44085176	Le texte dépasse la limite de Telegram ; raccourcissez la publication.
+71a61e10f	❌ <code>#g⟨0⟩</code> n’a pas pu être appliquée au canal.
+e2fd3d196	La publication est toujours prête.
+263efcc87	✅ <code>#g⟨0⟩</code> publiée : <a href="⟨1⟩">voir la publication</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Réutilisable : le code peut être utilisé à nouveau.
+7b7e3ce57	📝 <b>Publication</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ réutilisable
+68b8326a2	aucun
+da02209e7	légende en haut
+072c286c7	aperçu du lien : ⟨0⟩
+b3742c9fc	options par défaut
+75adccdaf	⚠️ <b>Le bot n’a pas le droit « Modifier les messages » dans ce canal.</b> Quand vous écrirez le code, la publication ne sera pas créée : donnez ce droit au bot dans les paramètres du canal.
+bcd754037	👉 Écrivez uniquement <code>#g⟨0⟩</code> dans le canal depuis votre propre compte ; le bot le transformera en cette publication.
+74370f776	⚙️ Options
+894e0e55f	👁 Aperçu
+4d52d4e82	⏰ Programmer / 📌 Épingler / 🗑 Suppression auto
+1cd1dbdf9	🗑 Supprimer
+89e868a25	📋 Mes publications
+dc6b96b25	⚙️ <b>Options</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (média flouté)
+10f55a4d2	Légende au-dessus du média
+13cc9e2b1	🔗 Aperçu du lien : ⟨0⟩
+bc6d5abe6	🔗 Lien d’aperçu⟨0⟩
+d341358af	🔗 Aperçu du lien : désactivé → petit → grand → au-dessus du texte. Sans lien d’aperçu, le premier lien du texte est utilisé.
+31c98d00a	Lien d’aperçu : ⟨0⟩
+9fbec9097	Code réutilisable
+7160ae248	♻️ Réutilisable : le code devient la publication à chaque fois qu’il est écrit (une seule fois s’il est désactivé).
+ad3968817	📢 Aucun canal trouvé pour lequel vous pouvez préparer des publications.
+6d383efc3	Ajoutez le bot à votre canal comme administrateur (avec le droit <b>Modifier les messages</b>), puis réessayez.
+7f8742403	📝 <b>Studio de publications</b>
+170aee2de	Pour quel canal préparez-vous la publication ?
+3e05df453	➕ Nouvelle publication
+864aedf12	📋 <b>Vos publications</b>
+1318a9069	Touchez-en une pour la modifier.
+4d939cb89	📋 Vous n’avez pas encore de publications. Commencez avec ➕ Nouvelle publication.
+01632d43b	📝 Le studio de publications fonctionne en privé : envoyez-moi /post en privé.
+3c5415709	📝 Pour voir vos publications, envoyez-moi /posts en privé.
+831dbaf68	Boutons actuels :
+bd542f721	❌ Le texte est vide. Écrivez le texte de la publication.
+ac9f5940e	❌ Le texte est trop long (⟨0⟩ caractères ; 4096 au maximum).
+3f1817503	(dans une publication avec média, 1024 caractères au maximum peuvent être affichés !)
+805393212	✅ Média retiré.
+42deb481c	❌ Les messages vocaux et les vidéos rondes ne peuvent pas être ajoutés par modification (limite de Telegram). Envoyez-les comme musique ou fichier.
+0b8f18cda	❌ Un sticker ne peut pas être ajouté à la publication. Envoyez une photo, vidéo, GIF, musique ou un fichier.
+b1710547c	❌ Aucun média trouvé. Envoyez une photo, vidéo, GIF, musique ou un fichier (pour retirer : delete).
+fe0741bc3	, sa légende est devenue le texte de la publication
+0b86280c2	✅ Logo du fichier retiré.
+90964f332	❌ Le logo de fichier n’existe que pour les médias de type fichier (document).
+4d8ce7343	❌ Envoyez une photo pour le logo (pour retirer : delete).
+d8e07b1f2	✅ Logo du fichier enregistré (réduit en JPEG de 320 px).
+dd65d93a0	✅ Boutons retirés.
+d1cf8dc6e	❌ Le format des boutons n’a pas été compris⟨0⟩
+f9e98ab3e	Exemple : <code>Notre canal - https://t.me/kanal &amp;&amp; Partager - share</code>
+dfe50c705	✅ Lien d’aperçu retiré.
+53d15ba87	❌ Écrivez un lien valide (ex. https://example.com).
+bf2d13067	✅ Lien d’aperçu enregistré.
+3febd3182	❌ Saisie inconnue.
+4ec886fb2	⏰ Délai écoulé, réessayez depuis l’éditeur.
+c6f41a62e	Cette publication n’existe plus.
+18363eae4	Annulé.
+08c32666e	Le studio de publications fonctionne en privé.
+fc778b227	Ce canal est introuvable ou vous n’y êtes pas administrateur.
+4d142fe56	📝 Nouveau brouillon créé.
+22442b0b9	📝 Brouillon créé
+d085f4110	Cette publication est introuvable.
+fe1b715bd	Le logo de fichier n’existe que pour les médias de type fichier (document).
+f3d1310bc	Écrivez votre réponse dans le message qui s’est ouvert 👇
+2b671f0ee	L’aperçu n’a pas pu être envoyé. ⟨0⟩
+55afcbd9c	👆 Aperçu : voici à quoi cela ressemblera dans le canal.
+a6aea5676	👁 Aperçu envoyé
+2ff4f7035	Vous n’êtes plus administrateur de ce canal.
+8be0b2234	✅ <b>Publication prête :</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Prête : #g⟨0⟩
+e53f197f7	🗑 Oui, supprimer
+9b6fcea87	↩️ Annuler
 7d75ab43e	Ce message ne peut pas être utilisé dans les canaux.
 93a792a44	Bienvenue
 06ba336bf	Au revoir
@@ -36781,6 +37856,47 @@ b35d597c9	📌 Garder le précédent
 242c0f02c	Introuvable
 ec93a493c	⏸ Arrêté
 e388dd558	▶️ Démarré
+daa3d48d5	🔔 Me rappeler
+d1fb68397	🤖 Le bot publie
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Je n’ai pas compris l’heure. Exemple : ⟨0⟩
+a0933c889	Date invalide. Exemple : ⟨0⟩
+4314dd4ac	Cette heure est déjà passée.
+b326ab625	On peut programmer au maximum 90 jours à l’avance.
+38fdf5e34	Publication introuvable.
+098340710	⏰ <b>Plan de publication</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ traitée
+9537aa30a	🕒 Heure : <b>⟨0⟩</b> (heure de Turquie)⟨1⟩
+438c53be8	🕒 Heure : aucune — appuyez sur ⏰ Programmer
+e669f0130	<i>À l’heure prévue, le bot publie lui-même dans le canal ; si les signatures sont activées dans le canal, le nom du bot apparaît.</i>
+5648800a1	⚠️ Pour « Le bot publie », un canal doit être choisi pour la publication ; sinon je fais seulement un rappel.
+b5d451869	<i>À l’heure prévue je vous le rappelle en privé ; vous écrivez <code>⟨0⟩</code> dans le canal depuis votre compte et la publication reste à votre nom.</i>
+686c037f9	🗑 Suppression auto : ⟨0⟩
+bf912c737	<i>Pour épingler et supprimer, le bot doit être administrateur du canal (droit de modifier / supprimer des messages).</i>
+cd509f96b	📝 La publication est encore un brouillon : la programmation fonctionnera une fois enregistrée comme prête.
+cf0dd8c87	✅ Publication publiée.
+5bd6eeff5	⏰ Changer l’heure
+ba70fe09b	⏰ Programmer
+ff57b73c7	❌ Retirer la programmation
+bef4fd8ba	‹ Retour à la publication
+af90e4911	📅 <b>Publications programmées</b>
+6e0c2a826	Aucune publication programmée à venir. Préparez-en une avec /post, puis appuyez sur ⏰ Programmer.
+edcf3ebe5	aucun canal choisi
+82569ed5d	Publication introuvable ou vous n’avez pas l’autorisation.
+6b7df2b07	Cette publication a déjà été publiée.
+ce0755ac6	⏰ Quand publier <code>⟨0⟩</code> ? (heure de Turquie)
+aa587326f	Exemple : ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Programmation retirée
+e31b7e154	Réécrivez-le ou cancel.
+401b94bff	✅ <code>⟨0⟩</code> programmée : <b>⟨1⟩</b>
+f02c379f3	⚠️ Épinglage impossible : le bot doit être administrateur du canal avec le droit de modifier les messages.
+78192eae9	⏰ Heure de publication : écrivez <code>⟨0⟩</code> dans le canal depuis votre propre compte.
+7887a0192	⚠️ Le bot n’a pas publié lui-même car aucun canal n’est choisi pour la publication.
+78c5e12de	⚠️ <code>⟨0⟩</code> n’a pas pu être publiée à l’heure (⟨1⟩).
+647007ee2	La publication est toujours prête : vous pouvez écrire <code>⟨0⟩</code> dans le canal depuis votre compte ou la reprogrammer avec /scheduled.
+dc2a06d68	Vérifiez que le bot est administrateur du canal avec le droit de publier des messages.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> publiée à l’heure⟨1⟩
 d08a36466	➕ Nouveau message programmé
 25cda8fe6	🚪 <b>Message d’au revoir</b> — ⟨0⟩
 b61184fea	État : <b>⟨0⟩</b> · ⟨1⟩
@@ -36791,9 +37907,7 @@ a4530174c	📜 Règles : ⟨0⟩ · 🚪 Au revoir : ⟨1⟩ · ⏰ Messages pro
 d0b1d849f	Pour les médias, boutons et variables, appuyez sur ✏️ Modifier (ou tapez /setwelcome dans le groupe pour voir l’aide).
 2b7ced272	Activé
 e5b4e786e	oui
-68b8326a2	aucun
 2bae1a721	✏️ Modifier
-894e0e55f	👁 Aperçu
 099ae3d9c	🖼 Retirer le média
 8bb5bb494	↩️ Rétablir par défaut
 adcf7aa93	🧹 Supprimer l’ancien
@@ -36806,7 +37920,6 @@ b6669596d	🚪 Message d’au revoir ›
 0c2dc5967	⏰ Messages programmés ›
 9a8a538db	Liste noire : ⟨0⟩
 0eed14a22	Aucune règle
-a6aea5676	👁 Aperçu envoyé
 eb9f11f93	↩️ Rétabli par défaut
 14af210b4	🖼 Média retiré
 f615cd8f5	⏹ Mentions arrêtées
@@ -37298,7 +38411,6 @@ f2ba0c77b	✅ Filtre supprimé.
 b7301e99a	Il n’y a aucun filtre dans ce groupe.
 bd0505102	⚠️ Supprimer les <b>⟨0⟩</b> filtres de ce groupe ?
 8d8252e68	🗑 Oui, tout supprimer
-9b6fcea87	↩️ Annuler
 cf9d69e94	🗑 ⟨0⟩ filtres supprimés.
 13c07c249	🧹 Tous les filtres supprimés (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nom de marque
@@ -37373,7 +38485,6 @@ b248ddfb0	💎 Emojis premium désactivés
 8f8af330e	Invalide.
 6a47f34ed	Ce clone a été supprimé.
 21d148b57	🗑 Supprimer le clone @⟨0⟩ ? Le bot s’arrête, les paramètres dans les groupes restent.
-e53f197f7	🗑 Oui, supprimer
 cb1a5e233	🗑 Votre bot clone @⟨0⟩ a été supprimé par le propriétaire du bot.
 19e55244e	Le lien doit commencer par https://t.me/. Écrivez-le à nouveau ou cancel.
 6e97fcc27	✅ ⟨0⟩ mis à jour.
@@ -37577,7 +38688,6 @@ a1ce809b5	⚠️ हटाया + चेतावनी दी
 4d4d20ba3	🔇 हटाया + 1 घंटे के लिए म्यूट
 3a4a2408d	🚫 हटाया + बैन किया
 184e9ea25	✅ अनदेखा किया
-1cd1dbdf9	🗑 हटाएँ
 d193c645a	⚠️ चेतावनी दें
 bb7ad37ac	🔇 1 घंटा म्यूट
 ebe01fecc	🚫 बैन करें
@@ -38090,7 +39200,6 @@ f41c17d41	इस पैनल का उपयोग करने के लि�
 8213d6575	<i>रद्द करने के लिए: cancel</i>
 1465f36fd	खुले हुए संदेश के जवाब में अपना उत्तर लिखें।
 3035a6b30	⏰ समय खत्म, पैनल से फिर कोशिश करें।
-18363eae4	रद्द किया गया।
 3a22b8f74	❌ नियम खाली नहीं हो सकते।
 fa98ef9b6	स्वागत संदेश
 a9e0c5b00	✏️ ⟨0⟩ अपडेट किया गया | ⟨1⟩
@@ -38123,7 +39232,6 @@ e4b73af2e	🚫 ब्लॉक किए गए मीडिया की सू
 a5265e3d7	🔓 मीडिया लॉक हटाएँ
 c1a903ce0	🔒 अभी मीडिया लॉक करें
 678507459	चालू
-c293fc85c	बंद
 8dd94c76e	इंस्टॉल नहीं (सर्वर पर: <code>pip install nudenet</code>)
 043b96df1	🔒 मीडिया लॉक ⟨0⟩ तक सक्रिय
 059a31b37	AI स्कैन: ⟨0⟩
@@ -38248,7 +39356,6 @@ c3eded236	🔕 साइलेंट
 cffb2a880	👆 बटन क्लिक गिने जाएँगे
 716ef3839	↪️ संदेश फ़ॉरवर्ड किया जाएगा (ऊपर "फ़ॉरवर्ड किया गया" दिखेगा, प्रीमियम इमोजी बने रहेंगे)
 251fac5c6	🗳 पोल फ़ॉरवर्ड किया जाएगा; वोट इसी पोल में जमा होंगे
-ba70fe09b	⏰ शेड्यूल करें
 8241e1495	✅ भेजें
 86f2e67ab	❌ रद्द करें
 d53523fb6	भेजने के लिए कोई नहीं है।
@@ -38817,6 +39924,8 @@ fcea72bad	चुने गए ग्रुप का त्वरित से�
 9674953cf	बॉट की घोषणाएँ बंद करें
 99ab93b21	भाषा
 333895635	एडमिन को लिखें (सहायता लाइन)
+de94cd9e4	चैनल पोस्ट तैयार करें
+7ffee2a93	आपके तैयार किए चैनल पोस्ट
 0d0187ac4	आपके बॉट के ग्रुप और आँकड़े
 8938961a5	ग्रुप, चैनल, लोगों को घोषणाएँ
 be4f2dea9	घोषणा इतिहास
@@ -39000,6 +40109,104 @@ a1c3d2c0b	<code>हमारा चैनल - https://t.me/channel &amp;&amp; �
 dd3608634	रंग: लाइन के अंत में <code>#green</code> <code>#red</code> <code>#blue</code> · Rose शैली: <code>[चैनल](buttonurl://t.me/channel)</code>
 90f26740a	<b>वेरिएबल:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>रैंडम:</b> कई संदेशों को ऐसी लाइन से अलग करें जिसमें केवल <code>%%%</code> हो।
+c293fc85c	बंद
+4ffaa2134	छोटा
+9ad8d8983	बड़ा
+65051db26	टेक्स्ट के ऊपर
+021eeb58e	✅ तैयार
+8dc576b65	📤 प्रकाशित
+e31d308d2	पोस्ट का टेक्स्ट लिखें। बोल्ड, इटैलिक, लिंक, उद्धरण, स्पॉइलर और प्रीमियम इमोजी जैसे हैं वैसे ही रहते हैं।
+e2bf41d44	पोस्ट टेक्स्ट
+c2af2bb93	फ़ोटो, वीडियो, GIF, संगीत या फ़ाइल भेजें। उसका कैप्शन पोस्ट का टेक्स्ट बन जाता है। मीडिया हटाने के लिए: delete
+71d627824	मीडिया भेजें
+5c2538ae6	वह फ़ोटो भेजें जो फ़ाइल का लोगो (थंबनेल) बनेगी। हटाने के लिए: delete
+a1c26cf23	लोगो फ़ोटो
+282908438	बटन लिखें (हर लाइन एक पंक्ति, && से साथ-साथ):
+c49a4d150	हमारा चैनल - https://t.me/kanal && शेयर - share
+b69bb4ad2	जानकारी - popup:छोटा विवरण #blue
+be890c755	रंग: लाइन के अंत में #green #red #blue · बटन हटाने के लिए: delete
+faa0b07d9	वह लिंक लिखें जिसका प्रीव्यू दिखेगा। हटाने के लिए: delete
+72b362db5	पोस्ट खाली है: पहले ✏️ टेक्स्ट या 🖼 मीडिया जोड़ें।
+741bec6dc	मीडिया वाली पोस्ट में टेक्स्ट अधिकतम 1024 अक्षर हो सकता है (अभी ⟨0⟩)।
+ed5e0a973	टेक्स्ट अधिकतम 4096 अक्षर हो सकता है (अभी ⟨0⟩)।
+86691bbcb	कोड किसी मीडिया के कैप्शन में लिखा गया है; टेक्स्ट पोस्ट को मीडिया पर लागू नहीं किया जा सकता। कोड को चैनल में सादे टेक्स्ट के रूप में लिखें।
+03a2ea7b5	इस चैनल में बॉट के पास <b>संदेश संपादित करें</b> अधिकार नहीं है। चैनल सेटिंग्स → एडमिनिस्ट्रेटर → बॉट → संदेश संपादित करें चालू करें, फिर कोड दोबारा लिखें।
+115d827cd	कोड वाला संदेश नहीं मिला (शायद हटा दिया गया)। कोड दोबारा लिखें।
+a44085176	टेक्स्ट Telegram की सीमा से अधिक है; पोस्ट छोटी करें।
+71a61e10f	❌ <code>#g⟨0⟩</code> चैनल पर लागू नहीं हो सका।
+e2fd3d196	पोस्ट अब भी तैयार है।
+263efcc87	✅ <code>#g⟨0⟩</code> प्रकाशित: <a href="⟨1⟩">पोस्ट पर जाएँ</a>⟨2⟩⟨3⟩
+7852257e0	♻️ बहु-उपयोगी: कोड फिर से इस्तेमाल किया जा सकता है।
+7b7e3ce57	📝 <b>पोस्ट</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ बहु-उपयोगी
+68b8326a2	कोई नहीं
+da02209e7	कैप्शन ऊपर
+072c286c7	लिंक प्रीव्यू: ⟨0⟩
+b3742c9fc	डिफ़ॉल्ट विकल्प
+75adccdaf	⚠️ <b>इस चैनल में बॉट के पास “संदेश संपादित करें” अधिकार नहीं है।</b> कोड लिखने पर पोस्ट नहीं बनेगी: चैनल सेटिंग्स में बॉट को यह अधिकार दें।
+bcd754037	👉 अपने खाते से चैनल में केवल <code>#g⟨0⟩</code> लिखें; बॉट उसे इस पोस्ट में बदल देगा।
+74370f776	⚙️ विकल्प
+894e0e55f	👁 पूर्वावलोकन
+4d52d4e82	⏰ शेड्यूल / 📌 पिन / 🗑 स्वतः हटाएँ
+1cd1dbdf9	🗑 हटाएँ
+89e868a25	📋 मेरी पोस्ट
+dc6b96b25	⚙️ <b>विकल्प</b> · <code>#g⟨0⟩</code>
+f47ec3f57	स्पॉइलर (धुंधला मीडिया)
+10f55a4d2	कैप्शन मीडिया के ऊपर
+13cc9e2b1	🔗 लिंक प्रीव्यू: ⟨0⟩
+bc6d5abe6	🔗 प्रीव्यू लिंक⟨0⟩
+d341358af	🔗 लिंक प्रीव्यू: बंद → छोटा → बड़ा → टेक्स्ट के ऊपर। प्रीव्यू लिंक न दिया जाए तो टेक्स्ट का पहला लिंक इस्तेमाल होता है।
+31c98d00a	प्रीव्यू लिंक: ⟨0⟩
+9fbec9097	बहु-उपयोगी कोड
+7160ae248	♻️ बहु-उपयोगी: कोड जब भी लिखा जाए, पोस्ट में बदल जाता है (बंद हो तो एक बार)।
+ad3968817	📢 ऐसा कोई चैनल नहीं मिला जिसके लिए आप पोस्ट तैयार कर सकें।
+6d383efc3	बॉट को अपने चैनल में एडमिन के रूप में जोड़ें (<b>संदेश संपादित करें</b> अधिकार के साथ), फिर दोबारा कोशिश करें।
+7f8742403	📝 <b>पोस्ट स्टूडियो</b>
+170aee2de	आप पोस्ट किस चैनल के लिए तैयार कर रहे हैं?
+3e05df453	➕ नई पोस्ट
+864aedf12	📋 <b>आपकी पोस्ट</b>
+1318a9069	संपादित करने के लिए किसी एक पर टैप करें।
+4d939cb89	📋 अभी आपकी कोई पोस्ट नहीं है। ➕ नई पोस्ट से शुरू करें।
+01632d43b	📝 पोस्ट स्टूडियो निजी चैट में काम करता है: मुझे निजी में /post भेजें।
+3c5415709	📝 अपनी पोस्ट देखने के लिए मुझे निजी में /posts भेजें।
+831dbaf68	मौजूदा बटन:
+bd542f721	❌ टेक्स्ट खाली है। पोस्ट का टेक्स्ट लिखें।
+ac9f5940e	❌ टेक्स्ट बहुत लंबा है (⟨0⟩ अक्षर; अधिकतम 4096)।
+3f1817503	(मीडिया वाली पोस्ट में अधिकतम 1024 अक्षर दिख सकते हैं!)
+805393212	✅ मीडिया हटाया गया।
+42deb481c	❌ वॉइस संदेश और गोल वीडियो संपादन से नहीं जोड़े जा सकते (Telegram सीमा)। संगीत या फ़ाइल के रूप में भेजें।
+0b8f18cda	❌ स्टिकर पोस्ट में नहीं जोड़ा जा सकता। फ़ोटो, वीडियो, GIF, संगीत या फ़ाइल भेजें।
+b1710547c	❌ कोई मीडिया नहीं मिला। फ़ोटो, वीडियो, GIF, संगीत या फ़ाइल भेजें (हटाने के लिए: delete)।
+fe0741bc3	, उसका कैप्शन पोस्ट का टेक्स्ट बन गया
+0b86280c2	✅ फ़ाइल लोगो हटाया गया।
+90964f332	❌ फ़ाइल लोगो केवल फ़ाइल (दस्तावेज़) मीडिया में होता है।
+4d8ce7343	❌ लोगो के लिए फ़ोटो भेजें (हटाने के लिए: delete)।
+d8e07b1f2	✅ फ़ाइल लोगो सहेजा गया (320 px JPEG में छोटा किया जाता है)।
+dd65d93a0	✅ बटन हटाए गए।
+d1cf8dc6e	❌ बटन का प्रारूप समझ नहीं आया⟨0⟩
+f9e98ab3e	उदाहरण: <code>हमारा चैनल - https://t.me/kanal &amp;&amp; शेयर - share</code>
+dfe50c705	✅ प्रीव्यू लिंक हटाया गया।
+53d15ba87	❌ एक मान्य लिंक लिखें (जैसे https://example.com)।
+bf2d13067	✅ प्रीव्यू लिंक सहेजा गया।
+3febd3182	❌ अज्ञात इनपुट।
+4ec886fb2	⏰ समय समाप्त, संपादक से दोबारा कोशिश करें।
+c6f41a62e	यह पोस्ट अब मौजूद नहीं है।
+18363eae4	रद्द किया गया।
+08c32666e	पोस्ट स्टूडियो निजी चैट में काम करता है।
+fc778b227	यह चैनल नहीं मिला या आप वहाँ एडमिन नहीं हैं।
+4d142fe56	📝 नया ड्राफ़्ट बनाया गया।
+22442b0b9	📝 ड्राफ़्ट बनाया गया
+d085f4110	यह पोस्ट नहीं मिली।
+fe1b715bd	फ़ाइल लोगो केवल फ़ाइल (दस्तावेज़) मीडिया में होता है।
+f3d1310bc	अपना जवाब खुले संदेश में लिखें 👇
+2b671f0ee	प्रीव्यू नहीं भेजा जा सका। ⟨0⟩
+55afcbd9c	👆 प्रीव्यू: चैनल में ऐसा दिखेगा।
+a6aea5676	👁 पूर्वावलोकन भेजा गया
+2ff4f7035	अब आप इस चैनल में एडमिन नहीं हैं।
+8be0b2234	✅ <b>पोस्ट तैयार:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ तैयार: #g⟨0⟩
+e53f197f7	🗑 हाँ, हटाएं
+9b6fcea87	↩️ रद्द करें
 7d75ab43e	यह संदेश चैनलों में इस्तेमाल नहीं किया जा सकता।
 93a792a44	स्वागत
 06ba336bf	विदाई
@@ -39035,6 +40242,47 @@ b35d597c9	📌 पिछला रखें
 242c0f02c	नहीं मिला
 ec93a493c	⏸ रोका गया
 e388dd558	▶️ शुरू किया गया
+daa3d48d5	🔔 याद दिलाएँ
+d1fb68397	🤖 बॉट पोस्ट करे
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	समय समझ नहीं आया। उदाहरण: ⟨0⟩
+a0933c889	अमान्य तारीख। उदाहरण: ⟨0⟩
+4314dd4ac	यह समय बीत चुका है।
+b326ab625	अधिकतम 90 दिन आगे तक शेड्यूल किया जा सकता है।
+38fdf5e34	पोस्ट नहीं मिली।
+098340710	⏰ <b>प्रकाशन योजना</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ पूरा हुआ
+9537aa30a	🕒 समय: <b>⟨0⟩</b> (तुर्की समय)⟨1⟩
+438c53be8	🕒 समय: नहीं — ⏰ शेड्यूल दबाएँ
+e669f0130	<i>समय आने पर बॉट खुद चैनल में पोस्ट करता है; अगर चैनल में हस्ताक्षर चालू हैं तो बॉट का नाम दिखता है।</i>
+5648800a1	⚠️ “बॉट पोस्ट करे” के लिए पोस्ट में चैनल चुना होना चाहिए; नहीं तो मैं सिर्फ़ याद दिलाऊँगा।
+b5d451869	<i>समय आने पर मैं आपको निजी में याद दिलाता हूँ; आप अपने खाते से चैनल में <code>⟨0⟩</code> लिखते हैं और पोस्ट आपके नाम से रहती है।</i>
+686c037f9	🗑 स्वतः हटाएँ: ⟨0⟩
+bf912c737	<i>पिन करने और हटाने के लिए बॉट को चैनल में एडमिन होना चाहिए (संदेश संपादित / हटाने का अधिकार)।</i>
+cd509f96b	📝 पोस्ट अभी ड्राफ़्ट है: तैयार के रूप में सहेजने पर शेड्यूल काम करेगा।
+cf0dd8c87	✅ पोस्ट प्रकाशित हुई।
+5bd6eeff5	⏰ समय बदलें
+ba70fe09b	⏰ शेड्यूल करें
+ff57b73c7	❌ शेड्यूल हटाएँ
+bef4fd8ba	‹ पोस्ट पर वापस
+af90e4911	📅 <b>शेड्यूल की गई पोस्ट</b>
+6e0c2a826	कोई आगामी शेड्यूल पोस्ट नहीं है। /post से तैयार करें, फिर ⏰ शेड्यूल दबाएँ।
+edcf3ebe5	चैनल नहीं चुना गया
+82569ed5d	पोस्ट नहीं मिली या आपके पास अनुमति नहीं है।
+6b7df2b07	यह पोस्ट पहले ही प्रकाशित हो चुकी है।
+ce0755ac6	⏰ <code>⟨0⟩</code> कब प्रकाशित हो? (तुर्की समय)
+aa587326f	उदाहरण: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ शेड्यूल हटाया गया
+e31b7e154	दोबारा लिखें या cancel।
+401b94bff	✅ <code>⟨0⟩</code> शेड्यूल हुआ: <b>⟨1⟩</b>
+f02c379f3	⚠️ पिन नहीं हो सका: बॉट को चैनल में संदेश संपादित करने के अधिकार के साथ एडमिन होना चाहिए।
+78192eae9	⏰ प्रकाशन का समय: अपने खाते से चैनल में <code>⟨0⟩</code> लिखें।
+7887a0192	⚠️ पोस्ट में चैनल नहीं चुना गया था, इसलिए बॉट ने खुद पोस्ट नहीं किया।
+78c5e12de	⚠️ <code>⟨0⟩</code> समय पर प्रकाशित नहीं हो सकी (⟨1⟩)।
+647007ee2	पोस्ट अब भी तैयार है: आप अपने खाते से चैनल में <code>⟨0⟩</code> लिख सकते हैं या /scheduled से दोबारा शेड्यूल कर सकते हैं।
+dc2a06d68	सुनिश्चित करें कि बॉट चैनल में संदेश भेजने के अधिकार के साथ एडमिन है।⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> समय पर प्रकाशित हुई⟨1⟩
 d08a36466	➕ नया शेड्यूल संदेश
 25cda8fe6	🚪 <b>विदाई संदेश</b> — ⟨0⟩
 b61184fea	स्थिति: <b>⟨0⟩</b> · ⟨1⟩
@@ -39045,9 +40293,7 @@ a4530174c	📜 नियम: ⟨0⟩ · 🚪 विदाई: ⟨1⟩ · ⏰ श
 d0b1d849f	मीडिया, बटन और वेरिएबल के लिए ✏️ संपादित करें दबाएं (या मदद देखने के लिए ग्रुप में /setwelcome लिखें)।
 2b7ced272	चालू
 e5b4e786e	हाँ
-68b8326a2	कोई नहीं
 2bae1a721	✏️ संपादित करें
-894e0e55f	👁 पूर्वावलोकन
 099ae3d9c	🖼 मीडिया हटाएं
 8bb5bb494	↩️ डिफ़ॉल्ट पर रीसेट करें
 adcf7aa93	🧹 पुराना हटाएं
@@ -39060,7 +40306,6 @@ b6669596d	🚪 विदाई संदेश ›
 0c2dc5967	⏰ शेड्यूल संदेश ›
 9a8a538db	ब्लैकलिस्ट: ⟨0⟩
 0eed14a22	कोई नियम नहीं
-a6aea5676	👁 पूर्वावलोकन भेजा गया
 eb9f11f93	↩️ डिफ़ॉल्ट पर रीसेट किया गया
 14af210b4	🖼 मीडिया हटाया गया
 f615cd8f5	⏹ टैग करना रोका गया
@@ -39555,7 +40800,6 @@ f2ba0c77b	✅ फ़िल्टर हटाया गया।
 b7301e99a	इस ग्रुप में कोई फ़िल्टर नहीं है।
 bd0505102	⚠️ इस ग्रुप के सभी <b>⟨0⟩</b> फ़िल्टर हटाएं?
 8d8252e68	🗑 हाँ, सब हटाएं
-9b6fcea87	↩️ रद्द करें
 cf9d69e94	🗑 ⟨0⟩ फ़िल्टर हटाए गए।
 13c07c249	🧹 सभी फ़िल्टर हटाए गए (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 ब्रांड नाम
@@ -39631,7 +40875,6 @@ b248ddfb0	💎 प्रीमियम इमोजी बंद किए ग�
 8f8af330e	अमान्य।
 6a47f34ed	यह क्लोन हटा दिया गया है।
 21d148b57	🗑 क्लोन @⟨0⟩ हटाएं? बॉट रुक जाएगा, ग्रुप की सेटिंग्स बनी रहेंगी।
-e53f197f7	🗑 हाँ, हटाएं
 cb1a5e233	🗑 आपका क्लोन बॉट @⟨0⟩ बॉट मालिक ने हटा दिया।
 19e55244e	लिंक https://t.me/ से शुरू होना चाहिए। फिर से लिखें या cancel।
 6e97fcc27	✅ ⟨0⟩ अपडेट किया गया।
@@ -39834,7 +41077,6 @@ a1ce809b5	⚠️ Dihapus + diperingatkan
 4d4d20ba3	🔇 Dihapus + dibisukan 1 jam
 3a4a2408d	🚫 Dihapus + diban
 184e9ea25	✅ Diabaikan
-1cd1dbdf9	🗑 Hapus
 d193c645a	⚠️ Peringatkan
 bb7ad37ac	🔇 Bisukan 1 jam
 ebe01fecc	🚫 Ban
@@ -40340,7 +41582,6 @@ f41c17d41	Kamu harus admin di grup untuk memakai panel ini.
 8213d6575	<i>Untuk membatalkan: cancel</i>
 1465f36fd	Tulis jawabanmu sebagai balasan ke pesan yang terbuka.
 3035a6b30	⏰ Waktu habis, coba lagi dari panel.
-18363eae4	Dibatalkan.
 3a22b8f74	❌ Aturan tidak boleh kosong.
 fa98ef9b6	Pesan sambutan
 a9e0c5b00	✏️ ⟨0⟩ diperbarui | ⟨1⟩
@@ -40373,7 +41614,6 @@ e4b73af2e	🚫 Daftar media diblokir ›
 a5265e3d7	🔓 Buka kunci media
 c1a903ce0	🔒 Kunci media sekarang
 678507459	aktif
-c293fc85c	nonaktif
 8dd94c76e	tidak terpasang (di server: <code>pip install nudenet</code>)
 043b96df1	🔒 Kunci media aktif sampai ⟨0⟩
 059a31b37	Pemindaian AI: ⟨0⟩
@@ -40497,7 +41737,6 @@ c3eded236	🔕 Senyap
 cffb2a880	👆 Klik tombol akan dihitung
 716ef3839	↪️ Pesan akan diteruskan (bertanda "Diteruskan", emoji premium tetap)
 251fac5c6	🗳 Polling akan diteruskan; suara dikumpulkan di polling ini
-ba70fe09b	⏰ Jadwalkan
 8241e1495	✅ Kirim
 86f2e67ab	❌ Batal
 d53523fb6	Tidak ada yang bisa dikirimi.
@@ -41063,6 +42302,8 @@ fcea72bad	Pengaturan cepat untuk grup terpilih
 9674953cf	Matikan pengumuman bot
 99ab93b21	Bahasa
 333895635	Tulis ke admin (layanan bantuan)
+de94cd9e4	Siapkan postingan kanal
+7ffee2a93	Postingan kanal yang kamu siapkan
 0d0187ac4	Grup dan statistik botmu
 8938961a5	Pengumuman ke grup, saluran, orang
 be4f2dea9	Riwayat pengumuman
@@ -41244,6 +42485,104 @@ a1c3d2c0b	<code>Saluran kami - https://t.me/channel &amp;&amp; Bantuan - @suppor
 dd3608634	Warna: di akhir baris <code>#green</code> <code>#red</code> <code>#blue</code> · Gaya Rose: <code>[Saluran](buttonurl://t.me/channel)</code>
 90f26740a	<b>Variabel:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Acak:</b> pisahkan beberapa pesan dengan baris yang hanya berisi <code>%%%</code>.
+c293fc85c	nonaktif
+4ffaa2134	kecil
+9ad8d8983	besar
+65051db26	di atas teks
+021eeb58e	✅ Siap
+8dc576b65	📤 Diterbitkan
+e31d308d2	tulis teks postingan. Tebal, miring, tautan, kutipan, spoiler, dan emoji premium dipertahankan apa adanya.
+e2bf41d44	Teks postingan
+c2af2bb93	kirim foto, video, GIF, musik, atau file. Jika ada keterangannya, itu menjadi teks postingan. Untuk menghapus media: delete
+71d627824	Kirim media
+5c2538ae6	kirim foto yang akan menjadi logo (thumbnail) file. Untuk menghapus: delete
+a1c26cf23	Foto logo
+282908438	tulis tombol (setiap baris satu deret, berdampingan dengan &&):
+c49a4d150	Kanal kami - https://t.me/kanal && Bagikan - share
+b69bb4ad2	Info - popup:Keterangan singkat #blue
+be890c755	Warna: di akhir baris #green #red #blue · Untuk menghapus tombol: delete
+faa0b07d9	tulis tautan yang pratinjaunya akan ditampilkan. Untuk menghapus: delete
+72b362db5	Postingan kosong: tambahkan dulu ✏️ Teks atau 🖼 Media.
+741bec6dc	Pada postingan bermedia, teks maksimal 1024 karakter (sekarang ⟨0⟩).
+ed5e0a973	Teks maksimal 4096 karakter (sekarang ⟨0⟩).
+86691bbcb	Kode ditulis sebagai keterangan media; postingan teks tidak bisa diterapkan ke media. Tulis kode di kanal sebagai teks biasa.
+03a2ea7b5	Bot tidak punya izin <b>Edit pesan</b> di kanal ini. Pengaturan kanal → Administrator → bot → aktifkan Edit pesan, lalu tulis kodenya lagi.
+115d827cd	Pesan kode tidak ditemukan (mungkin sudah dihapus). Tulis kodenya lagi.
+a44085176	Teks melebihi batas Telegram; persingkat postingan.
+71a61e10f	❌ <code>#g⟨0⟩</code> tidak dapat diterapkan ke kanal.
+e2fd3d196	Postingan masih siap.
+263efcc87	✅ <code>#g⟨0⟩</code> diterbitkan: <a href="⟨1⟩">buka postingan</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Multi-pakai: kode bisa dipakai lagi.
+7b7e3ce57	📝 <b>Postingan</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ multi-pakai
+68b8326a2	tidak ada
+da02209e7	keterangan di atas
+072c286c7	pratinjau tautan: ⟨0⟩
+b3742c9fc	opsi bawaan
+75adccdaf	⚠️ <b>Bot tidak punya izin “Edit pesan” di kanal ini.</b> Saat kode ditulis, postingan tidak akan terbentuk: berikan izin ini ke bot di pengaturan kanal.
+bcd754037	👉 Tulis hanya <code>#g⟨0⟩</code> di kanal dari akunmu sendiri; bot akan mengubahnya menjadi postingan ini.
+74370f776	⚙️ Opsi
+894e0e55f	👁 Pratinjau
+4d52d4e82	⏰ Jadwalkan / 📌 Sematkan / 🗑 Hapus otomatis
+1cd1dbdf9	🗑 Hapus
+89e868a25	📋 Postinganku
+dc6b96b25	⚙️ <b>Opsi</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (media buram)
+10f55a4d2	Keterangan di atas media
+13cc9e2b1	🔗 Pratinjau tautan: ⟨0⟩
+bc6d5abe6	🔗 Tautan pratinjau⟨0⟩
+d341358af	🔗 Pratinjau tautan: mati → kecil → besar → di atas teks. Jika tautan pratinjau tidak diberikan, tautan pertama di teks yang dipakai.
+31c98d00a	Tautan pratinjau: ⟨0⟩
+9fbec9097	Kode multi-pakai
+7160ae248	♻️ Multi-pakai: kode berubah menjadi postingan setiap kali ditulis (sekali saja jika mati).
+ad3968817	📢 Tidak ditemukan kanal tempat kamu bisa menyiapkan postingan.
+6d383efc3	Tambahkan bot ke kanalmu sebagai administrator (dengan izin <b>Edit pesan</b>), lalu coba lagi.
+7f8742403	📝 <b>Studio postingan</b>
+170aee2de	Untuk kanal mana kamu menyiapkan postingan?
+3e05df453	➕ Postingan baru
+864aedf12	📋 <b>Postinganmu</b>
+1318a9069	Ketuk salah satu untuk mengeditnya.
+4d939cb89	📋 Kamu belum punya postingan. Mulai dengan ➕ Postingan baru.
+01632d43b	📝 Studio postingan bekerja di chat pribadi: kirimi aku /post secara pribadi.
+3c5415709	📝 Untuk melihat postinganmu, kirimi aku /posts secara pribadi.
+831dbaf68	Tombol saat ini:
+bd542f721	❌ Teks kosong. Tulis teks postingan.
+ac9f5940e	❌ Teks terlalu panjang (⟨0⟩ karakter; maksimal 4096).
+3f1817503	(pada postingan bermedia maksimal 1024 karakter yang bisa ditampilkan!)
+805393212	✅ Media dihapus.
+42deb481c	❌ Pesan suara dan video bulat tidak bisa ditambahkan lewat edit (batas Telegram). Kirim sebagai musik atau file.
+0b8f18cda	❌ Stiker tidak bisa ditambahkan ke postingan. Kirim foto, video, GIF, musik, atau file.
+b1710547c	❌ Media tidak ditemukan. Kirim foto, video, GIF, musik, atau file (untuk menghapus: delete).
+fe0741bc3	, keterangannya menjadi teks postingan
+0b86280c2	✅ Logo file dihapus.
+90964f332	❌ Logo file hanya ada pada media file (dokumen).
+4d8ce7343	❌ Kirim foto untuk logo (untuk menghapus: delete).
+d8e07b1f2	✅ Logo file disimpan (dikecilkan menjadi JPEG 320 px).
+dd65d93a0	✅ Tombol dihapus.
+d1cf8dc6e	❌ Format tombol tidak dapat dipahami⟨0⟩
+f9e98ab3e	Contoh: <code>Kanal kami - https://t.me/kanal &amp;&amp; Bagikan - share</code>
+dfe50c705	✅ Tautan pratinjau dihapus.
+53d15ba87	❌ Tulis tautan yang valid (mis. https://example.com).
+bf2d13067	✅ Tautan pratinjau disimpan.
+3febd3182	❌ Masukan tidak dikenal.
+4ec886fb2	⏰ Waktu habis, coba lagi dari editor.
+c6f41a62e	Postingan ini sudah tidak ada.
+18363eae4	Dibatalkan.
+08c32666e	Studio postingan bekerja di chat pribadi.
+fc778b227	Kanal ini tidak ditemukan atau kamu bukan administrator di sana.
+4d142fe56	📝 Draf baru dibuat.
+22442b0b9	📝 Draf dibuat
+d085f4110	Postingan ini tidak ditemukan.
+fe1b715bd	Logo file hanya ada pada media file (dokumen).
+f3d1310bc	Tulis jawabanmu di pesan yang terbuka 👇
+2b671f0ee	Pratinjau tidak dapat dikirim. ⟨0⟩
+55afcbd9c	👆 Pratinjau: begini tampilannya di kanal.
+a6aea5676	👁 Pratinjau dikirim
+2ff4f7035	Kamu bukan lagi administrator di kanal ini.
+8be0b2234	✅ <b>Postingan siap:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Siap: #g⟨0⟩
+e53f197f7	🗑 Ya, hapus
+9b6fcea87	↩️ Batal
 7d75ab43e	Pesan ini tidak bisa digunakan di saluran.
 93a792a44	Sambutan
 06ba336bf	Perpisahan
@@ -41279,6 +42618,47 @@ b35d597c9	📌 Simpan yang sebelumnya
 242c0f02c	Tidak ditemukan
 ec93a493c	⏸ Dihentikan
 e388dd558	▶️ Dimulai
+daa3d48d5	🔔 Ingatkan
+d1fb68397	🤖 Bot yang memposting
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Aku tidak mengerti waktunya. Contoh: ⟨0⟩
+a0933c889	Tanggal tidak valid. Contoh: ⟨0⟩
+4314dd4ac	Waktu ini sudah lewat.
+b326ab625	Bisa dijadwalkan paling lama 90 hari ke depan.
+38fdf5e34	Postingan tidak ditemukan.
+098340710	⏰ <b>Rencana terbit</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ diproses
+9537aa30a	🕒 Waktu: <b>⟨0⟩</b> (waktu Turki)⟨1⟩
+438c53be8	🕒 Waktu: tidak ada — tekan ⏰ Jadwalkan
+e669f0130	<i>Saat waktunya tiba, bot memposting ke kanal sendiri; jika tanda tangan aktif di kanal, nama bot terlihat.</i>
+5648800a1	⚠️ Untuk “Bot yang memposting”, postingan harus punya kanal terpilih; jika tidak, aku hanya mengingatkan.
+b5d451869	<i>Saat waktunya tiba aku mengingatkanmu secara pribadi; kamu menulis <code>⟨0⟩</code> di kanal dari akunmu, dan postingan tetap atas namamu.</i>
+686c037f9	🗑 Hapus otomatis: ⟨0⟩
+bf912c737	<i>Untuk menyematkan dan menghapus, bot harus menjadi administrator di kanal (izin edit / hapus pesan).</i>
+cd509f96b	📝 Postingan masih draf: penjadwalan berjalan setelah disimpan sebagai siap.
+cf0dd8c87	✅ Postingan diterbitkan.
+5bd6eeff5	⏰ Ubah waktu
+ba70fe09b	⏰ Jadwalkan
+ff57b73c7	❌ Hapus jadwal
+bef4fd8ba	‹ Kembali ke postingan
+af90e4911	📅 <b>Postingan terjadwal</b>
+6e0c2a826	Tidak ada postingan terjadwal yang akan datang. Siapkan dengan /post, lalu tekan ⏰ Jadwalkan.
+edcf3ebe5	kanal belum dipilih
+82569ed5d	Postingan tidak ditemukan atau kamu tidak punya izin.
+6b7df2b07	Postingan ini sudah diterbitkan.
+ce0755ac6	⏰ Kapan <code>⟨0⟩</code> diterbitkan? (waktu Turki)
+aa587326f	Contoh: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Jadwal dihapus
+e31b7e154	Tulis lagi atau cancel.
+401b94bff	✅ <code>⟨0⟩</code> dijadwalkan: <b>⟨1⟩</b>
+f02c379f3	⚠️ Gagal menyematkan: bot harus menjadi administrator kanal dengan izin edit pesan.
+78192eae9	⏰ Waktunya terbit: tulis <code>⟨0⟩</code> di kanal dari akunmu sendiri.
+7887a0192	⚠️ Bot tidak memposting sendiri karena postingan tidak punya kanal terpilih.
+78c5e12de	⚠️ <code>⟨0⟩</code> tidak dapat diterbitkan tepat waktu (⟨1⟩).
+647007ee2	Postingan masih siap: kamu bisa menulis <code>⟨0⟩</code> di kanal dari akunmu atau menjadwalkan ulang dengan /scheduled.
+dc2a06d68	Pastikan bot adalah administrator kanal dan punya izin mengirim pesan.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> diterbitkan tepat waktu⟨1⟩
 d08a36466	➕ Pesan terjadwal baru
 25cda8fe6	🚪 <b>Pesan perpisahan</b> — ⟨0⟩
 b61184fea	Status: <b>⟨0⟩</b> · ⟨1⟩
@@ -41289,9 +42669,7 @@ a4530174c	📜 Aturan: ⟨0⟩ · 🚪 Perpisahan: ⟨1⟩ · ⏰ Pesan terjadwa
 d0b1d849f	Untuk media, tombol, dan variabel tekan ✏️ Edit (atau ketik /setwelcome di grup untuk melihat bantuannya).
 2b7ced272	Aktif
 e5b4e786e	ada
-68b8326a2	tidak ada
 2bae1a721	✏️ Edit
-894e0e55f	👁 Pratinjau
 099ae3d9c	🖼 Hapus media
 8bb5bb494	↩️ Kembalikan ke bawaan
 adcf7aa93	🧹 Hapus yang lama
@@ -41304,7 +42682,6 @@ b6669596d	🚪 Pesan perpisahan ›
 0c2dc5967	⏰ Pesan terjadwal ›
 9a8a538db	Daftar hitam: ⟨0⟩
 0eed14a22	Tidak ada aturan
-a6aea5676	👁 Pratinjau dikirim
 eb9f11f93	↩️ Dikembalikan ke bawaan
 14af210b4	🖼 Media dihapus
 f615cd8f5	⏹ Penandaan dihentikan
@@ -41795,7 +43172,6 @@ f2ba0c77b	✅ Filter dihapus.
 b7301e99a	Tidak ada filter di grup ini.
 bd0505102	⚠️ Hapus semua <b>⟨0⟩</b> filter di grup ini?
 8d8252e68	🗑 Ya, hapus semua
-9b6fcea87	↩️ Batal
 cf9d69e94	🗑 ⟨0⟩ filter dihapus.
 13c07c249	🧹 Semua filter dihapus (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nama merek
@@ -41871,7 +43247,6 @@ b248ddfb0	💎 Emoji premium dinonaktifkan
 8f8af330e	Tidak valid.
 6a47f34ed	Klon ini telah dihapus.
 21d148b57	🗑 Hapus klon @⟨0⟩? Bot berhenti, pengaturan di grup tetap ada.
-e53f197f7	🗑 Ya, hapus
 cb1a5e233	🗑 Bot klonmu @⟨0⟩ dihapus oleh pemilik bot.
 19e55244e	Tautan harus diawali https://t.me/. Tulis lagi atau ketik cancel.
 6e97fcc27	✅ ⟨0⟩ diperbarui.
@@ -42074,7 +43449,6 @@ a1ce809b5	⚠️ Eliminato + avvisato
 4d4d20ba3	🔇 Eliminato + silenziato per 1 ora
 3a4a2408d	🚫 Eliminato + bannato
 184e9ea25	✅ Ignorato
-1cd1dbdf9	🗑 Elimina
 d193c645a	⚠️ Avvisa
 bb7ad37ac	🔇 Silenzia 1h
 ebe01fecc	🚫 Banna
@@ -42583,7 +43957,6 @@ f41c17d41	Per usare questo pannello devi essere admin del gruppo.
 8213d6575	<i>Per annullare: cancel</i>
 1465f36fd	Scrivi la risposta rispondendo al messaggio che si è aperto.
 3035a6b30	⏰ Tempo scaduto, riprova dal pannello.
-18363eae4	Annullato.
 3a22b8f74	❌ Le regole non possono essere vuote.
 fa98ef9b6	Messaggio di benvenuto
 a9e0c5b00	✏️ ⟨0⟩ aggiornato | ⟨1⟩
@@ -42616,7 +43989,6 @@ e4b73af2e	🚫 Lista dei media bloccati ›
 a5265e3d7	🔓 Rimuovi blocco media
 c1a903ce0	🔒 Blocca i media ora
 678507459	attivo
-c293fc85c	disattivo
 8dd94c76e	non installata (sul server: <code>pip install nudenet</code>)
 043b96df1	🔒 Blocco media attivo fino a ⟨0⟩
 059a31b37	Scansione IA: ⟨0⟩
@@ -42741,7 +44113,6 @@ c3eded236	🔕 Silenzioso
 cffb2a880	👆 I clic sui pulsanti verranno contati
 716ef3839	↪️ Il messaggio verrà inoltrato (mostra "Inoltrato", emoji premium mantenute)
 251fac5c6	🗳 Il sondaggio verrà inoltrato; i voti vengono raccolti in questo sondaggio
-ba70fe09b	⏰ Programma
 8241e1495	✅ Invia
 86f2e67ab	❌ Annulla
 d53523fb6	Non c’è nessuno a cui inviare.
@@ -43308,6 +44679,8 @@ fcea72bad	Configurazione rapida del gruppo selezionato
 9674953cf	Disattiva gli annunci del bot
 99ab93b21	Lingua
 333895635	Scrivi all’admin (linea di supporto)
+de94cd9e4	Prepara un post per il canale
+7ffee2a93	Post del canale che hai preparato
 0d0187ac4	Gruppi e statistiche del tuo bot
 8938961a5	Annunci a gruppi, canali, persone
 be4f2dea9	Cronologia annunci
@@ -43489,6 +44862,104 @@ a1c3d2c0b	<code>Il nostro canale - https://t.me/channel &amp;&amp; Supporto - @s
 dd3608634	Colore: a fine riga <code>#green</code> <code>#red</code> <code>#blue</code> · Stile Rose: <code>[Canale](buttonurl://t.me/channel)</code>
 90f26740a	<b>Variabili:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Casuale:</b> separa più messaggi con una riga che contiene solo <code>%%%</code>.
+c293fc85c	disattivo
+4ffaa2134	piccola
+9ad8d8983	grande
+65051db26	sopra il testo
+021eeb58e	✅ Pronto
+8dc576b65	📤 Pubblicato
+e31d308d2	scrivi il testo del post. Grassetto, corsivo, link, citazioni, spoiler ed emoji premium restano come sono.
+e2bf41d44	Testo del post
+c2af2bb93	invia una foto, un video, una GIF, musica o un file. La didascalia diventa il testo del post. Per rimuovere il media: delete
+71d627824	Invia il media
+5c2538ae6	invia la foto che sarà il logo (miniatura) del file. Per rimuoverla: delete
+a1c26cf23	Foto del logo
+282908438	scrivi i pulsanti (ogni riga una fila, affiancati con &&):
+c49a4d150	Il nostro canale - https://t.me/kanal && Condividi - share
+b69bb4ad2	Info - popup:Breve descrizione #blue
+be890c755	Colore: a fine riga #green #red #blue · Per rimuovere i pulsanti: delete
+faa0b07d9	scrivi il link di cui mostrare l’anteprima. Per rimuoverlo: delete
+72b362db5	Il post è vuoto: aggiungi prima ✏️ Testo o 🖼 Media.
+741bec6dc	In un post con media il testo può avere al massimo 1024 caratteri (ora ⟨0⟩).
+ed5e0a973	Il testo può avere al massimo 4096 caratteri (ora ⟨0⟩).
+86691bbcb	Il codice è stato scritto come didascalia di un media; un post di testo non può essere applicato a un media. Scrivi il codice nel canale come testo semplice.
+03a2ea7b5	Il bot non ha il permesso <b>Modifica messaggi</b> in questo canale. Impostazioni del canale → Amministratori → bot → attiva Modifica messaggi, poi riscrivi il codice.
+115d827cd	Messaggio del codice non trovato (forse è stato eliminato). Riscrivi il codice.
+a44085176	Il testo supera il limite di Telegram; accorcia il post.
+71a61e10f	❌ Impossibile applicare <code>#g⟨0⟩</code> al canale.
+e2fd3d196	Il post è ancora pronto.
+263efcc87	✅ <code>#g⟨0⟩</code> pubblicato: <a href="⟨1⟩">vai al post</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Riutilizzabile: il codice si può usare di nuovo.
+7b7e3ce57	📝 <b>Post</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ riutilizzabile
+68b8326a2	nessuno
+da02209e7	didascalia in alto
+072c286c7	anteprima link: ⟨0⟩
+b3742c9fc	opzioni predefinite
+75adccdaf	⚠️ <b>Il bot non ha il permesso “Modifica messaggi” in questo canale.</b> Quando scriverai il codice il post non verrà creato: dai al bot questo permesso nelle impostazioni del canale.
+bcd754037	👉 Scrivi nel canale dal tuo account solo <code>#g⟨0⟩</code>; il bot lo trasformerà in questo post.
+74370f776	⚙️ Opzioni
+894e0e55f	👁 Anteprima
+4d52d4e82	⏰ Programma / 📌 Fissa / 🗑 Eliminazione automatica
+1cd1dbdf9	🗑 Elimina
+89e868a25	📋 I miei post
+dc6b96b25	⚙️ <b>Opzioni</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (media sfocato)
+10f55a4d2	Didascalia sopra il media
+13cc9e2b1	🔗 Anteprima link: ⟨0⟩
+bc6d5abe6	🔗 Link di anteprima⟨0⟩
+d341358af	🔗 Anteprima link: disattivata → piccola → grande → sopra il testo. Senza link di anteprima si usa il primo link del testo.
+31c98d00a	Link di anteprima: ⟨0⟩
+9fbec9097	Codice riutilizzabile
+7160ae248	♻️ Riutilizzabile: il codice diventa il post ogni volta che viene scritto (una sola volta se disattivato).
+ad3968817	📢 Nessun canale trovato per cui puoi preparare post.
+6d383efc3	Aggiungi il bot al tuo canale come amministratore (con il permesso <b>Modifica messaggi</b>), poi riprova.
+7f8742403	📝 <b>Studio dei post</b>
+170aee2de	Per quale canale stai preparando il post?
+3e05df453	➕ Nuovo post
+864aedf12	📋 <b>I tuoi post</b>
+1318a9069	Tocca un post per modificarlo.
+4d939cb89	📋 Non hai ancora post. Inizia con ➕ Nuovo post.
+01632d43b	📝 Lo studio dei post funziona in chat privata: scrivimi /post in privato.
+3c5415709	📝 Per vedere i tuoi post, scrivimi /posts in privato.
+831dbaf68	Pulsanti attuali:
+bd542f721	❌ Il testo è vuoto. Scrivi il testo del post.
+ac9f5940e	❌ Il testo è troppo lungo (⟨0⟩ caratteri; massimo 4096).
+3f1817503	(in un post con media si possono mostrare al massimo 1024 caratteri!)
+805393212	✅ Media rimosso.
+42deb481c	❌ Messaggi vocali e video rotondi non si possono aggiungere modificando (limite di Telegram). Invialo come musica o file.
+0b8f18cda	❌ Non si può aggiungere uno sticker al post. Invia una foto, un video, una GIF, musica o un file.
+b1710547c	❌ Nessun media trovato. Invia una foto, un video, una GIF, musica o un file (per rimuovere: delete).
+fe0741bc3	, la didascalia è diventata il testo del post
+0b86280c2	✅ Logo del file rimosso.
+90964f332	❌ Il logo del file esiste solo per i media di tipo file (documento).
+4d8ce7343	❌ Invia una foto per il logo (per rimuovere: delete).
+d8e07b1f2	✅ Logo del file salvato (ridotto a un JPEG di 320 px).
+dd65d93a0	✅ Pulsanti rimossi.
+d1cf8dc6e	❌ Formato dei pulsanti non compreso⟨0⟩
+f9e98ab3e	Esempio: <code>Il nostro canale - https://t.me/kanal &amp;&amp; Condividi - share</code>
+dfe50c705	✅ Link di anteprima rimosso.
+53d15ba87	❌ Scrivi un link valido (es. https://example.com).
+bf2d13067	✅ Link di anteprima salvato.
+3febd3182	❌ Input sconosciuto.
+4ec886fb2	⏰ Tempo scaduto, riprova dall’editor.
+c6f41a62e	Questo post non esiste più.
+18363eae4	Annullato.
+08c32666e	Lo studio dei post funziona in chat privata.
+fc778b227	Canale non trovato oppure non sei amministratore lì.
+4d142fe56	📝 Nuova bozza creata.
+22442b0b9	📝 Bozza creata
+d085f4110	Questo post non è stato trovato.
+fe1b715bd	Il logo del file esiste solo per i media di tipo file (documento).
+f3d1310bc	Scrivi la risposta nel messaggio che si è aperto 👇
+2b671f0ee	Impossibile inviare l’anteprima. ⟨0⟩
+55afcbd9c	👆 Anteprima: ecco come apparirà nel canale.
+a6aea5676	👁 Anteprima inviata
+2ff4f7035	Non sei più amministratore di questo canale.
+8be0b2234	✅ <b>Post pronto:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Pronto: #g⟨0⟩
+e53f197f7	🗑 Sì, elimina
+9b6fcea87	↩️ Annulla
 7d75ab43e	Questo messaggio non può essere usato nei canali.
 93a792a44	Benvenuto
 06ba336bf	Congedo
@@ -43524,6 +44995,47 @@ b35d597c9	📌 Mantieni il precedente
 242c0f02c	Non trovato
 ec93a493c	⏸ Fermato
 e388dd558	▶️ Avviato
+daa3d48d5	🔔 Ricordamelo
+d1fb68397	🤖 Pubblica il bot
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Non ho capito l’orario. Esempio: ⟨0⟩
+a0933c889	Data non valida. Esempio: ⟨0⟩
+4314dd4ac	Questo orario è già passato.
+b326ab625	Si può programmare al massimo con 90 giorni di anticipo.
+38fdf5e34	Post non trovato.
+098340710	⏰ <b>Piano di pubblicazione</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ elaborato
+9537aa30a	🕒 Orario: <b>⟨0⟩</b> (ora della Turchia)⟨1⟩
+438c53be8	🕒 Orario: nessuno — premi ⏰ Programma
+e669f0130	<i>All’orario previsto il bot pubblica da solo nel canale; se nel canale le firme sono attive, si vede il nome del bot.</i>
+5648800a1	⚠️ Per “Pubblica il bot” il post deve avere un canale scelto; altrimenti faccio solo un promemoria.
+b5d451869	<i>All’orario previsto te lo ricordo in privato; scrivi <code>⟨0⟩</code> nel canale dal tuo account e il post resta a tuo nome.</i>
+686c037f9	🗑 Eliminazione automatica: ⟨0⟩
+bf912c737	<i>Per fissare ed eliminare, il bot deve essere amministratore del canale (permesso di modificare / eliminare messaggi).</i>
+cd509f96b	📝 Il post è ancora una bozza: la programmazione funziona dopo averlo salvato come pronto.
+cf0dd8c87	✅ Post pubblicato.
+5bd6eeff5	⏰ Cambia orario
+ba70fe09b	⏰ Programma
+ff57b73c7	❌ Rimuovi programmazione
+bef4fd8ba	‹ Torna al post
+af90e4911	📅 <b>Post programmati</b>
+6e0c2a826	Nessun post programmato in arrivo. Preparane uno con /post, poi premi ⏰ Programma.
+edcf3ebe5	nessun canale scelto
+82569ed5d	Post non trovato o non hai il permesso.
+6b7df2b07	Questo post è già stato pubblicato.
+ce0755ac6	⏰ Quando pubblicare <code>⟨0⟩</code>? (ora della Turchia)
+aa587326f	Esempio: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Programmazione rimossa
+e31b7e154	Riscrivilo oppure cancel.
+401b94bff	✅ <code>⟨0⟩</code> programmato: <b>⟨1⟩</b>
+f02c379f3	⚠️ Impossibile fissare: il bot deve essere amministratore del canale con il permesso di modificare i messaggi.
+78192eae9	⏰ Ora di pubblicare: scrivi <code>⟨0⟩</code> nel canale dal tuo account.
+7887a0192	⚠️ Il bot non l’ha pubblicato da solo perché per il post non è scelto alcun canale.
+78c5e12de	⚠️ Impossibile pubblicare <code>⟨0⟩</code> in orario (⟨1⟩).
+647007ee2	Il post è ancora pronto: puoi scrivere <code>⟨0⟩</code> nel canale dal tuo account o riprogrammarlo con /scheduled.
+dc2a06d68	Assicurati che il bot sia amministratore del canale con il permesso di pubblicare messaggi.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> pubblicato in orario⟨1⟩
 d08a36466	➕ Nuovo messaggio programmato
 25cda8fe6	🚪 <b>Messaggio di congedo</b> — ⟨0⟩
 b61184fea	Stato: <b>⟨0⟩</b> · ⟨1⟩
@@ -43534,9 +45046,7 @@ a4530174c	📜 Regole: ⟨0⟩ · 🚪 Congedo: ⟨1⟩ · ⏰ Messaggi programm
 d0b1d849f	Per media, pulsanti e variabili premi ✏️ Modifica (oppure scrivi /setwelcome nel gruppo per vedere l’aiuto).
 2b7ced272	Attivo
 e5b4e786e	sì
-68b8326a2	nessuno
 2bae1a721	✏️ Modifica
-894e0e55f	👁 Anteprima
 099ae3d9c	🖼 Rimuovi media
 8bb5bb494	↩️ Ripristina predefinito
 adcf7aa93	🧹 Elimina il vecchio
@@ -43549,7 +45059,6 @@ b6669596d	🚪 Messaggio di congedo ›
 0c2dc5967	⏰ Messaggi programmati ›
 9a8a538db	Lista nera: ⟨0⟩
 0eed14a22	Nessuna regola
-a6aea5676	👁 Anteprima inviata
 eb9f11f93	↩️ Ripristinato al predefinito
 14af210b4	🖼 Media rimosso
 f615cd8f5	⏹ Tag interrotti
@@ -44042,7 +45551,6 @@ f2ba0c77b	✅ Filtro eliminato.
 b7301e99a	In questo gruppo non ci sono filtri.
 bd0505102	⚠️ Eliminare tutti i <b>⟨0⟩</b> filtri di questo gruppo?
 8d8252e68	🗑 Sì, elimina tutti
-9b6fcea87	↩️ Annulla
 cf9d69e94	🗑 ⟨0⟩ filtri eliminati.
 13c07c249	🧹 Tutti i filtri eliminati (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nome del marchio
@@ -44118,7 +45626,6 @@ b248ddfb0	💎 Emoji premium disattivate
 8f8af330e	Non valido.
 6a47f34ed	Questo clone è stato eliminato.
 21d148b57	🗑 Eliminare il clone @⟨0⟩? Il bot si ferma, le impostazioni nei gruppi restano.
-e53f197f7	🗑 Sì, elimina
 cb1a5e233	🗑 Il tuo bot clone @⟨0⟩ è stato eliminato dal proprietario del bot.
 19e55244e	Il link deve iniziare con https://t.me/. Scrivilo di nuovo oppure cancel.
 6e97fcc27	✅ ⟨0⟩ aggiornato.
@@ -44322,7 +45829,6 @@ a1ce809b5	⚠️ Жойылды + ескерту берілді
 4d4d20ba3	🔇 Жойылды + 1 сағатқа дыбысы өшірілді
 3a4a2408d	🚫 Жойылды + бан берілді
 184e9ea25	✅ Еленбеді
-1cd1dbdf9	🗑 Жою
 d193c645a	⚠️ Ескерту
 bb7ad37ac	🔇 1 сағ мут
 ebe01fecc	🚫 Бан
@@ -44835,7 +46341,6 @@ f41c17d41	Бұл панельді пайдалану үшін топта адм�
 8213d6575	<i>Бас тарту үшін: cancel</i>
 1465f36fd	Жауабыңызды ашылған хабарға жауап ретінде жазыңыз.
 3035a6b30	⏰ Уақыт бітті, панельден қайталап көріңіз.
-18363eae4	Бас тартылды.
 3a22b8f74	❌ Ережелер бос болмауы керек.
 fa98ef9b6	Сәлемдесу хабары
 a9e0c5b00	✏️ ⟨0⟩ жаңартылды | ⟨1⟩
@@ -44868,7 +46373,6 @@ e4b73af2e	🚫 Бұғатталған медиа тізімі ›
 a5265e3d7	🔓 Медиа құлпын алу
 c1a903ce0	🔒 Медианы қазір құлыптау
 678507459	қосулы
-c293fc85c	өшірулі
 8dd94c76e	орнатылмаған (серверде: <code>pip install nudenet</code>)
 043b96df1	🔒 Медиа құлпы ⟨0⟩ дейін белсенді
 059a31b37	ЖИ тексеруі: ⟨0⟩
@@ -44993,7 +46497,6 @@ c3eded236	🔕 Дыбыссыз
 cffb2a880	👆 Түйме басулары саналады
 716ef3839	↪️ Хабар қайта жіберіледі (үстінде «Қайта жіберілді» жазылады, премиум эмодзилер сақталады)
 251fac5c6	🗳 Сауалнама қайта жіберіледі; дауыстар осы сауалнамаға жиналады
-ba70fe09b	⏰ Жоспарлау
 8241e1495	✅ Жіберу
 86f2e67ab	❌ Бас тарту
 d53523fb6	Жіберетін ешкім жоқ.
@@ -45562,6 +47065,8 @@ fcea72bad	Таңдалған топты жылдам орнату
 9674953cf	Бот хабарландыруларын өшіру
 99ab93b21	Тіл
 333895635	Админге жазу (қолдау желісі)
+de94cd9e4	Арнаға жазба дайындау
+7ffee2a93	Сіз дайындаған арна жазбалары
 0d0187ac4	Ботыңыздың топтары мен статистикасы
 8938961a5	Топтарға, арналарға, адамдарға хабарландыру
 be4f2dea9	Хабарландырулар тарихы
@@ -45745,6 +47250,104 @@ a1c3d2c0b	<code>Біздің арна - https://t.me/channel &amp;&amp; Қолд
 dd3608634	Түс: жолдың соңында <code>#green</code> <code>#red</code> <code>#blue</code> · Rose стилі: <code>[Арна](buttonurl://t.me/channel)</code>
 90f26740a	<b>Айнымалылар:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Кездейсоқ:</b> бірнеше хабарды тек <code>%%%</code> бар жолмен бөліңіз.
+c293fc85c	өшірулі
+4ffaa2134	кіші
+9ad8d8983	үлкен
+65051db26	мәтіннің үстінде
+021eeb58e	✅ Дайын
+8dc576b65	📤 Жарияланды
+e31d308d2	жазбаның мәтінін жазыңыз. Қалың, курсив, сілтеме, дәйексөз, спойлер және премиум эмодзи сол күйінде сақталады.
+e2bf41d44	Жазба мәтіні
+c2af2bb93	фото, видео, GIF, музыка немесе файл жіберіңіз. Сипаттамасы болса, жазба мәтіні болады. Медианы алып тастау үшін: delete
+71d627824	Медиа жіберіңіз
+5c2538ae6	файлдың логотипі (кішкентай суреті) болатын фотоны жіберіңіз. Алып тастау үшін: delete
+a1c26cf23	Логотип фотосы
+282908438	түймелерді жазыңыз (әр жол бір қатар, && арқылы қатар):
+c49a4d150	Біздің арна - https://t.me/kanal && Бөлісу - share
+b69bb4ad2	Ақпарат - popup:Қысқа сипаттама #blue
+be890c755	Түс: жол соңына #green #red #blue · Түймелерді алып тастау үшін: delete
+faa0b07d9	алдын ала көрінісі шығатын сілтемені жазыңыз. Алып тастау үшін: delete
+72b362db5	Жазба бос: алдымен ✏️ Мәтін немесе 🖼 Медиа қосыңыз.
+741bec6dc	Медиасы бар жазбада мәтін ең көбі 1024 таңба болуы мүмкін (қазір ⟨0⟩).
+ed5e0a973	Мәтін ең көбі 4096 таңба болуы мүмкін (қазір ⟨0⟩).
+86691bbcb	Код медиа сипаттамасына жазылған; мәтіндік жазбаны медиаға қолдану мүмкін емес. Кодты арнаға қарапайым мәтін ретінде жазыңыз.
+03a2ea7b5	Боттың бұл арнада <b>Хабарларды өңдеу</b> құқығы жоқ. Арна баптаулары → Әкімшілер → бот → Хабарларды өңдеуді қосыңыз, содан кейін кодты қайта жазыңыз.
+115d827cd	Код хабары табылмады (жойылған болуы мүмкін). Кодты қайта жазыңыз.
+a44085176	Мәтін Telegram шегінен асады; жазбаны қысқартыңыз.
+71a61e10f	❌ <code>#g⟨0⟩</code> арнаға қолданылмады.
+e2fd3d196	Жазба әлі дайын.
+263efcc87	✅ <code>#g⟨0⟩</code> жарияланды: <a href="⟨1⟩">жазбаға өту</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Көп реттік: кодты қайта қолдануға болады.
+7b7e3ce57	📝 <b>Жазба</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ көп реттік
+68b8326a2	жоқ
+da02209e7	сипаттама жоғарыда
+072c286c7	сілтеме көрінісі: ⟨0⟩
+b3742c9fc	әдепкі баптаулар
+75adccdaf	⚠️ <b>Боттың бұл арнада “Хабарларды өңдеу” құқығы жоқ.</b> Код жазылғанда жазба пайда болмайды: арна баптауларында ботқа осы құқықты беріңіз.
+bcd754037	👉 Арнаға өз аккаунтыңыздан тек <code>#g⟨0⟩</code> жазыңыз; бот оны осы жазбаға айналдырады.
+74370f776	⚙️ Баптаулар
+894e0e55f	👁 Алдын ала қарау
+4d52d4e82	⏰ Жоспарлау / 📌 Бекіту / 🗑 Мерзімді жою
+1cd1dbdf9	🗑 Жою
+89e868a25	📋 Жазбаларым
+dc6b96b25	⚙️ <b>Баптаулар</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Спойлер (бұлыңғыр медиа)
+10f55a4d2	Сипаттама медианың үстінде
+13cc9e2b1	🔗 Сілтеме көрінісі: ⟨0⟩
+bc6d5abe6	🔗 Көрініс сілтемесі⟨0⟩
+d341358af	🔗 Сілтеме көрінісі: өшірулі → кіші → үлкен → мәтіннің үстінде. Көрініс сілтемесі берілмесе, мәтіндегі бірінші сілтеме қолданылады.
+31c98d00a	Көрініс сілтемесі: ⟨0⟩
+9fbec9097	Көп реттік код
+7160ae248	♻️ Көп реттік: код жазылған сайын жазбаға айналады (өшірулі болса бір рет).
+ad3968817	📢 Жазба дайындай алатын арна табылмады.
+6d383efc3	Ботты арнаңызға әкімші ретінде қосыңыз (<b>Хабарларды өңдеу</b> құқығымен), содан кейін қайталап көріңіз.
+7f8742403	📝 <b>Жазба студиясы</b>
+170aee2de	Жазбаны қай арна үшін дайындап жатырсыз?
+3e05df453	➕ Жаңа жазба
+864aedf12	📋 <b>Жазбаларыңыз</b>
+1318a9069	Өңдеу үшін біреуін басыңыз.
+4d939cb89	📋 Әзірге жазбаңыз жоқ. ➕ Жаңа жазба арқылы бастаңыз.
+01632d43b	📝 Жазба студиясы жеке чатта жұмыс істейді: маған жеке /post жазыңыз.
+3c5415709	📝 Жазбаларыңызды көру үшін маған жеке /posts жазыңыз.
+831dbaf68	Қазіргі түймелер:
+bd542f721	❌ Мәтін бос. Жазбаның мәтінін жазыңыз.
+ac9f5940e	❌ Мәтін тым ұзын (⟨0⟩ таңба; ең көбі 4096).
+3f1817503	(медиасы бар жазбада ең көбі 1024 таңба көрсетіледі!)
+805393212	✅ Медиа алынып тасталды.
+42deb481c	❌ Дауыстық хабар мен дөңгелек бейнені өңдеу арқылы қосу мүмкін емес (Telegram шектеуі). Музыка немесе файл ретінде жіберіңіз.
+0b8f18cda	❌ Стикерді жазбаға қосу мүмкін емес. Фото, видео, GIF, музыка немесе файл жіберіңіз.
+b1710547c	❌ Медиа табылмады. Фото, видео, GIF, музыка немесе файл жіберіңіз (алып тастау үшін: delete).
+fe0741bc3	, сипаттамасы жазба мәтіні болды
+0b86280c2	✅ Файл логотипі алынып тасталды.
+90964f332	❌ Файл логотипі тек файл (құжат) медиасында болады.
+4d8ce7343	❌ Логотип үшін фото жіберіңіз (алып тастау үшін: delete).
+d8e07b1f2	✅ Файл логотипі сақталды (320 px JPEG-ке кішірейтіледі).
+dd65d93a0	✅ Түймелер алынып тасталды.
+d1cf8dc6e	❌ Түйме пішімі түсінілмеді⟨0⟩
+f9e98ab3e	Мысал: <code>Біздің арна - https://t.me/kanal &amp;&amp; Бөлісу - share</code>
+dfe50c705	✅ Көрініс сілтемесі алынып тасталды.
+53d15ba87	❌ Жарамды сілтеме жазыңыз (мыс. https://example.com).
+bf2d13067	✅ Көрініс сілтемесі сақталды.
+3febd3182	❌ Белгісіз енгізу.
+4ec886fb2	⏰ Уақыт бітті, редактордан қайталап көріңіз.
+c6f41a62e	Бұл жазба енді жоқ.
+18363eae4	Бас тартылды.
+08c32666e	Жазба студиясы жеке чатта жұмыс істейді.
+fc778b227	Бұл арна табылмады немесе сіз онда әкімші емессіз.
+4d142fe56	📝 Жаңа жоба жасалды.
+22442b0b9	📝 Жоба жасалды
+d085f4110	Бұл жазба табылмады.
+fe1b715bd	Файл логотипі тек файл (құжат) медиасында болады.
+f3d1310bc	Жауабыңызды ашылған хабарға жазыңыз 👇
+2b671f0ee	Көрініс жіберілмеді. ⟨0⟩
+55afcbd9c	👆 Көрініс: арнада осылай көрінеді.
+a6aea5676	👁 Алдын ала көрініс жіберілді
+2ff4f7035	Сіз енді бұл арнада әкімші емессіз.
+8be0b2234	✅ <b>Жазба дайын:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Дайын: #g⟨0⟩
+e53f197f7	🗑 Иә, жою
+9b6fcea87	↩️ Бас тарту
 7d75ab43e	Бұл хабарды арналарда пайдалану мүмкін емес.
 93a792a44	Сәлемдесу
 06ba336bf	Қоштасу
@@ -45780,6 +47383,47 @@ b35d597c9	📌 Алдыңғысын қалдыру
 242c0f02c	Табылмады
 ec93a493c	⏸ Тоқтатылды
 e388dd558	▶️ Іске қосылды
+daa3d48d5	🔔 Еске салу
+d1fb68397	🤖 Бот жарияласын
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Уақытты түсінбедім. Мысал: ⟨0⟩
+a0933c889	Қате күн. Мысал: ⟨0⟩
+4314dd4ac	Бұл уақыт өтіп кетті.
+b326ab625	Ең көбі 90 күн алға жоспарлауға болады.
+38fdf5e34	Жазба табылмады.
+098340710	⏰ <b>Жариялау жоспары</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ орындалды
+9537aa30a	🕒 Уақыт: <b>⟨0⟩</b> (Түркия уақыты)⟨1⟩
+438c53be8	🕒 Уақыт: жоқ — ⏰ Жоспарлау түймесін басыңыз
+e669f0130	<i>Уақыты келгенде бот жазбаны арнаға өзі жариялайды; арнада қолтаңба қосулы болса, бот аты көрінеді.</i>
+5648800a1	⚠️ “Бот жарияласын” үшін жазбада арна таңдалуы керек; әйтпесе тек еске саламын.
+b5d451869	<i>Уақыты келгенде сізге жеке еске саламын; арнаға өз аккаунтыңыздан <code>⟨0⟩</code> жазасыз, жазба сіздің атыңызбен қалады.</i>
+686c037f9	🗑 Мерзімді жою: ⟨0⟩
+bf912c737	<i>Бекіту және жою үшін бот арнада әкімші болуы керек (хабарларды өңдеу / жою құқығы).</i>
+cd509f96b	📝 Жазба әлі жоба: дайын ретінде сақталғанда жоспарлау жұмыс істейді.
+cf0dd8c87	✅ Жазба жарияланды.
+5bd6eeff5	⏰ Уақытты өзгерту
+ba70fe09b	⏰ Жоспарлау
+ff57b73c7	❌ Жоспарды алып тастау
+bef4fd8ba	‹ Жазбаға оралу
+af90e4911	📅 <b>Жоспарланған жазбалар</b>
+6e0c2a826	Жақын арада жоспарланған жазба жоқ. /post арқылы дайындап, ⏰ Жоспарлау түймесін басыңыз.
+edcf3ebe5	арна таңдалмаған
+82569ed5d	Жазба табылмады немесе құқығыңыз жоқ.
+6b7df2b07	Бұл жазба бұрын жарияланған.
+ce0755ac6	⏰ <code>⟨0⟩</code> қашан жариялансын? (Түркия уақыты)
+aa587326f	Мысал: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Жоспар алынып тасталды
+e31b7e154	Қайта жазыңыз немесе cancel.
+401b94bff	✅ <code>⟨0⟩</code> жоспарланды: <b>⟨1⟩</b>
+f02c379f3	⚠️ Бекіту мүмкін болмады: бот арнада хабарларды өңдеу құқығы бар әкімші болуы керек.
+78192eae9	⏰ Жариялау уақыты: арнаға өз аккаунтыңыздан <code>⟨0⟩</code> жазыңыз.
+7887a0192	⚠️ Жазбада арна таңдалмағандықтан, бот оны өзі жарияламады.
+78c5e12de	⚠️ <code>⟨0⟩</code> уақытында жарияланбады (⟨1⟩).
+647007ee2	Жазба дайын тұр: арнаға өз аккаунтыңыздан <code>⟨0⟩</code> жаза аласыз немесе /scheduled арқылы қайта жоспарлай аласыз.
+dc2a06d68	Боттың арнада әкімші екеніне және хабар жіберу құқығы барына көз жеткізіңіз.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> уақытында жарияланды⟨1⟩
 d08a36466	➕ Жаңа жоспарланған хабар
 25cda8fe6	🚪 <b>Қоштасу хабары</b> — ⟨0⟩
 b61184fea	Күйі: <b>⟨0⟩</b> · ⟨1⟩
@@ -45790,9 +47434,7 @@ a4530174c	📜 Ережелер: ⟨0⟩ · 🚪 Қоштасу: ⟨1⟩ · ⏰ 
 d0b1d849f	Медиа, түймелер және айнымалылар үшін ✏️ Өзгерту түймесін басыңыз (немесе көмекті көру үшін топта /setwelcome жазыңыз).
 2b7ced272	Қосулы
 e5b4e786e	иә
-68b8326a2	жоқ
 2bae1a721	✏️ Өзгерту
-894e0e55f	👁 Алдын ала қарау
 099ae3d9c	🖼 Медианы алып тастау
 8bb5bb494	↩️ Әдепкіге қайтару
 adcf7aa93	🧹 Ескісін жою
@@ -45805,7 +47447,6 @@ b6669596d	🚪 Қоштасу хабары ›
 0c2dc5967	⏰ Жоспарланған хабарлар ›
 9a8a538db	Қара тізім: ⟨0⟩
 0eed14a22	Ережелер жоқ
-a6aea5676	👁 Алдын ала көрініс жіберілді
 eb9f11f93	↩️ Әдепкіге қайтарылды
 14af210b4	🖼 Медиа алынды
 f615cd8f5	⏹ Белгілеу тоқтатылды
@@ -46300,7 +47941,6 @@ f2ba0c77b	✅ Сүзгі жойылды.
 b7301e99a	Бұл топта сүзгі жоқ.
 bd0505102	⚠️ Бұл топтағы барлық <b>⟨0⟩</b> сүзгі жойылсын ба?
 8d8252e68	🗑 Иә, бәрін жою
-9b6fcea87	↩️ Бас тарту
 cf9d69e94	🗑 ⟨0⟩ сүзгі жойылды.
 13c07c249	🧹 Барлық сүзгілер жойылды (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Бренд атауы
@@ -46376,7 +48016,6 @@ b248ddfb0	💎 Премиум эмодзи өшірілді
 8f8af330e	Жарамсыз.
 6a47f34ed	Бұл клон жойылған.
 21d148b57	🗑 @⟨0⟩ клоны жойылсын ба? Бот тоқтайды, топтардағы баптаулар сақталады.
-e53f197f7	🗑 Иә, жою
 cb1a5e233	🗑 @⟨0⟩ клон ботыңызды бот иесі жойды.
 19e55244e	Сілтеме https://t.me/ деп басталуы керек. Қайта жазыңыз немесе cancel.
 6e97fcc27	✅ ⟨0⟩ жаңартылды.
@@ -46579,7 +48218,6 @@ a1ce809b5	⚠️ Apagada + advertido
 4d4d20ba3	🔇 Apagada + silenciado por 1 hora
 3a4a2408d	🚫 Apagada + banido
 184e9ea25	✅ Ignorado
-1cd1dbdf9	🗑 Apagar
 d193c645a	⚠️ Advertir
 bb7ad37ac	🔇 Silenciar 1h
 ebe01fecc	🚫 Banir
@@ -47089,7 +48727,6 @@ f41c17d41	Você precisa ser admin do grupo para usar este painel.
 8213d6575	<i>Para cancelar: cancel</i>
 1465f36fd	Escreva sua resposta respondendo à mensagem que abriu.
 3035a6b30	⏰ O tempo acabou, tente de novo pelo painel.
-18363eae4	Cancelado.
 3a22b8f74	❌ As regras não podem ficar vazias.
 fa98ef9b6	Mensagem de boas-vindas
 a9e0c5b00	✏️ ⟨0⟩ atualizado | ⟨1⟩
@@ -47122,7 +48759,6 @@ e4b73af2e	🚫 Lista de mídias bloqueadas ›
 a5265e3d7	🔓 Remover bloqueio de mídia
 c1a903ce0	🔒 Bloquear mídia agora
 678507459	ativado
-c293fc85c	desativado
 8dd94c76e	não instalado (no servidor: <code>pip install nudenet</code>)
 043b96df1	🔒 Bloqueio de mídia ativo até ⟨0⟩
 059a31b37	Análise por IA: ⟨0⟩
@@ -47247,7 +48883,6 @@ c3eded236	🔕 Silencioso
 cffb2a880	👆 Os cliques nos botões serão contados
 716ef3839	↪️ A mensagem será encaminhada (mostra "Encaminhada", emojis premium mantidos)
 251fac5c6	🗳 A enquete será encaminhada; os votos ficam nesta enquete
-ba70fe09b	⏰ Agendar
 8241e1495	✅ Enviar
 86f2e67ab	❌ Cancelar
 d53523fb6	Não há para quem enviar.
@@ -47814,6 +49449,8 @@ fcea72bad	Configuração rápida do grupo selecionado
 9674953cf	Desativar os anúncios do bot
 99ab93b21	Idioma
 333895635	Falar com o admin (linha de suporte)
+de94cd9e4	Preparar uma publicação para o canal
+7ffee2a93	Publicações de canal que você preparou
 0d0187ac4	Grupos e estatísticas do seu bot
 8938961a5	Anúncios para grupos, canais e pessoas
 be4f2dea9	Histórico de anúncios
@@ -47997,6 +49634,104 @@ a1c3d2c0b	<code>Nosso canal - https://t.me/channel &amp;&amp; Suporte - @support
 dd3608634	Cor: no fim da linha <code>#green</code> <code>#red</code> <code>#blue</code> · Estilo Rose: <code>[Canal](buttonurl://t.me/channel)</code>
 90f26740a	<b>Variáveis:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Aleatório:</b> separe várias mensagens com uma linha contendo só <code>%%%</code>.
+c293fc85c	desativado
+4ffaa2134	pequena
+9ad8d8983	grande
+65051db26	acima do texto
+021eeb58e	✅ Pronta
+8dc576b65	📤 Publicada
+e31d308d2	escreva o texto da publicação. Negrito, itálico, links, citações, spoilers e emoji premium são mantidos como estão.
+e2bf41d44	Texto da publicação
+c2af2bb93	envie uma foto, vídeo, GIF, música ou arquivo. Se tiver legenda, ela vira o texto da publicação. Para remover a mídia: delete
+71d627824	Envie a mídia
+5c2538ae6	envie a foto que será o logo (miniatura) do arquivo. Para remover: delete
+a1c26cf23	Foto do logo
+282908438	escreva os botões (cada linha uma fileira, lado a lado com &&):
+c49a4d150	Nosso canal - https://t.me/kanal && Compartilhar - share
+b69bb4ad2	Info - popup:Descrição curta #blue
+be890c755	Cor: no fim da linha #green #red #blue · Para remover os botões: delete
+faa0b07d9	escreva o link cuja prévia será mostrada. Para remover: delete
+72b362db5	A publicação está vazia: primeiro adicione ✏️ Texto ou 🖼 Mídia.
+741bec6dc	Numa publicação com mídia o texto pode ter no máximo 1024 caracteres (agora ⟨0⟩).
+ed5e0a973	O texto pode ter no máximo 4096 caracteres (agora ⟨0⟩).
+86691bbcb	O código foi escrito como legenda de uma mídia; uma publicação de texto não pode ser aplicada a uma mídia. Escreva o código no canal como texto simples.
+03a2ea7b5	O bot não tem a permissão <b>Editar mensagens</b> neste canal. Configurações do canal → Administradores → bot → ative Editar mensagens e escreva o código de novo.
+115d827cd	A mensagem do código não foi encontrada (pode ter sido apagada). Escreva o código de novo.
+a44085176	O texto excede o limite do Telegram; encurte a publicação.
+71a61e10f	❌ Não foi possível aplicar <code>#g⟨0⟩</code> ao canal.
+e2fd3d196	A publicação continua pronta.
+263efcc87	✅ <code>#g⟨0⟩</code> publicada: <a href="⟨1⟩">ir para a publicação</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Reutilizável: o código pode ser usado de novo.
+7b7e3ce57	📝 <b>Publicação</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ reutilizável
+68b8326a2	não
+da02209e7	legenda em cima
+072c286c7	prévia do link: ⟨0⟩
+b3742c9fc	opções padrão
+75adccdaf	⚠️ <b>O bot não tem a permissão “Editar mensagens” neste canal.</b> Ao escrever o código a publicação não será criada: dê essa permissão ao bot nas configurações do canal.
+bcd754037	👉 Escreva no canal, pela sua própria conta, apenas <code>#g⟨0⟩</code>; o bot o transformará nesta publicação.
+74370f776	⚙️ Opções
+894e0e55f	👁 Prévia
+4d52d4e82	⏰ Agendar / 📌 Fixar / 🗑 Apagar automaticamente
+1cd1dbdf9	🗑 Apagar
+89e868a25	📋 Minhas publicações
+dc6b96b25	⚙️ <b>Opções</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (mídia desfocada)
+10f55a4d2	Legenda acima da mídia
+13cc9e2b1	🔗 Prévia do link: ⟨0⟩
+bc6d5abe6	🔗 Link da prévia⟨0⟩
+d341358af	🔗 Prévia do link: desativada → pequena → grande → acima do texto. Se nenhum link de prévia for informado, usa-se o primeiro link do texto.
+31c98d00a	Link da prévia: ⟨0⟩
+9fbec9097	Código reutilizável
+7160ae248	♻️ Reutilizável: o código vira a publicação toda vez que é escrito (uma vez só se estiver desativado).
+ad3968817	📢 Nenhum canal encontrado para o qual você possa preparar publicações.
+6d383efc3	Adicione o bot ao seu canal como administrador (com a permissão <b>Editar mensagens</b>) e tente de novo.
+7f8742403	📝 <b>Estúdio de publicações</b>
+170aee2de	Para qual canal você está preparando a publicação?
+3e05df453	➕ Nova publicação
+864aedf12	📋 <b>Suas publicações</b>
+1318a9069	Toque em uma para editá-la.
+4d939cb89	📋 Você ainda não tem publicações. Comece com ➕ Nova publicação.
+01632d43b	📝 O estúdio de publicações funciona no chat privado: me mande /post no privado.
+3c5415709	📝 Para ver suas publicações, me mande /posts no privado.
+831dbaf68	Botões atuais:
+bd542f721	❌ O texto está vazio. Escreva o texto da publicação.
+ac9f5940e	❌ O texto é longo demais (⟨0⟩ caracteres; máximo 4096).
+3f1817503	(numa publicação com mídia podem ser mostrados no máximo 1024 caracteres!)
+805393212	✅ Mídia removida.
+42deb481c	❌ Mensagens de voz e vídeos redondos não podem ser adicionados por edição (limite do Telegram). Envie como música ou arquivo.
+0b8f18cda	❌ Não é possível adicionar figurinha à publicação. Envie uma foto, vídeo, GIF, música ou arquivo.
+b1710547c	❌ Nenhuma mídia encontrada. Envie uma foto, vídeo, GIF, música ou arquivo (para remover: delete).
+fe0741bc3	, a legenda virou o texto da publicação
+0b86280c2	✅ Logo do arquivo removido.
+90964f332	❌ O logo do arquivo só existe em mídia do tipo arquivo (documento).
+4d8ce7343	❌ Envie uma foto para o logo (para remover: delete).
+d8e07b1f2	✅ Logo do arquivo salvo (reduzido para JPEG de 320 px).
+dd65d93a0	✅ Botões removidos.
+d1cf8dc6e	❌ Não foi possível entender o formato dos botões⟨0⟩
+f9e98ab3e	Exemplo: <code>Nosso canal - https://t.me/kanal &amp;&amp; Compartilhar - share</code>
+dfe50c705	✅ Link da prévia removido.
+53d15ba87	❌ Escreva um link válido (ex.: https://example.com).
+bf2d13067	✅ Link da prévia salvo.
+3febd3182	❌ Entrada desconhecida.
+4ec886fb2	⏰ O tempo acabou, tente de novo pelo editor.
+c6f41a62e	Esta publicação não existe mais.
+18363eae4	Cancelado.
+08c32666e	O estúdio de publicações funciona no chat privado.
+fc778b227	Este canal não foi encontrado ou você não é administrador lá.
+4d142fe56	📝 Novo rascunho criado.
+22442b0b9	📝 Rascunho criado
+d085f4110	Esta publicação não foi encontrada.
+fe1b715bd	O logo do arquivo só existe em mídia do tipo arquivo (documento).
+f3d1310bc	Escreva sua resposta na mensagem que abriu 👇
+2b671f0ee	Não foi possível enviar a prévia. ⟨0⟩
+55afcbd9c	👆 Prévia: é assim que vai aparecer no canal.
+a6aea5676	👁 Prévia enviada
+2ff4f7035	Você não é mais administrador neste canal.
+8be0b2234	✅ <b>Publicação pronta:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Pronta: #g⟨0⟩
+e53f197f7	🗑 Sim, apagar
+9b6fcea87	↩️ Cancelar
 7d75ab43e	Esta mensagem não pode ser usada em canais.
 93a792a44	Boas-vindas
 06ba336bf	Despedida
@@ -48032,6 +49767,47 @@ b35d597c9	📌 Manter a anterior
 242c0f02c	Não encontrado
 ec93a493c	⏸ Parado
 e388dd558	▶️ Iniciado
+daa3d48d5	🔔 Lembrar
+d1fb68397	🤖 O bot publica
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Não entendi o horário. Exemplo: ⟨0⟩
+a0933c889	Data inválida. Exemplo: ⟨0⟩
+4314dd4ac	Esse horário já passou.
+b326ab625	É possível agendar no máximo com 90 dias de antecedência.
+38fdf5e34	Publicação não encontrada.
+098340710	⏰ <b>Plano de publicação</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ processada
+9537aa30a	🕒 Horário: <b>⟨0⟩</b> (horário da Turquia)⟨1⟩
+438c53be8	🕒 Horário: nenhum — toque em ⏰ Agendar
+e669f0130	<i>Na hora marcada o bot publica no canal sozinho; se as assinaturas estiverem ativas no canal, o nome do bot aparece.</i>
+5648800a1	⚠️ Para “O bot publica” a publicação precisa ter um canal escolhido; senão eu só lembro.
+b5d451869	<i>Na hora marcada eu te lembro no privado; você escreve <code>⟨0⟩</code> no canal pela sua conta e a publicação fica no seu nome.</i>
+686c037f9	🗑 Apagar automaticamente: ⟨0⟩
+bf912c737	<i>Para fixar e apagar, o bot precisa ser administrador do canal (permissão de editar / apagar mensagens).</i>
+cd509f96b	📝 A publicação ainda é rascunho: o agendamento funciona depois que for salva como pronta.
+cf0dd8c87	✅ Publicação publicada.
+5bd6eeff5	⏰ Mudar o horário
+ba70fe09b	⏰ Agendar
+ff57b73c7	❌ Remover agendamento
+bef4fd8ba	‹ Voltar à publicação
+af90e4911	📅 <b>Publicações agendadas</b>
+6e0c2a826	Não há publicações agendadas próximas. Prepare uma com /post e toque em ⏰ Agendar.
+edcf3ebe5	nenhum canal escolhido
+82569ed5d	Publicação não encontrada ou você não tem permissão.
+6b7df2b07	Esta publicação já foi publicada.
+ce0755ac6	⏰ Quando <code>⟨0⟩</code> deve ser publicada? (horário da Turquia)
+aa587326f	Exemplo: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Agendamento removido
+e31b7e154	Escreva de novo ou cancel.
+401b94bff	✅ <code>⟨0⟩</code> agendada: <b>⟨1⟩</b>
+f02c379f3	⚠️ Não foi possível fixar: o bot precisa ser administrador do canal com permissão de editar mensagens.
+78192eae9	⏰ Hora de publicar: escreva <code>⟨0⟩</code> no canal pela sua própria conta.
+7887a0192	⚠️ O bot não publicou sozinho porque a publicação não tem canal escolhido.
+78c5e12de	⚠️ <code>⟨0⟩</code> não pôde ser publicada no horário (⟨1⟩).
+647007ee2	A publicação continua pronta: você pode escrever <code>⟨0⟩</code> no canal pela sua conta ou reagendar com /scheduled.
+dc2a06d68	Verifique se o bot é administrador do canal com permissão para publicar mensagens.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> publicada no horário⟨1⟩
 d08a36466	➕ Nova mensagem agendada
 25cda8fe6	🚪 <b>Mensagem de despedida</b> — ⟨0⟩
 b61184fea	Status: <b>⟨0⟩</b> · ⟨1⟩
@@ -48042,9 +49818,7 @@ a4530174c	📜 Regras: ⟨0⟩ · 🚪 Despedida: ⟨1⟩ · ⏰ Mensagens agend
 d0b1d849f	Para mídia, botões e variáveis toque em ✏️ Editar (ou digite /setwelcome no grupo para ver a ajuda).
 2b7ced272	Ativado
 e5b4e786e	sim
-68b8326a2	não
 2bae1a721	✏️ Editar
-894e0e55f	👁 Prévia
 099ae3d9c	🖼 Remover mídia
 8bb5bb494	↩️ Restaurar padrão
 adcf7aa93	🧹 Apagar a antiga
@@ -48057,7 +49831,6 @@ b6669596d	🚪 Mensagem de despedida ›
 0c2dc5967	⏰ Mensagens agendadas ›
 9a8a538db	Lista negra: ⟨0⟩
 0eed14a22	Sem regras
-a6aea5676	👁 Prévia enviada
 eb9f11f93	↩️ Restaurado
 14af210b4	🖼 Mídia removida
 f615cd8f5	⏹ Marcações paradas
@@ -48549,7 +50322,6 @@ f2ba0c77b	✅ Filtro apagado.
 b7301e99a	Não há filtros neste grupo.
 bd0505102	⚠️ Apagar todos os <b>⟨0⟩</b> filtros deste grupo?
 8d8252e68	🗑 Sim, apagar tudo
-9b6fcea87	↩️ Cancelar
 cf9d69e94	🗑 ⟨0⟩ filtros apagados.
 13c07c249	🧹 Todos os filtros apagados (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Nome da marca
@@ -48625,7 +50397,6 @@ b248ddfb0	💎 Emojis premium desativados
 8f8af330e	Inválido.
 6a47f34ed	Este clone foi apagado.
 21d148b57	🗑 Apagar o clone @⟨0⟩? O bot para; as configurações nos grupos ficam.
-e53f197f7	🗑 Sim, apagar
 cb1a5e233	🗑 Seu bot clone @⟨0⟩ foi apagado pelo dono do bot.
 19e55244e	O link precisa começar com https://t.me/. Escreva de novo ou cancel.
 6e97fcc27	✅ ⟨0⟩ atualizado.
@@ -48806,7 +50577,6 @@ a1ce809b5	⚠️ Удалено + предупреждение
 4d4d20ba3	🔇 Удалено + мут на 1 час
 3a4a2408d	🚫 Удалено + бан
 184e9ea25	✅ Проигнорировано
-1cd1dbdf9	🗑 Удалить
 d193c645a	⚠️ Предупредить
 bb7ad37ac	🔇 Мут 1 ч
 ebe01fecc	🚫 Бан
@@ -49317,7 +51087,6 @@ f41c17d41	Чтобы пользоваться этой панелью, нужн�
 8213d6575	<i>Отмена: cancel</i>
 1465f36fd	Напишите ответ как ответ на открывшееся сообщение.
 3035a6b30	⏰ Время вышло, попробуйте снова из панели.
-18363eae4	Отменено.
 3a22b8f74	❌ Правила не могут быть пустыми.
 fa98ef9b6	Приветствие
 a9e0c5b00	✏️ ⟨0⟩ обновлено | ⟨1⟩
@@ -49350,7 +51119,6 @@ e4b73af2e	🚫 Список заблокированных медиа ›
 a5265e3d7	🔓 Снять блокировку медиа
 c1a903ce0	🔒 Заблокировать медиа сейчас
 678507459	вкл
-c293fc85c	выкл
 8dd94c76e	не установлено (на сервере: <code>pip install nudenet</code>)
 043b96df1	🔒 Блокировка медиа активна до ⟨0⟩
 059a31b37	ИИ-проверка: ⟨0⟩
@@ -49474,7 +51242,6 @@ c3eded236	🔕 Без звука
 cffb2a880	👆 Клики по кнопкам будут считаться
 716ef3839	↪️ Сообщение будет переслано (с пометкой «Переслано», премиум-эмодзи сохраняются)
 251fac5c6	🗳 Опрос будет переслан; голоса собираются в этом опросе
-ba70fe09b	⏰ Запланировать
 8241e1495	✅ Отправить
 86f2e67ab	❌ Отмена
 d53523fb6	Отправлять некому.
@@ -50043,6 +51810,8 @@ fcea72bad	Быстрая настройка выбранной группы
 9674953cf	Отключить рассылки бота
 99ab93b21	Язык
 333895635	Написать администратору (поддержка)
+de94cd9e4	Подготовить пост для канала
+7ffee2a93	Подготовленные вами посты канала
 0d0187ac4	Группы и статистика вашего бота
 8938961a5	Рассылки в группы, каналы, людям
 be4f2dea9	История рассылок
@@ -50226,6 +51995,104 @@ a1c3d2c0b	<code>Наш канал - https://t.me/channel &amp;&amp; Поддер
 dd3608634	Цвет: в конце строки <code>#green</code> <code>#red</code> <code>#blue</code> · Стиль Rose: <code>[Канал](buttonurl://t.me/channel)</code>
 90f26740a	<b>Переменные:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Случайно:</b> разделите несколько сообщений строкой, содержащей только <code>%%%</code>.
+c293fc85c	выкл
+4ffaa2134	маленькое
+9ad8d8983	большое
+65051db26	над текстом
+021eeb58e	✅ Готов
+8dc576b65	📤 Опубликован
+e31d308d2	напишите текст поста. Жирный, курсив, ссылки, цитаты, спойлеры и премиум-эмодзи сохраняются как есть.
+e2bf41d44	Текст поста
+c2af2bb93	отправьте фото, видео, GIF, музыку или файл. Подпись станет текстом поста. Чтобы убрать медиа: delete
+71d627824	Отправьте медиа
+5c2538ae6	отправьте фото, которое станет логотипом (миниатюрой) файла. Чтобы убрать: delete
+a1c26cf23	Фото логотипа
+282908438	напишите кнопки (каждая строка — ряд, рядом через &&):
+c49a4d150	Наш канал - https://t.me/kanal && Поделиться - share
+b69bb4ad2	Инфо - popup:Краткое описание #blue
+be890c755	Цвет: в конце строки #green #red #blue · Чтобы убрать кнопки: delete
+faa0b07d9	напишите ссылку, превью которой будет показано. Чтобы убрать: delete
+72b362db5	Пост пуст: сначала добавьте ✏️ Текст или 🖼 Медиа.
+741bec6dc	В посте с медиа текст может быть не длиннее 1024 символов (сейчас ⟨0⟩).
+ed5e0a973	Текст может быть не длиннее 4096 символов (сейчас ⟨0⟩).
+86691bbcb	Код написан в подписи к медиа; текстовый пост нельзя применить к медиа. Напишите код в канал обычным текстом.
+03a2ea7b5	У бота нет права <b>Редактировать сообщения</b> в этом канале. Настройки канала → Администраторы → бот → включите «Редактировать сообщения», затем напишите код снова.
+115d827cd	Сообщение с кодом не найдено (возможно, удалено). Напишите код снова.
+a44085176	Текст превышает лимит Telegram; сократите пост.
+71a61e10f	❌ <code>#g⟨0⟩</code> не удалось применить в канале.
+e2fd3d196	Пост по-прежнему готов.
+263efcc87	✅ <code>#g⟨0⟩</code> опубликован: <a href="⟨1⟩">перейти к посту</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Многоразовый: код можно использовать снова.
+7b7e3ce57	📝 <b>Пост</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ многоразовый
+68b8326a2	нет
+da02209e7	подпись сверху
+072c286c7	превью ссылки: ⟨0⟩
+b3742c9fc	параметры по умолчанию
+75adccdaf	⚠️ <b>У бота нет права «Редактировать сообщения» в этом канале.</b> Когда вы напишете код, пост не появится: дайте боту это право в настройках канала.
+bcd754037	👉 Напишите в канал со своего аккаунта только <code>#g⟨0⟩</code>; бот превратит его в этот пост.
+74370f776	⚙️ Параметры
+894e0e55f	👁 Предпросмотр
+4d52d4e82	⏰ Запланировать / 📌 Закрепить / 🗑 Автоудаление
+1cd1dbdf9	🗑 Удалить
+89e868a25	📋 Мои посты
+dc6b96b25	⚙️ <b>Параметры</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Спойлер (размытое медиа)
+10f55a4d2	Подпись над медиа
+13cc9e2b1	🔗 Превью ссылки: ⟨0⟩
+bc6d5abe6	🔗 Ссылка для превью⟨0⟩
+d341358af	🔗 Превью ссылки: выкл → маленькое → большое → над текстом. Если ссылка для превью не задана, берётся первая ссылка из текста.
+31c98d00a	Ссылка для превью: ⟨0⟩
+9fbec9097	Многоразовый код
+7160ae248	♻️ Многоразовый: код превращается в пост каждый раз, когда его пишут (если выключено — один раз).
+ad3968817	📢 Не найдено канала, для которого вы можете подготовить пост.
+6d383efc3	Добавьте бота в канал администратором (с правом <b>Редактировать сообщения</b>), затем попробуйте снова.
+7f8742403	📝 <b>Студия постов</b>
+170aee2de	Для какого канала вы готовите пост?
+3e05df453	➕ Новый пост
+864aedf12	📋 <b>Ваши посты</b>
+1318a9069	Нажмите на пост, чтобы изменить его.
+4d939cb89	📋 У вас пока нет постов. Начните с ➕ Новый пост.
+01632d43b	📝 Студия постов работает в личном чате: напишите мне /post в личку.
+3c5415709	📝 Чтобы увидеть свои посты, напишите мне /posts в личку.
+831dbaf68	Текущие кнопки:
+bd542f721	❌ Текст пуст. Напишите текст поста.
+ac9f5940e	❌ Текст слишком длинный (⟨0⟩ символов; максимум 4096).
+3f1817503	(в посте с медиа может отображаться не больше 1024 символов!)
+805393212	✅ Медиа удалено.
+42deb481c	❌ Голосовые сообщения и круглые видео нельзя добавить редактированием (ограничение Telegram). Отправьте как музыку или файл.
+0b8f18cda	❌ Стикер нельзя добавить в пост. Отправьте фото, видео, GIF, музыку или файл.
+b1710547c	❌ Медиа не найдено. Отправьте фото, видео, GIF, музыку или файл (чтобы убрать: delete).
+fe0741bc3	, подпись стала текстом поста
+0b86280c2	✅ Логотип файла удалён.
+90964f332	❌ Логотип файла бывает только у медиа-файла (документа).
+4d8ce7343	❌ Отправьте фото для логотипа (чтобы убрать: delete).
+d8e07b1f2	✅ Логотип файла сохранён (уменьшается до JPEG 320 px).
+dd65d93a0	✅ Кнопки удалены.
+d1cf8dc6e	❌ Не удалось разобрать формат кнопок⟨0⟩
+f9e98ab3e	Пример: <code>Наш канал - https://t.me/kanal &amp;&amp; Поделиться - share</code>
+dfe50c705	✅ Ссылка для превью удалена.
+53d15ba87	❌ Напишите корректную ссылку (напр. https://example.com).
+bf2d13067	✅ Ссылка для превью сохранена.
+3febd3182	❌ Неизвестный ввод.
+4ec886fb2	⏰ Время вышло, попробуйте снова из редактора.
+c6f41a62e	Этого поста больше нет.
+18363eae4	Отменено.
+08c32666e	Студия постов работает в личном чате.
+fc778b227	Канал не найден или вы там не администратор.
+4d142fe56	📝 Создан новый черновик.
+22442b0b9	📝 Черновик создан
+d085f4110	Пост не найден.
+fe1b715bd	Логотип файла бывает только у медиа-файла (документа).
+f3d1310bc	Напишите ответ в открывшемся сообщении 👇
+2b671f0ee	Не удалось отправить превью. ⟨0⟩
+55afcbd9c	👆 Превью: так это будет выглядеть в канале.
+a6aea5676	👁 Предпросмотр отправлен
+2ff4f7035	Вы больше не администратор этого канала.
+8be0b2234	✅ <b>Пост готов:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Готов: #g⟨0⟩
+e53f197f7	🗑 Да, удалить
+9b6fcea87	↩️ Отмена
 7d75ab43e	Это сообщение нельзя использовать в каналах.
 93a792a44	Приветствие
 06ba336bf	Прощание
@@ -50261,6 +52128,47 @@ b35d597c9	📌 Оставлять предыдущее
 242c0f02c	Не найдено
 ec93a493c	⏸ Остановлен
 e388dd558	▶️ Запущено
+daa3d48d5	🔔 Напомнить
+d1fb68397	🤖 Публикует бот
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Не удалось понять время. Пример: ⟨0⟩
+a0933c889	Неверная дата. Пример: ⟨0⟩
+4314dd4ac	Это время уже прошло.
+b326ab625	Запланировать можно не дальше чем на 90 дней.
+38fdf5e34	Пост не найден.
+098340710	⏰ <b>План публикации</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ выполнено
+9537aa30a	🕒 Время: <b>⟨0⟩</b> (время Турции)⟨1⟩
+438c53be8	🕒 Время: не задано — нажмите ⏰ Запланировать
+e669f0130	<i>Когда придёт время, бот сам опубликует пост в канале; если в канале включены подписи, будет видно имя бота.</i>
+5648800a1	⚠️ Для «Публикует бот» у поста должен быть выбран канал; иначе я только напомню.
+b5d451869	<i>Когда придёт время, я напомню вам в личке; вы напишете <code>⟨0⟩</code> в канал со своего аккаунта, и пост останется от вашего имени.</i>
+686c037f9	🗑 Автоудаление: ⟨0⟩
+bf912c737	<i>Для закрепления и удаления бот должен быть администратором канала (право редактировать / удалять сообщения).</i>
+cd509f96b	📝 Пост ещё черновик: планирование заработает, когда он будет сохранён как готовый.
+cf0dd8c87	✅ Пост опубликован.
+5bd6eeff5	⏰ Изменить время
+ba70fe09b	⏰ Запланировать
+ff57b73c7	❌ Убрать планирование
+bef4fd8ba	‹ Назад к посту
+af90e4911	📅 <b>Запланированные посты</b>
+6e0c2a826	Нет предстоящих запланированных постов. Подготовьте пост через /post, затем нажмите ⏰ Запланировать.
+edcf3ebe5	канал не выбран
+82569ed5d	Пост не найден или у вас нет прав.
+6b7df2b07	Этот пост уже опубликован.
+ce0755ac6	⏰ Когда опубликовать <code>⟨0⟩</code>? (время Турции)
+aa587326f	Пример: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Планирование убрано
+e31b7e154	Напишите снова или cancel.
+401b94bff	✅ <code>⟨0⟩</code> запланирован: <b>⟨1⟩</b>
+f02c379f3	⚠️ Не удалось закрепить: бот должен быть администратором канала с правом редактировать сообщения.
+78192eae9	⏰ Время публикации: напишите <code>⟨0⟩</code> в канал со своего аккаунта.
+7887a0192	⚠️ Бот не опубликовал пост сам, потому что для него не выбран канал.
+78c5e12de	⚠️ <code>⟨0⟩</code> не удалось опубликовать вовремя (⟨1⟩).
+647007ee2	Пост по-прежнему готов: можете написать <code>⟨0⟩</code> в канал со своего аккаунта или перепланировать через /scheduled.
+dc2a06d68	Убедитесь, что бот — администратор канала с правом публиковать сообщения.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> опубликован вовремя⟨1⟩
 d08a36466	➕ Новое сообщение по расписанию
 25cda8fe6	🚪 <b>Прощание</b> — ⟨0⟩
 b61184fea	Статус: <b>⟨0⟩</b> · ⟨1⟩
@@ -50271,9 +52179,7 @@ a4530174c	📜 Правила: ⟨0⟩ · 🚪 Прощание: ⟨1⟩ · ⏰ 
 d0b1d849f	Для медиа, кнопок и переменных нажмите ✏️ Изменить (или напишите в группе /setwelcome, чтобы увидеть справку).
 2b7ced272	Вкл
 e5b4e786e	есть
-68b8326a2	нет
 2bae1a721	✏️ Изменить
-894e0e55f	👁 Предпросмотр
 099ae3d9c	🖼 Убрать медиа
 8bb5bb494	↩️ Сбросить к стандартному
 adcf7aa93	🧹 Удалять старое
@@ -50286,7 +52192,6 @@ b6669596d	🚪 Прощание ›
 0c2dc5967	⏰ Сообщения по расписанию ›
 9a8a538db	Чёрный список: ⟨0⟩
 0eed14a22	Нет правил
-a6aea5676	👁 Предпросмотр отправлен
 eb9f11f93	↩️ Сброшено к стандартному
 14af210b4	🖼 Медиа убрано
 f615cd8f5	⏹ Упоминания остановлены
@@ -50781,7 +52686,6 @@ f2ba0c77b	✅ Фильтр удалён.
 b7301e99a	В этой группе нет фильтров.
 bd0505102	⚠️ Удалить все <b>⟨0⟩</b> фильтров в этой группе?
 8d8252e68	🗑 Да, удалить все
-9b6fcea87	↩️ Отмена
 cf9d69e94	🗑 Удалено фильтров: ⟨0⟩.
 13c07c249	🧹 Все фильтры удалены (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Название бренда
@@ -50857,7 +52761,6 @@ b248ddfb0	💎 Премиум-эмодзи выключены
 8f8af330e	Неверно.
 6a47f34ed	Этот клон удалён.
 21d148b57	🗑 Удалить клон @⟨0⟩? Бот остановится, настройки в группах сохранятся.
-e53f197f7	🗑 Да, удалить
 cb1a5e233	🗑 Ваш клон бота @⟨0⟩ удалён владельцем бота.
 19e55244e	Ссылка должна начинаться с https://t.me/. Напишите снова или cancel.
 6e97fcc27	✅ ⟨0⟩ обновлено.
@@ -51061,7 +52964,6 @@ a1ce809b5	⚠️ Видалено + попередження
 4d4d20ba3	🔇 Видалено + мут на 1 годину
 3a4a2408d	🚫 Видалено + бан
 184e9ea25	✅ Проігноровано
-1cd1dbdf9	🗑 Видалити
 d193c645a	⚠️ Попередити
 bb7ad37ac	🔇 Мут 1 год
 ebe01fecc	🚫 Бан
@@ -51574,7 +53476,6 @@ f41c17d41	Щоб користуватися цією панеллю, потрі�
 8213d6575	<i>Скасувати: cancel</i>
 1465f36fd	Напишіть відповідь як відповідь на повідомлення, що відкрилося.
 3035a6b30	⏰ Час вийшов, спробуйте знову з панелі.
-18363eae4	Скасовано.
 3a22b8f74	❌ Правила не можуть бути порожніми.
 fa98ef9b6	Привітання
 a9e0c5b00	✏️ ⟨0⟩ оновлено | ⟨1⟩
@@ -51607,7 +53508,6 @@ e4b73af2e	🚫 Список заблокованих медіа ›
 a5265e3d7	🔓 Зняти блокування медіа
 c1a903ce0	🔒 Заблокувати медіа зараз
 678507459	увімк
-c293fc85c	вимк
 8dd94c76e	не встановлено (на сервері: <code>pip install nudenet</code>)
 043b96df1	🔒 Блокування медіа активне до ⟨0⟩
 059a31b37	ШІ-перевірка: ⟨0⟩
@@ -51732,7 +53632,6 @@ c3eded236	🔕 Без звуку
 cffb2a880	👆 Натискання кнопок рахуватимуться
 716ef3839	↪️ Повідомлення буде переслано (з позначкою «Переслано», преміум-емодзі зберігаються)
 251fac5c6	🗳 Опитування буде переслано; голоси збираються в цьому опитуванні
-ba70fe09b	⏰ Запланувати
 8241e1495	✅ Надіслати
 86f2e67ab	❌ Скасувати
 d53523fb6	Немає кому надсилати.
@@ -52301,6 +54200,8 @@ fcea72bad	Швидке налаштування вибраної групи
 9674953cf	Вимкнути розсилки бота
 99ab93b21	Мова
 333895635	Написати адміну (лінія підтримки)
+de94cd9e4	Підготувати допис для каналу
+7ffee2a93	Підготовлені вами дописи каналу
 0d0187ac4	Групи та статистика вашого бота
 8938961a5	Розсилки в групи, канали, людям
 be4f2dea9	Історія розсилок
@@ -52484,6 +54385,104 @@ a1c3d2c0b	<code>Наш канал - https://t.me/channel &amp;&amp; Підтри
 dd3608634	Колір: у кінці рядка <code>#green</code> <code>#red</code> <code>#blue</code> · Стиль Rose: <code>[Канал](buttonurl://t.me/channel)</code>
 90f26740a	<b>Змінні:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Випадково:</b> розділяйте кілька повідомлень рядком, що містить лише <code>%%%</code>.
+c293fc85c	вимк
+4ffaa2134	мале
+9ad8d8983	велике
+65051db26	над текстом
+021eeb58e	✅ Готовий
+8dc576b65	📤 Опубліковано
+e31d308d2	напишіть текст допису. Жирний, курсив, посилання, цитати, спойлери та преміум-емодзі зберігаються як є.
+e2bf41d44	Текст допису
+c2af2bb93	надішліть фото, відео, GIF, музику або файл. Підпис стане текстом допису. Щоб прибрати медіа: delete
+71d627824	Надішліть медіа
+5c2538ae6	надішліть фото, яке стане логотипом (мініатюрою) файлу. Щоб прибрати: delete
+a1c26cf23	Фото логотипа
+282908438	напишіть кнопки (кожен рядок — ряд, поруч через &&):
+c49a4d150	Наш канал - https://t.me/kanal && Поділитися - share
+b69bb4ad2	Інфо - popup:Короткий опис #blue
+be890c755	Колір: у кінці рядка #green #red #blue · Щоб прибрати кнопки: delete
+faa0b07d9	напишіть посилання, прев'ю якого буде показано. Щоб прибрати: delete
+72b362db5	Допис порожній: спершу додайте ✏️ Текст або 🖼 Медіа.
+741bec6dc	У дописі з медіа текст може містити не більше 1024 символів (зараз ⟨0⟩).
+ed5e0a973	Текст може містити не більше 4096 символів (зараз ⟨0⟩).
+86691bbcb	Код написано в підписі до медіа; текстовий допис не можна застосувати до медіа. Напишіть код у канал звичайним текстом.
+03a2ea7b5	Бот не має права <b>Редагувати повідомлення</b> у цьому каналі. Налаштування каналу → Адміністратори → бот → увімкніть «Редагувати повідомлення», потім напишіть код знову.
+115d827cd	Повідомлення з кодом не знайдено (можливо, видалено). Напишіть код знову.
+a44085176	Текст перевищує ліміт Telegram; скоротіть допис.
+71a61e10f	❌ <code>#g⟨0⟩</code> не вдалося застосувати в каналі.
+e2fd3d196	Допис і далі готовий.
+263efcc87	✅ <code>#g⟨0⟩</code> опубліковано: <a href="⟨1⟩">перейти до допису</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Багаторазовий: код можна використати знову.
+7b7e3ce57	📝 <b>Допис</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ багаторазовий
+68b8326a2	немає
+da02209e7	підпис зверху
+072c286c7	прев'ю посилання: ⟨0⟩
+b3742c9fc	параметри за замовчуванням
+75adccdaf	⚠️ <b>Бот не має права «Редагувати повідомлення» у цьому каналі.</b> Коли ви напишете код, допис не з'явиться: надайте боту це право в налаштуваннях каналу.
+bcd754037	👉 Напишіть у канал зі свого акаунта лише <code>#g⟨0⟩</code>; бот перетворить його на цей допис.
+74370f776	⚙️ Параметри
+894e0e55f	👁 Попередній перегляд
+4d52d4e82	⏰ Запланувати / 📌 Закріпити / 🗑 Автовидалення
+1cd1dbdf9	🗑 Видалити
+89e868a25	📋 Мої дописи
+dc6b96b25	⚙️ <b>Параметри</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Спойлер (розмите медіа)
+10f55a4d2	Підпис над медіа
+13cc9e2b1	🔗 Прев'ю посилання: ⟨0⟩
+bc6d5abe6	🔗 Посилання для прев'ю⟨0⟩
+d341358af	🔗 Прев'ю посилання: вимк → мале → велике → над текстом. Якщо посилання для прев'ю не задано, береться перше посилання з тексту.
+31c98d00a	Посилання для прев'ю: ⟨0⟩
+9fbec9097	Багаторазовий код
+7160ae248	♻️ Багаторазовий: код перетворюється на допис щоразу, коли його пишуть (якщо вимкнено — один раз).
+ad3968817	📢 Не знайдено каналу, для якого ви можете підготувати допис.
+6d383efc3	Додайте бота в канал адміністратором (з правом <b>Редагувати повідомлення</b>), потім спробуйте знову.
+7f8742403	📝 <b>Студія дописів</b>
+170aee2de	Для якого каналу ви готуєте допис?
+3e05df453	➕ Новий допис
+864aedf12	📋 <b>Ваші дописи</b>
+1318a9069	Натисніть на допис, щоб змінити його.
+4d939cb89	📋 У вас ще немає дописів. Почніть з ➕ Новий допис.
+01632d43b	📝 Студія дописів працює в особистому чаті: напишіть мені /post в особисті.
+3c5415709	📝 Щоб побачити свої дописи, напишіть мені /posts в особисті.
+831dbaf68	Поточні кнопки:
+bd542f721	❌ Текст порожній. Напишіть текст допису.
+ac9f5940e	❌ Текст задовгий (⟨0⟩ символів; максимум 4096).
+3f1817503	(у дописі з медіа може відображатися не більше 1024 символів!)
+805393212	✅ Медіа видалено.
+42deb481c	❌ Голосові повідомлення та круглі відео не можна додати редагуванням (обмеження Telegram). Надішліть як музику або файл.
+0b8f18cda	❌ Стікер не можна додати в допис. Надішліть фото, відео, GIF, музику або файл.
+b1710547c	❌ Медіа не знайдено. Надішліть фото, відео, GIF, музику або файл (щоб прибрати: delete).
+fe0741bc3	, підпис став текстом допису
+0b86280c2	✅ Логотип файлу видалено.
+90964f332	❌ Логотип файлу буває лише в медіа-файлу (документа).
+4d8ce7343	❌ Надішліть фото для логотипа (щоб прибрати: delete).
+d8e07b1f2	✅ Логотип файлу збережено (зменшується до JPEG 320 px).
+dd65d93a0	✅ Кнопки видалено.
+d1cf8dc6e	❌ Не вдалося розібрати формат кнопок⟨0⟩
+f9e98ab3e	Приклад: <code>Наш канал - https://t.me/kanal &amp;&amp; Поділитися - share</code>
+dfe50c705	✅ Посилання для прев'ю видалено.
+53d15ba87	❌ Напишіть коректне посилання (напр. https://example.com).
+bf2d13067	✅ Посилання для прев'ю збережено.
+3febd3182	❌ Невідоме введення.
+4ec886fb2	⏰ Час вийшов, спробуйте знову з редактора.
+c6f41a62e	Цього допису більше немає.
+18363eae4	Скасовано.
+08c32666e	Студія дописів працює в особистому чаті.
+fc778b227	Канал не знайдено або ви там не адміністратор.
+4d142fe56	📝 Створено нову чернетку.
+22442b0b9	📝 Чернетку створено
+d085f4110	Допис не знайдено.
+fe1b715bd	Логотип файлу буває лише в медіа-файлу (документа).
+f3d1310bc	Напишіть відповідь у повідомленні, що відкрилося 👇
+2b671f0ee	Не вдалося надіслати прев'ю. ⟨0⟩
+55afcbd9c	👆 Прев'ю: так це виглядатиме в каналі.
+a6aea5676	👁 Попередній перегляд надіслано
+2ff4f7035	Ви більше не адміністратор цього каналу.
+8be0b2234	✅ <b>Допис готовий:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Готовий: #g⟨0⟩
+e53f197f7	🗑 Так, видалити
+9b6fcea87	↩️ Скасувати
 7d75ab43e	Це повідомлення не можна використовувати в каналах.
 93a792a44	Привітання
 06ba336bf	Прощання
@@ -52519,6 +54518,47 @@ b35d597c9	📌 Залишати попереднє
 242c0f02c	Не знайдено
 ec93a493c	⏸ Зупинено
 e388dd558	▶️ Запущено
+daa3d48d5	🔔 Нагадати
+d1fb68397	🤖 Публікує бот
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Не вдалося зрозуміти час. Приклад: ⟨0⟩
+a0933c889	Неправильна дата. Приклад: ⟨0⟩
+4314dd4ac	Цей час уже минув.
+b326ab625	Запланувати можна не далі ніж на 90 днів.
+38fdf5e34	Допис не знайдено.
+098340710	⏰ <b>План публікації</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ виконано
+9537aa30a	🕒 Час: <b>⟨0⟩</b> (час Туреччини)⟨1⟩
+438c53be8	🕒 Час: не задано — натисніть ⏰ Запланувати
+e669f0130	<i>Коли настане час, бот сам опублікує допис у каналі; якщо в каналі увімкнено підписи, буде видно ім'я бота.</i>
+5648800a1	⚠️ Для «Публікує бот» у допису має бути вибрано канал; інакше я лише нагадаю.
+b5d451869	<i>Коли настане час, я нагадаю вам в особистих; ви напишете <code>⟨0⟩</code> у канал зі свого акаунта, і допис залишиться від вашого імені.</i>
+686c037f9	🗑 Автовидалення: ⟨0⟩
+bf912c737	<i>Для закріплення та видалення бот має бути адміністратором каналу (право редагувати / видаляти повідомлення).</i>
+cd509f96b	📝 Допис ще чернетка: планування запрацює, коли його буде збережено як готовий.
+cf0dd8c87	✅ Допис опубліковано.
+5bd6eeff5	⏰ Змінити час
+ba70fe09b	⏰ Запланувати
+ff57b73c7	❌ Прибрати планування
+bef4fd8ba	‹ Назад до допису
+af90e4911	📅 <b>Заплановані дописи</b>
+6e0c2a826	Немає найближчих запланованих дописів. Підготуйте допис через /post, потім натисніть ⏰ Запланувати.
+edcf3ebe5	канал не вибрано
+82569ed5d	Допис не знайдено або у вас немає прав.
+6b7df2b07	Цей допис уже опубліковано.
+ce0755ac6	⏰ Коли опублікувати <code>⟨0⟩</code>? (час Туреччини)
+aa587326f	Приклад: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Планування прибрано
+e31b7e154	Напишіть знову або cancel.
+401b94bff	✅ <code>⟨0⟩</code> заплановано: <b>⟨1⟩</b>
+f02c379f3	⚠️ Не вдалося закріпити: бот має бути адміністратором каналу з правом редагувати повідомлення.
+78192eae9	⏰ Час публікації: напишіть <code>⟨0⟩</code> у канал зі свого акаунта.
+7887a0192	⚠️ Бот не опублікував допис сам, бо для нього не вибрано канал.
+78c5e12de	⚠️ <code>⟨0⟩</code> не вдалося опублікувати вчасно (⟨1⟩).
+647007ee2	Допис і далі готовий: можете написати <code>⟨0⟩</code> у канал зі свого акаунта або перепланувати через /scheduled.
+dc2a06d68	Переконайтеся, що бот — адміністратор каналу з правом публікувати повідомлення.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> опубліковано вчасно⟨1⟩
 d08a36466	➕ Нове повідомлення за розкладом
 25cda8fe6	🚪 <b>Прощальне повідомлення</b> — ⟨0⟩
 b61184fea	Стан: <b>⟨0⟩</b> · ⟨1⟩
@@ -52529,9 +54569,7 @@ a4530174c	📜 Правила: ⟨0⟩ · 🚪 Прощання: ⟨1⟩ · ⏰ 
 d0b1d849f	Для медіа, кнопок і змінних натисніть ✏️ Редагувати (або напишіть /setwelcome у групі, щоб побачити довідку).
 2b7ced272	Увімк
 e5b4e786e	є
-68b8326a2	немає
 2bae1a721	✏️ Редагувати
-894e0e55f	👁 Попередній перегляд
 099ae3d9c	🖼 Прибрати медіа
 8bb5bb494	↩️ Скинути до стандартного
 adcf7aa93	🧹 Видаляти старе
@@ -52544,7 +54582,6 @@ b6669596d	🚪 Прощальне повідомлення ›
 0c2dc5967	⏰ Повідомлення за розкладом ›
 9a8a538db	Чорний список: ⟨0⟩
 0eed14a22	Правил немає
-a6aea5676	👁 Попередній перегляд надіслано
 eb9f11f93	↩️ Скинуто до стандартного
 14af210b4	🖼 Медіа прибрано
 f615cd8f5	⏹ Згадування зупинено
@@ -53039,7 +55076,6 @@ f2ba0c77b	✅ Фільтр видалено.
 b7301e99a	У цій групі немає фільтрів.
 bd0505102	⚠️ Видалити всі фільтри цієї групи (<b>⟨0⟩</b>)?
 8d8252e68	🗑 Так, видалити все
-9b6fcea87	↩️ Скасувати
 cf9d69e94	🗑 Видалено фільтрів: ⟨0⟩.
 13c07c249	🧹 Усі фільтри видалено (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Назва бренду
@@ -53115,7 +55151,6 @@ b248ddfb0	💎 Преміум-емодзі вимкнено
 8f8af330e	Недійсно.
 6a47f34ed	Цей клон видалено.
 21d148b57	🗑 Видалити клон @⟨0⟩? Бот зупиниться, налаштування в групах залишаться.
-e53f197f7	🗑 Так, видалити
 cb1a5e233	🗑 Вашого бота-клона @⟨0⟩ видалив власник бота.
 19e55244e	Посилання має починатися з https://t.me/. Напишіть ще раз або cancel.
 6e97fcc27	✅ ⟨0⟩ оновлено.
@@ -53318,7 +55353,6 @@ a1ce809b5	⚠️ O‘chirildi + ogohlantirildi
 4d4d20ba3	🔇 O‘chirildi + 1 soatga ovozsiz
 3a4a2408d	🚫 O‘chirildi + ban
 184e9ea25	✅ E’tiborsiz qoldirildi
-1cd1dbdf9	🗑 O‘chirish
 d193c645a	⚠️ Ogohlantirish
 bb7ad37ac	🔇 1 soat ovozsiz
 ebe01fecc	🚫 Ban
@@ -53826,7 +55860,6 @@ f41c17d41	Bu paneldan foydalanish uchun guruhda admin bo‘lishingiz kerak.
 8213d6575	<i>Bekor qilish: cancel</i>
 1465f36fd	Javobingizni ochilgan xabarga javob qilib yozing.
 3035a6b30	⏰ Vaqt tugadi, paneldan qayta urinib ko‘ring.
-18363eae4	Bekor qilindi.
 3a22b8f74	❌ Qoidalar bo‘sh bo‘lishi mumkin emas.
 fa98ef9b6	Xush kelibsiz xabari
 a9e0c5b00	✏️ ⟨0⟩ yangilandi | ⟨1⟩
@@ -53859,7 +55892,6 @@ e4b73af2e	🚫 Bloklangan media ro‘yxati ›
 a5265e3d7	🔓 Media qulfini olish
 c1a903ce0	🔒 Mediani hozir qulflash
 678507459	yoqiq
-c293fc85c	o‘chiq
 8dd94c76e	o‘rnatilmagan (serverda: <code>pip install nudenet</code>)
 043b96df1	🔒 Media qulfi ⟨0⟩ gacha faol
 059a31b37	SI tekshiruvi: ⟨0⟩
@@ -53983,7 +56015,6 @@ c3eded236	🔕 Ovozsiz
 cffb2a880	👆 Tugma bosishlari sanaladi
 716ef3839	↪️ Xabar uzatiladi (ustida "Uzatildi" yoziladi, premium emojilar saqlanadi)
 251fac5c6	🗳 So‘rovnoma forward qilinadi; ovozlar shu so‘rovnomada yig‘iladi
-ba70fe09b	⏰ Rejalashtirish
 8241e1495	✅ Yuborish
 86f2e67ab	❌ Bekor qilish
 d53523fb6	Yuboradigan hech kim yo‘q.
@@ -54547,6 +56578,8 @@ fcea72bad	Tanlangan guruh uchun tezkor sozlash
 9674953cf	Bot e’lonlarini o‘chirish
 99ab93b21	Til
 333895635	Adminga yozish (yordam liniyasi)
+de94cd9e4	Kanal posti tayyorlash
+7ffee2a93	Siz tayyorlagan kanal postlari
 0d0187ac4	Botingiz guruhlari va statistikasi
 8938961a5	Guruhlar, kanallar, odamlarga e’lonlar
 be4f2dea9	E’lonlar tarixi
@@ -54727,6 +56760,104 @@ a1c3d2c0b	<code>Kanalimiz - https://t.me/channel &amp;&amp; Yordam - @support</c
 dd3608634	Rang: qator oxirida <code>#green</code> <code>#red</code> <code>#blue</code> · Rose uslubi: <code>[Kanal](buttonurl://t.me/channel)</code>
 90f26740a	<b>O‘zgaruvchilar:</b> <code>{user}</code> <code>{first}</code> <code>{last}</code> <code>{username}</code> <code>{id}</code> <code>{group}</code> <code>{count}</code> <code>{date}</code> <code>{time}</code>
 23adc295f	<b>Tasodifiy:</b> bir nechta xabarni faqat <code>%%%</code> dan iborat qator bilan ajrating.
+c293fc85c	o‘chiq
+4ffaa2134	kichik
+9ad8d8983	katta
+65051db26	matn ustida
+021eeb58e	✅ Tayyor
+8dc576b65	📤 Eʼlon qilindi
+e31d308d2	post matnini yozing. Qalin, kursiv, havola, iqtibos, spoiler va premium emoji qanday boʻlsa shunday saqlanadi.
+e2bf41d44	Post matni
+c2af2bb93	rasm, video, GIF, musiqa yoki fayl yuboring. Izohi boʻlsa post matni boʻladi. Mediani olib tashlash uchun: delete
+71d627824	Media yuboring
+5c2538ae6	fayl logotipi (kichik rasmi) boʻladigan rasmni yuboring. Olib tashlash uchun: delete
+a1c26cf23	Logotip rasmi
+282908438	tugmalarni yozing (har qator bir qatorga, && bilan yonma-yon):
+c49a4d150	Kanalimiz - https://t.me/kanal && Ulashish - share
+b69bb4ad2	Maʼlumot - popup:Qisqa izoh #blue
+be890c755	Rang: qator oxiriga #green #red #blue · Tugmalarni olib tashlash uchun: delete
+faa0b07d9	oldindan koʻrinishi chiqadigan havolani yozing. Olib tashlash uchun: delete
+72b362db5	Post boʻsh: avval ✏️ Matn yoki 🖼 Media qoʻshing.
+741bec6dc	Mediali postda matn koʻpi bilan 1024 belgi boʻlishi mumkin (hozir ⟨0⟩).
+ed5e0a973	Matn koʻpi bilan 4096 belgi boʻlishi mumkin (hozir ⟨0⟩).
+86691bbcb	Kod media izohiga yozilgan; matnli postni mediaga qoʻllab boʻlmaydi. Kodni kanalga oddiy matn sifatida yozing.
+03a2ea7b5	Botda bu kanalda <b>Xabarlarni tahrirlash</b> huquqi yoʻq. Kanal sozlamalari → Adminlar → bot → Xabarlarni tahrirlashni yoqing, keyin kodni qayta yozing.
+115d827cd	Kod xabari topilmadi (oʻchirilgan boʻlishi mumkin). Kodni qayta yozing.
+a44085176	Matn Telegram chegarasidan oshdi; postni qisqartiring.
+71a61e10f	❌ <code>#g⟨0⟩</code> kanalga qoʻllanmadi.
+e2fd3d196	Post hali ham tayyor.
+263efcc87	✅ <code>#g⟨0⟩</code> eʼlon qilindi: <a href="⟨1⟩">postga oʻtish</a>⟨2⟩⟨3⟩
+7852257e0	♻️ Koʻp martalik: kodni yana ishlatish mumkin.
+7b7e3ce57	📝 <b>Post</b> <code>#g⟨0⟩</code> · 📢 <b>⟨1⟩</b>
+bb2359256	· ♻️ koʻp martalik
+68b8326a2	yo‘q
+da02209e7	izoh tepada
+072c286c7	havola koʻrinishi: ⟨0⟩
+b3742c9fc	standart sozlamalar
+75adccdaf	⚠️ <b>Botda bu kanalda “Xabarlarni tahrirlash” huquqi yoʻq.</b> Kod yozilganda post paydo boʻlmaydi: kanal sozlamalarida botga bu huquqni bering.
+bcd754037	👉 Kanalga oʻz akkauntingizdan faqat <code>#g⟨0⟩</code> yozing; bot uni shu postga aylantiradi.
+74370f776	⚙️ Sozlamalar
+894e0e55f	👁 Oldindan ko‘rish
+4d52d4e82	⏰ Rejalash / 📌 Qadash / 🗑 Vaqtli oʻchirish
+1cd1dbdf9	🗑 O‘chirish
+89e868a25	📋 Postlarim
+dc6b96b25	⚙️ <b>Sozlamalar</b> · <code>#g⟨0⟩</code>
+f47ec3f57	Spoiler (xira media)
+10f55a4d2	Izoh media ustida
+13cc9e2b1	🔗 Havola koʻrinishi: ⟨0⟩
+bc6d5abe6	🔗 Koʻrinish havolasi⟨0⟩
+d341358af	🔗 Havola koʻrinishi: oʻchiq → kichik → katta → matn ustida. Koʻrinish havolasi berilmasa, matndagi birinchi havola ishlatiladi.
+31c98d00a	Koʻrinish havolasi: ⟨0⟩
+9fbec9097	Koʻp martalik kod
+7160ae248	♻️ Koʻp martalik: kod har safar yozilganda postga aylanadi (oʻchiq boʻlsa bir marta).
+ad3968817	📢 Post tayyorlay oladigan kanal topilmadi.
+6d383efc3	Botni kanalingizga admin qilib qoʻshing (<b>Xabarlarni tahrirlash</b> huquqi bilan), keyin qayta urinib koʻring.
+7f8742403	📝 <b>Post studiyasi</b>
+170aee2de	Postni qaysi kanal uchun tayyorlayapsiz?
+3e05df453	➕ Yangi post
+864aedf12	📋 <b>Postlaringiz</b>
+1318a9069	Tahrirlash uchun birini bosing.
+4d939cb89	📋 Hali postlaringiz yoʻq. ➕ Yangi post bilan boshlang.
+01632d43b	📝 Post studiyasi shaxsiy chatda ishlaydi: menga shaxsiyda /post yozing.
+3c5415709	📝 Postlaringizni koʻrish uchun menga shaxsiyda /posts yozing.
+831dbaf68	Joriy tugmalar:
+bd542f721	❌ Matn boʻsh. Post matnini yozing.
+ac9f5940e	❌ Matn juda uzun (⟨0⟩ belgi; koʻpi bilan 4096).
+3f1817503	(mediali postda koʻpi bilan 1024 belgi koʻrsatiladi!)
+805393212	✅ Media olib tashlandi.
+42deb481c	❌ Ovozli xabar va dumaloq videoni tahrirlash orqali qoʻshib boʻlmaydi (Telegram cheklovi). Musiqa yoki fayl sifatida yuboring.
+0b8f18cda	❌ Stikerni postga qoʻshib boʻlmaydi. Rasm, video, GIF, musiqa yoki fayl yuboring.
+b1710547c	❌ Media topilmadi. Rasm, video, GIF, musiqa yoki fayl yuboring (olib tashlash uchun: delete).
+fe0741bc3	, izohi post matni boʻldi
+0b86280c2	✅ Fayl logotipi olib tashlandi.
+90964f332	❌ Fayl logotipi faqat fayl (hujjat) mediasida boʻladi.
+4d8ce7343	❌ Logotip uchun rasm yuboring (olib tashlash uchun: delete).
+d8e07b1f2	✅ Fayl logotipi saqlandi (320 px JPEG ga kichraytiriladi).
+dd65d93a0	✅ Tugmalar olib tashlandi.
+d1cf8dc6e	❌ Tugma formati tushunilmadi⟨0⟩
+f9e98ab3e	Misol: <code>Kanalimiz - https://t.me/kanal &amp;&amp; Ulashish - share</code>
+dfe50c705	✅ Koʻrinish havolasi olib tashlandi.
+53d15ba87	❌ Toʻgʻri havola yozing (masalan, https://example.com).
+bf2d13067	✅ Koʻrinish havolasi saqlandi.
+3febd3182	❌ Nomaʼlum kiritish.
+4ec886fb2	⏰ Vaqt tugadi, muharrirdan qayta urinib koʻring.
+c6f41a62e	Bu post endi yoʻq.
+18363eae4	Bekor qilindi.
+08c32666e	Post studiyasi shaxsiy chatda ishlaydi.
+fc778b227	Bu kanal topilmadi yoki u yerda admin emassiz.
+4d142fe56	📝 Yangi qoralama yaratildi.
+22442b0b9	📝 Qoralama yaratildi
+d085f4110	Bu post topilmadi.
+fe1b715bd	Fayl logotipi faqat fayl (hujjat) mediasida boʻladi.
+f3d1310bc	Javobingizni ochilgan xabarga yozing 👇
+2b671f0ee	Koʻrinish yuborilmadi. ⟨0⟩
+55afcbd9c	👆 Koʻrinish: kanalda shunday koʻrinadi.
+a6aea5676	👁 Oldindan ko‘rish yuborildi
+2ff4f7035	Siz endi bu kanalda admin emassiz.
+8be0b2234	✅ <b>Post tayyor:</b> <code>#g⟨0⟩</code>
+266ebf25d	✅ Tayyor: #g⟨0⟩
+e53f197f7	🗑 Ha, o‘chirish
+9b6fcea87	↩️ Bekor qilish
 7d75ab43e	Bu xabarni kanallarda ishlatib bo‘lmaydi.
 93a792a44	Xush kelibsiz
 06ba336bf	Xayrlashuv
@@ -54762,6 +56893,47 @@ b35d597c9	📌 Oldingisini qoldirish
 242c0f02c	Topilmadi
 ec93a493c	⏸ To‘xtatildi
 e388dd558	▶️ Boshlandi
+daa3d48d5	🔔 Eslatish
+d1fb68397	🤖 Bot joylasin
+bbbdcceb8	<code>20:30</code> · <code>tomorrow 09:00</code> · <code>14.10 20:30</code> · <code>+2h</code> · <code>+30m</code>
+fd2dd8a7d	Vaqtni tushunmadim. Misol: ⟨0⟩
+a0933c889	Notoʻgʻri sana. Misol: ⟨0⟩
+4314dd4ac	Bu vaqt allaqachon oʻtgan.
+b326ab625	Koʻpi bilan 90 kun keyinga rejalash mumkin.
+38fdf5e34	Post topilmadi.
+098340710	⏰ <b>Eʼlon rejasi</b> — <code>⟨0⟩</code>
+8af503c12	· ✅ bajarildi
+9537aa30a	🕒 Vaqt: <b>⟨0⟩</b> (Turkiya vaqti)⟨1⟩
+438c53be8	🕒 Vaqt: yoʻq — ⏰ Rejalash tugmasini bosing
+e669f0130	<i>Vaqt kelganda bot postni kanalga oʻzi joylaydi; kanalda imzo yoqilgan boʻlsa, bot nomi koʻrinadi.</i>
+5648800a1	⚠️ “Bot joylasin” uchun postda kanal tanlangan boʻlishi kerak; aks holda faqat eslataman.
+b5d451869	<i>Vaqt kelganda sizga shaxsiyda eslataman; kanalga oʻz akkauntingizdan <code>⟨0⟩</code> yozasiz, post sizning nomingizda qoladi.</i>
+686c037f9	🗑 Vaqtli oʻchirish: ⟨0⟩
+bf912c737	<i>Qadash va oʻchirish uchun bot kanalda admin boʻlishi kerak (xabarlarni tahrirlash / oʻchirish huquqi).</i>
+cd509f96b	📝 Post hali qoralama: tayyor deb saqlanganda rejalash ishlaydi.
+cf0dd8c87	✅ Post eʼlon qilindi.
+5bd6eeff5	⏰ Vaqtni oʻzgartirish
+ba70fe09b	⏰ Rejalashtirish
+ff57b73c7	❌ Rejani bekor qilish
+bef4fd8ba	‹ Postga qaytish
+af90e4911	📅 <b>Rejalangan postlar</b>
+6e0c2a826	Yaqinlashayotgan rejalangan post yoʻq. /post bilan tayyorlang, keyin ⏰ Rejalash tugmasini bosing.
+edcf3ebe5	kanal tanlanmagan
+82569ed5d	Post topilmadi yoki huquqingiz yoʻq.
+6b7df2b07	Bu post allaqachon eʼlon qilingan.
+ce0755ac6	⏰ <code>⟨0⟩</code> qachon eʼlon qilinsin? (Turkiya vaqti)
+aa587326f	Misol: ⟨0⟩
+f438c6eba	tomorrow 09:00
+bd0c9b510	❌ Reja bekor qilindi
+e31b7e154	Qayta yozing yoki cancel.
+401b94bff	✅ <code>⟨0⟩</code> rejalandi: <b>⟨1⟩</b>
+f02c379f3	⚠️ Qadab boʻlmadi: bot kanalda xabarlarni tahrirlash huquqiga ega admin boʻlishi kerak.
+78192eae9	⏰ Eʼlon vaqti: kanalga oʻz akkauntingizdan <code>⟨0⟩</code> yozing.
+7887a0192	⚠️ Postda kanal tanlanmagani uchun bot uni oʻzi joylamadi.
+78c5e12de	⚠️ <code>⟨0⟩</code> oʻz vaqtida eʼlon qilinmadi (⟨1⟩).
+647007ee2	Post tayyor turibdi: kanalga oʻz akkauntingizdan <code>⟨0⟩</code> yozishingiz yoki /scheduled bilan qayta rejalashingiz mumkin.
+dc2a06d68	Bot kanalda admin ekanligiga va xabar yuborish huquqi borligiga ishonch hosil qiling.⟨0⟩
+fee144017	✅ <b>⟨0⟩</b> oʻz vaqtida eʼlon qilindi⟨1⟩
 d08a36466	➕ Yangi rejalashtirilgan xabar
 25cda8fe6	🚪 <b>Xayrlashuv xabari</b> — ⟨0⟩
 b61184fea	Holat: <b>⟨0⟩</b> · ⟨1⟩
@@ -54772,9 +56944,7 @@ a4530174c	📜 Qoidalar: ⟨0⟩ · 🚪 Xayrlashuv: ⟨1⟩ · ⏰ Rejalashtiri
 d0b1d849f	Media, tugmalar va o‘zgaruvchilar uchun ✏️ Tahrirlash tugmasini bosing (yoki yordamni ko‘rish uchun guruhda /setwelcome yozing).
 2b7ced272	Yoqiq
 e5b4e786e	bor
-68b8326a2	yo‘q
 2bae1a721	✏️ Tahrirlash
-894e0e55f	👁 Oldindan ko‘rish
 099ae3d9c	🖼 Mediani olib tashlash
 8bb5bb494	↩️ Standartga qaytarish
 adcf7aa93	🧹 Eskisini o‘chirish
@@ -54787,7 +56957,6 @@ b6669596d	🚪 Xayrlashuv xabari ›
 0c2dc5967	⏰ Rejalashtirilgan xabarlar ›
 9a8a538db	Qora ro‘yxat: ⟨0⟩
 0eed14a22	Qoidalar yo‘q
-a6aea5676	👁 Oldindan ko‘rish yuborildi
 eb9f11f93	↩️ Standartga qaytarildi
 14af210b4	🖼 Media olib tashlandi
 f615cd8f5	⏹ Belgilash to‘xtatildi
@@ -55276,7 +57445,6 @@ f2ba0c77b	✅ Filtr o‘chirildi.
 b7301e99a	Bu guruhda filtrlar yo‘q.
 bd0505102	⚠️ Bu guruhdagi barcha <b>⟨0⟩</b> ta filtr o‘chirilsinmi?
 8d8252e68	🗑 Ha, hammasini o‘chirish
-9b6fcea87	↩️ Bekor qilish
 cf9d69e94	🗑 ⟨0⟩ ta filtr o‘chirildi.
 13c07c249	🧹 Barcha filtrlar o‘chirildi (⟨0⟩) | ⟨1⟩
 0451d6399	🏷 Brend nomi
@@ -55351,7 +57519,6 @@ b248ddfb0	💎 Premium emoji o‘chirildi
 8f8af330e	Noto‘g‘ri.
 6a47f34ed	Bu klon o‘chirilgan.
 21d148b57	🗑 @⟨0⟩ kloni o‘chirilsinmi? Bot to‘xtaydi, guruhlardagi sozlamalar qoladi.
-e53f197f7	🗑 Ha, o‘chirish
 cb1a5e233	🗑 @⟨0⟩ klon botingiz bot egasi tomonidan o‘chirildi.
 19e55244e	Havola https://t.me/ bilan boshlanishi kerak. Qayta yozing yoki cancel deb yozing.
 6e97fcc27	✅ ⟨0⟩ yangilandi.

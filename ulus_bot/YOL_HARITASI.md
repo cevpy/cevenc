@@ -102,6 +102,16 @@ Sonraki fazlardaki mesajlar (çekiliş, kanal zorunluluğu uyarısı) da bunu ku
 - Yöneticilerin yazdığı içerik (hoş geldin, kurallar, notlar, filtreler) çevrilmez
 - Katalogda olmayan satır İngilizceye düşer
 
+## Kanal gönderi stüdyosu ✅ (tamamlandı)
+- `/gonderi` (özelden): kanal seç → ✏️ Metin, 🖼 Medya, 📎 Dosya logosu, 🔘 Butonlar, ⚙️ Seçenekler, 👁 Önizle, ✅ Hazır
+- Hazır olunca kod verilir (`#g12`); kanala kendi hesabından sadece kodu yazınca bot o mesajı gönderiye çevirir
+  (metin, tek medya + açıklama, butonlar; gönderi senin adınla kalır)
+- Seçenekler: spoiler, açıklama üstte, link önizleme (kapalı/küçük/büyük/üstte), çok kullanımlık kod
+- Dosya logosu: belgeye 320 px küçük resim; premium emoji ve biçim korunur, içerik çevrilmez
+- ⏰ Zamanla: `20:30`, `yarın 09:00`, `14.10 20:30`, `+2s`, `+30dk` — 🔔 Hatırlat ya da 🤖 Bot atsın
+- 📌 Sabitle, 🗑 Süreli sil (6 sa – 7 gün); `/gonderiler`, `/gonderiplan`
+- Sınırlar: albüm yok (Telegram düzenlemede tek medya); sesli mesaj ve yuvarlak video eklenemez
+
 ## Önerildi, şimdilik seçilmedi
 - Davet yarışması (haftalık/aylık davet sıralaması)
 - Hesap güven puanı (hesap yaşı, profil fotoğrafı, biyografideki link, premium)
