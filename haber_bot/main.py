@@ -255,6 +255,31 @@ def name_tokens(title: str) -> set[str]:
             out |= tokens(w)
     return out
 
+_IL_STEMS: dict | None = None
+
+def il_stems() -> dict:
+    """İl adı kökü (ilk 5 harf, sade) → plaka. 'Ankara'da' → ankar → 6; Bursaspor da Bursa sayılır."""
+    global _IL_STEMS
+    if _IL_STEMS is None:
+        _IL_STEMS = {fold(n)[:5]: p for p, n, *_ in ILLER}
+        _IL_STEMS.update({fold(a)[:5]: p for a, p in IL_ALIASES.items()})
+    return _IL_STEMS
+
+def cap_tokens(title: str) -> set[str]:
+    """Büyük harfle başlayan tüm kelimelerin kökleri (ilk kelime dahil). Ayırt etme korumaları için:
+    il adı başlığın başında olsa da ('Uşak için…') ya da başlık Çoğunlukla Büyük Harfle yazılmış olsa da çalışır."""
+    out = set()
+    for w in (title or "").split():
+        w = w.strip(".,:;!?\"“”‘()[]«»…|-–'’")
+        if w[:1].isupper():
+            out |= tokens(w)
+    return out
+
+def provinces_in(names: set) -> set:
+    """Özel isim köklerinden geçen iller (plaka)."""
+    st = il_stems()
+    return {st[t] for t in names if t in st}
+
 _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
 
@@ -314,6 +339,35 @@ def ibtn(text: str, data: str | None = None, style=None, url: str | None = None,
 
 def toggle_btn(label: str, on: bool, data: str) -> InlineKeyboardButton:
     return ibtn(f"{'✅' if on else '⬜'} {label}", data, GREEN if on else None)
+
+# ───────────────────────────── 81 il (plaka, ad, enlem, boylam) ─────────────────────────────
+
+ILLER = [
+    (1, "Adana", 37.00, 35.32), (2, "Adıyaman", 37.76, 38.28), (3, "Afyonkarahisar", 38.76, 30.54),
+    (4, "Ağrı", 39.72, 43.05), (5, "Amasya", 40.65, 35.83), (6, "Ankara", 39.93, 32.86), (7, "Antalya", 36.90, 30.70),
+    (8, "Artvin", 41.18, 41.82), (9, "Aydın", 37.85, 27.84), (10, "Balıkesir", 39.65, 27.88), (11, "Bilecik", 40.14, 29.98),
+    (12, "Bingöl", 38.88, 40.50), (13, "Bitlis", 38.40, 42.11), (14, "Bolu", 40.74, 31.61), (15, "Burdur", 37.72, 30.29),
+    (16, "Bursa", 40.19, 29.06), (17, "Çanakkale", 40.15, 26.41), (18, "Çankırı", 40.60, 33.62), (19, "Çorum", 40.55, 34.95),
+    (20, "Denizli", 37.78, 29.09), (21, "Diyarbakır", 37.91, 40.24), (22, "Edirne", 41.68, 26.56), (23, "Elazığ", 38.67, 39.22),
+    (24, "Erzincan", 39.75, 39.49), (25, "Erzurum", 39.90, 41.27), (26, "Eskişehir", 39.78, 30.52),
+    (27, "Gaziantep", 37.07, 37.38), (28, "Giresun", 40.91, 38.39), (29, "Gümüşhane", 40.46, 39.48),
+    (30, "Hakkari", 37.58, 43.74), (31, "Hatay", 36.20, 36.16), (32, "Isparta", 37.76, 30.55), (33, "Mersin", 36.80, 34.63),
+    (34, "İstanbul", 41.01, 28.98), (35, "İzmir", 38.42, 27.14), (36, "Kars", 40.60, 43.10), (37, "Kastamonu", 41.38, 33.78),
+    (38, "Kayseri", 38.72, 35.49), (39, "Kırklareli", 41.74, 27.22), (40, "Kırşehir", 39.15, 34.17),
+    (41, "Kocaeli", 40.77, 29.92), (42, "Konya", 37.87, 32.48), (43, "Kütahya", 39.42, 29.98), (44, "Malatya", 38.35, 38.31),
+    (45, "Manisa", 38.61, 27.43), (46, "Kahramanmaraş", 37.58, 36.94), (47, "Mardin", 37.31, 40.74), (48, "Muğla", 37.22, 28.36),
+    (49, "Muş", 38.74, 41.49), (50, "Nevşehir", 38.62, 34.71), (51, "Niğde", 37.97, 34.68), (52, "Ordu", 40.98, 37.88),
+    (53, "Rize", 41.03, 40.52), (54, "Sakarya", 40.69, 30.44), (55, "Samsun", 41.29, 36.33), (56, "Siirt", 37.93, 41.94),
+    (57, "Sinop", 42.03, 35.15), (58, "Sivas", 39.75, 37.02), (59, "Tekirdağ", 40.98, 27.51), (60, "Tokat", 40.31, 36.55),
+    (61, "Trabzon", 41.00, 39.72), (62, "Tunceli", 39.11, 39.55), (63, "Şanlıurfa", 37.16, 38.79), (64, "Uşak", 38.68, 29.41),
+    (65, "Van", 38.49, 43.38), (66, "Yozgat", 39.82, 34.81), (67, "Zonguldak", 41.45, 31.79), (68, "Aksaray", 38.37, 34.03),
+    (69, "Bayburt", 40.26, 40.23), (70, "Karaman", 37.18, 33.22), (71, "Kırıkkale", 39.85, 33.51), (72, "Batman", 37.88, 41.13),
+    (73, "Şırnak", 37.52, 42.46), (74, "Bartın", 41.63, 32.34), (75, "Ardahan", 41.11, 42.70), (76, "Iğdır", 39.92, 44.05),
+    (77, "Yalova", 40.65, 29.27), (78, "Karabük", 41.20, 32.62), (79, "Kilis", 36.72, 37.12), (80, "Osmaniye", 37.07, 36.25),
+    (81, "Düzce", 40.84, 31.16),
+]
+IL_BY_PLATE = {p: (n, la, lo) for p, n, la, lo in ILLER}
+IL_ALIASES = {'urfa': 63, 'antep': 27, 'maraş': 46, 'afyon': 3, 'antakya': 31, 'izmit': 41, 'adapazarı': 54}
 
 # ───────────────────────────── Veritabanı ─────────────────────────────
 
@@ -379,25 +433,70 @@ class StoryIndex:
     ve nadir kelimeler (özel isimler) sık kelimelerden (operasyon, maç, İstanbul) daha ağır basar."""
 
     MAX_MEMBERS = 8
+    EXT_MIN = 8          # özet benzerliği için en az bu kadar kelime kökü (başlık + özet)
+    EXT_SIM = 0.23       # gri bölgede (2+ ortak özel isim) başlık+özet ağırlıklı benzerlik eşiği
+    EXT_TITLE = 0.15     # gri bölgede başlıkların da en az bu kadar benzemesi gerekir
 
     def __init__(self):
-        self.members: dict[int, list[tuple[frozenset, frozenset]]] = {}
+        self.members: dict[int, list[tuple[frozenset, frozenset, frozenset | None, frozenset]]] = {}
         self.seen: dict[int, float] = {}
         self.inv: dict[str, set[int]] = {}
 
-    def add(self, sid: int, title: str, first_seen: float):
+    def add(self, sid: int, title: str, first_seen: float, summary: str = ''):
         self.members[sid] = []
         self.seen[sid] = first_seen
-        self.extend(sid, title)
+        self.extend(sid, title, summary)
 
-    def extend(self, sid: int, title: str):
+    @classmethod
+    def ext_tokens(cls, toks: frozenset, summary: str) -> frozenset | None:
+        """Başlık + özetin ilk cümleleri (sayılar dahil: '16 kişi', '865'). Özet kısaysa None."""
+        if not summary:
+            return None
+        t = fold(re.sub(r"(?<=\w)[’'`´]\w*", " ", summary[:300]))
+        ext = toks | {w[:5] for w in _WORD.findall(t) if w not in _stop() and len(w) >= 2}
+        return frozenset(ext) if len(ext) - len(toks) >= cls.EXT_MIN else None
+
+    def extend(self, sid: int, title: str, summary: str = ''):
         toks, names = frozenset(tokens(title)), frozenset(name_tokens(title))
         mem = self.members.get(sid)
         if mem is None or not toks or any(m[0] == toks for m in mem) or len(mem) >= self.MAX_MEMBERS:
             return
-        mem.append((toks, names))
+        mem.append((toks, names, self.ext_tokens(toks, summary), frozenset(cap_tokens(title))))
         for t in toks:
             self.inv.setdefault(t, set()).add(sid)
+
+    def wjac(self, a: frozenset, b: frozenset) -> float:
+        wi = sum(self._idf(t) for t in a & b)
+        return wi / (sum(self._idf(t) for t in a) + sum(self._idf(t) for t in b) - wi or 1)
+
+    @staticmethod
+    def other_place(ca: frozenset, cb: frozenset) -> bool:
+        """Başlıklarda farklı iller geçiyor ve ortak il yok: farklı haber
+        ("Uşak için sağanak uyarısı" ≠ "Ankara Valiliği'nden yağış uyarısı", "Kocaeli Valiliği…" ≠ "İstanbul Valiliği…")."""
+        pa, pb = provinces_in(ca), provinces_in(cb)
+        return bool(pa and pb and not (pa & pb))
+
+
+    def similar_ext(self, a, na, ea, b, nb, eb) -> bool:
+        """Gri bölge: başlıklar farklı yazılmış ama 2+ ortak özel isim var; özetler de benzerse aynı haber
+        ('RTÜK'ten Sözcü TV ve Koza TV'ye idari para cezası' = 'Fon iftiraları cezasız kalmadı: RTÜK'ten…')."""
+        if ea is None or eb is None:
+            return False
+        # Başlık Çoğunlukla Büyük Harfle yazılmışsa özel isim ayırt edilemez (boş küme): 3+ ortak kök aranır
+        names_ok = len(na & nb) >= 2 or ((not na or not nb) and len(a & b) >= 3)
+        return (names_ok and len(a & b) >= 2
+                and self.wjac(a, b) >= self.EXT_TITLE and self.wjac(ea, eb) >= self.EXT_SIM)
+
+    def same_story(self, t1: str, s1: str, t2: str, s2: str) -> bool:
+        """İki ayrı kayıt aynı haber mi (gönderim öncesi son kontrol)."""
+        a, na, b, nb = frozenset(tokens(t1)), frozenset(name_tokens(t1)), frozenset(tokens(t2)), frozenset(name_tokens(t2))
+        if len(a) < 2 or len(b) < 2:
+            return False
+        ea, eb = self.ext_tokens(a, s1 or ''), self.ext_tokens(b, s2 or '')
+        ca, cb = frozenset(cap_tokens(t1)), frozenset(cap_tokens(t2))
+        if self.other_place(ca, cb):
+            return False
+        return self.similar(a, b, na, nb) or self.similar_ext(a, na, ea, b, nb, eb)
 
     def prune(self):
         limit = now() - INDEX_WINDOW
@@ -430,30 +529,37 @@ class StoryIndex:
             return wjac >= 0.42 or (wov >= 0.72 and len(inter) >= 4)
         return small <= 3 and wjac >= 0.6
 
-    def find(self, title: str) -> int | None:
+    def find(self, title: str, summary: str = '') -> int | None:
         a, na = frozenset(tokens(title)), frozenset(name_tokens(title))
         if len(a) < 2:
             return None
+        ea, ca = self.ext_tokens(a, summary), frozenset(cap_tokens(title))
         hits = Counter()
         for t in a:
             for sid in self.inv.get(t, ()):
                 hits[sid] += 1
+        gray = None
         for sid, inter in hits.most_common(30):
             if inter < 2:
                 break
-            if any(self.similar(a, m, na, mn) for m, mn in self.members[sid]):
-                return sid
-        return None
+            for m, mn, me, mc in self.members[sid]:
+                if self.other_place(ca, mc):
+                    continue
+                if self.similar(a, m, na, mn):
+                    return sid
+                if gray is None and self.similar_ext(a, na, ea, m, mn, me):
+                    gray = sid
+        return gray
 
     def load(self):
         with db() as c:
-            rows = c.execute("SELECT s.id, s.first_seen, i.title FROM stories s JOIN items i ON i.story_id = s.id "
+            rows = c.execute("SELECT s.id, s.first_seen, i.title, i.summary FROM stories s JOIN items i ON i.story_id = s.id "
                              "WHERE s.first_seen > ? ORDER BY s.id, i.id", (now() - INDEX_WINDOW,)).fetchall()
         for r in rows:
             if r['id'] not in self.members:
-                self.add(r['id'], r['title'], r['first_seen'])
+                self.add(r['id'], r['title'], r['first_seen'], r['summary'] or '')
             else:
-                self.extend(r['id'], r['title'])
+                self.extend(r['id'], r['title'], r['summary'] or '')
 
 
 index = StoryIndex()
@@ -558,7 +664,7 @@ def _ingest_one(c, feed: Feed, it: dict, seeding: bool) -> int:
         return 0
     toks = tokens(it['title'])
     fresh_item = (not seeding) and _is_fresh(it['published'])
-    sid = index.find(it['title'])
+    sid = index.find(it['title'], it['summary'])
     ts = now()
     if sid:
         st = c.execute("SELECT * FROM stories WHERE id = ?", (sid,)).fetchone()
@@ -589,7 +695,7 @@ def _ingest_one(c, feed: Feed, it: dict, seeding: bool) -> int:
         if it['published'] and (not st['published'] or it['published'] < st['published']):
             upd['published'] = it['published']
         c.execute(f"UPDATE stories SET {', '.join(k + ' = ?' for k in upd)} WHERE id = ?", (*upd.values(), sid))
-        index.extend(sid, it['title'])
+        index.extend(sid, it['title'], it['summary'])
         changed = 1 if new_source else 0
     else:
         cur = c.execute(
@@ -599,7 +705,7 @@ def _ingest_one(c, feed: Feed, it: dict, seeding: bool) -> int:
              json.dumps([it['source']], ensure_ascii=False), " ".join(sorted(toks)), fold(it['title'] + " " + it['summary'][:200]),
              it['published'], ts, ts, 1 if feed.breaking else 0, 1 if fresh_item else 0))
         sid = cur.lastrowid
-        index.add(sid, it['title'], ts)
+        index.add(sid, it['title'], ts, it['summary'])
         changed = 1
     c.execute("INSERT OR IGNORE INTO items (story_id, source, cat, title, link, summary, image, published, fetched) "
               "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -724,6 +830,14 @@ def latest_stories(cat: str | None = None, limit: int = 40, offset: int = 0, hou
         return c.execute("SELECT * FROM stories WHERE first_seen > ? AND cats != ',' "
                          "ORDER BY COALESCE(published, first_seen) DESC LIMIT ? OFFSET ?",
                          (since, limit, offset)).fetchall()
+
+def dedupe_rows(rows: list) -> list:
+    """Listede aynı haberin farklı kayıtları varsa ilki (en çok kaynaklı/ilk sıradaki) kalır."""
+    out = []
+    for r in rows:
+        if not any(index.same_story(r['title'], r['summary'], o['title'], o['summary']) for o in out):
+            out.append(r)
+    return out
 
 def search_stories(query: str, limit: int = 40, days: float = KEEP_DAYS) -> list:
     words = [w for w in _WORD.findall(fold(query)) if len(w) >= 2][:6]
@@ -1071,10 +1185,34 @@ async def deliver_cycle(bot) -> int:
                 logger.exception("Gönderim hatası %s", sub['chat_id'])
         return total
 
+DUP_WINDOW = 12 * 3600
+
+def recently_sent(cid: int) -> list:
+    """Bu sohbete son 12 saatte gönderilen haberler (başlık + özet): aynı haberin başka kaydı tekrar gitmesin."""
+    with db() as c:
+        return c.execute("SELECT s.id, s.title, s.summary FROM sent x JOIN stories s ON s.id = x.story_id "
+                         "WHERE x.chat_id = ? AND x.at > ? AND x.kind != 'dup'", (cid, now() - DUP_WINDOW)).fetchall()
+
+def dup_of_sent(st, recent: list) -> bool:
+    return any(r['id'] != st['id'] and index.same_story(st['title'], st['summary'], r['title'], r['summary'])
+               for r in recent)
+
 async def _deliver_to(bot, sub: dict, fresh: list, breaking: list, t: float) -> int:
     s, cid = sub['settings'], sub['chat_id']
     quiet = in_quiet(s, t)
     already = sent_ids(cid, [st['id'] for st in fresh] + [st['id'] for st in breaking])
+    recent = recently_sent(cid)
+
+    def is_dup(st) -> bool:
+        """Farklı kayıt ama aynı haber (başka sitenin farklı başlığı): gönderilmez, gönderilmiş sayılır."""
+        if dup_of_sent(st, recent):
+            mark_sent(cid, [st['id']], 'dup')
+            already.add(st['id'])
+            return True
+        return False
+
+    def remember(st):
+        recent.append({'id': st['id'], 'title': st['title'], 'summary': st['summary']})
     count = 0
     if s.get('breaking', 'off') != 'off' and not quiet:
         daily = sent_count(cid, 86400, ('bd',))
@@ -1085,7 +1223,10 @@ async def _deliver_to(bot, sub: dict, fresh: list, breaking: list, t: float) -> 
                 continue
             if s['breaking'] == 'cats' and not set(story_cats(st)) & set(s.get('cats') or []):
                 continue
+            if is_dup(st):
+                continue
             await send_story(bot, sub, st, 'breaking')
+            remember(st)
             mark_sent(cid, [st['id']], 'bd')
             already.add(st['id'])
             daily += 1
@@ -1095,7 +1236,10 @@ async def _deliver_to(bot, sub: dict, fresh: list, breaking: list, t: float) -> 
         if st['updated'] <= sub['cursor'] or st['id'] in already:
             continue
         r = match_reason(st, s)
-        if r and (s.get('instant') or r.startswith('kw:')):
+        if r and (s.get('instant') or r.startswith('kw:')) and not is_dup(st):
+            if any(index.same_story(st['title'], st['summary'], p['title'], p['summary']) for p, _ in picks):
+                mark_sent(cid, [st['id']], 'dup')
+                continue
             picks.append((st, r))
     if quiet or not picks:
         set_sub(cid, cursor=t)
@@ -1140,7 +1284,7 @@ def build_digest(sub: dict, t: float | None = None) -> tuple[str, list[int]] | N
                          "ORDER BY source_count DESC, COALESCE(published, first_seen) DESC LIMIT 800",
                          (t - 14 * 3600, t - 24 * 3600)).fetchall()
     done = sent_ids(sub['chat_id'], [r['id'] for r in rows], kind='dg')   # günün özeti: sadece önceki bültenler hariç
-    rows = [r for r in rows if r['id'] not in done and source_allowed(r, s)]
+    rows = dedupe_rows([r for r in rows if r['id'] not in done and source_allowed(r, s)][:300])
     used, sections = set(), []
     kw_rows = [r for r in rows if any(kw_match(fold(k), r['ftitle']) for k in s.get('kw') or [])][:5]
     if kw_rows:
@@ -1297,7 +1441,7 @@ def _list_rows(key: str, page: int) -> tuple[list, bool]:
         rows = [r for r in (story_row(i) for i in chunk) if r]
         return rows, len(ids) > off + PAGE
     rows = latest_stories(None if key == 'all' else key, limit=PAGE + 1, offset=off)
-    return rows[:PAGE], len(rows) > PAGE
+    return dedupe_rows(rows[:PAGE]), len(rows) > PAGE
 
 def render_list(key: str, page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
     page = max(0, page)
