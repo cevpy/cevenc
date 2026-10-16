@@ -14,7 +14,7 @@ Türk haber sitelerinden canlı haber toplayıp kullanıcılara (özelden), kana
 Çalıştırma: .env dosyasını doldur →  python main.py
 """
 
-import os, re, html, json, time, math, asyncio, logging, sqlite3, calendar, unicodedata, secrets
+import os, re, html, json, time, math, shutil, asyncio, logging, sqlite3, calendar, unicodedata, secrets
 from collections import Counter
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -29,7 +29,7 @@ from telegram import (Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyK
                       BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeChat)
 from telegram.constants import ParseMode, KeyboardButtonStyle, ChatMemberStatus
 from telegram.error import Forbidden, BadRequest, TimedOut, NetworkError, RetryAfter
-from telegram.ext import (Application, ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
+from telegram.ext import (ExtBot, Application, ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
                           InlineQueryHandler, ChatMemberHandler, ContextTypes, AIORateLimiter, ApplicationHandlerStop, filters)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -114,7 +114,6 @@ DIRECT_FEEDS = [
     ("Anadolu Ajansı", 'kultur', "https://www.aa.com.tr/tr/rss/default?cat=kultur", False),
     ("NTV", 'gundem', "https://www.ntv.com.tr/son-dakika.rss", True),
     ("NTV", 'gundem', "https://www.ntv.com.tr/turkiye.rss", False),
-    ("NTV", 'ekonomi', "https://www.ntv.com.tr/ekonomi.rss", False),
     ("NTV", 'spor', "https://www.ntv.com.tr/sporskor.rss", False),
     ("NTV", 'dunya', "https://www.ntv.com.tr/dunya.rss", False),
     ("NTV", 'teknoloji', "https://www.ntv.com.tr/teknoloji.rss", False),
@@ -124,7 +123,7 @@ DIRECT_FEEDS = [
     ("Hürriyet", 'spor', "https://www.hurriyet.com.tr/rss/spor", False),
     ("Hürriyet", 'dunya', "https://www.hurriyet.com.tr/rss/dunya", False),
     ("Hürriyet", 'teknoloji', "https://www.hurriyet.com.tr/rss/teknoloji", False),
-    ("Hürriyet", 'magazin', "https://www.hurriyet.com.tr/rss/magazin", False),
+    ("Hürriyet", 'magazin', "https://www.hurriyet.com.tr/rss/kelebek", False),
     ("Sözcü", 'gundem', "https://www.sozcu.com.tr/feeds-son-dakika", True),
     ("Sözcü", 'gundem', "https://www.sozcu.com.tr/feeds-rss-category-gundem", False),
     ("Sözcü", 'ekonomi', "https://www.sozcu.com.tr/feeds-rss-category-ekonomi", False),
@@ -179,10 +178,21 @@ DIRECT_FEEDS = [
     ("Webtekno", 'teknoloji', "https://www.webtekno.com/rss.xml", False),
     ("ShiftDelete", 'teknoloji', "https://shiftdelete.net/feed", False),
     ("DonanımHaber", 'teknoloji', "https://www.donanimhaber.com/rss/tum/", False),
+    # Farklı görüşlerden ek kaynaklar
+    ("Diken", 'gundem', "https://www.diken.com.tr/feed/", False),
+    ("Karar", 'gundem', "https://www.karar.com/rss", False),
+    ("Medyascope", 'gundem', "https://medyascope.tv/feed/", False),
+    ("Bianet", 'gundem', "https://bianet.org/rss/bianet", False),
+    ("Odatv", 'gundem', "https://www.odatv.com/rss.xml", False),
+    ("Star", 'gundem', "https://www.star.com.tr/rss/rss.asp", False),
+    ("A Haber", 'gundem', "https://www.ahaber.com.tr/rss/gundem.xml", False),
+    ("Takvim", 'gundem', "https://www.takvim.com.tr/rss/guncel.xml", False),
+    ("Sputnik Türkiye", 'dunya', "https://sputniknews.com.tr/export/rss2/archive/index.xml", False),
+    ("Haberler.com", 'gundem', "https://rss.haberler.com/rss.asp", False),
 ]
 class Feed:
     __slots__ = ('fid', 'source', 'cat', 'url', 'breaking', 'interval',
-                 'etag', 'modified', 'next_at', 'errors', 'last_ok', 'last_error', 'seeded', 'count')
+                 'etag', 'modified', 'next_at', 'errors', 'last_ok', 'last_error', 'seeded', 'count', 'last_item')
 
     def __init__(self, source, cat, url, breaking=False, interval=None):
         self.source, self.cat, self.url, self.breaking = source, cat, url, breaking
@@ -195,6 +205,7 @@ class Feed:
         self.last_error = ""
         self.seeded = False   # ilk çekimde eski haberler "yeni" sayılmaz
         self.count = 0
+        self.last_item = 0.0  # akıştaki en yeni haberin zamanı (durgun akış tespiti)
 
 
 def build_feeds() -> list[Feed]:
@@ -383,7 +394,10 @@ def db():
 
 def init_db():
     with db() as c:
-        c.execute("PRAGMA journal_mode=WAL")
+        try:  # WAL ağ diskinde (PythonAnywhere) bozulmaya yol açabiliyor; klasik günlük daha güvenli
+            c.execute("PRAGMA journal_mode=DELETE")
+        except sqlite3.OperationalError as e:
+            logger.warning("Günlük modu ayarlanamadı: %s", e)
         c.executescript("""
         CREATE TABLE IF NOT EXISTS stories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -421,7 +435,11 @@ def init_db():
         CREATE TABLE IF NOT EXISTS feed_state (
             fid TEXT PRIMARY KEY, etag TEXT, modified TEXT, last_ok REAL, errors INTEGER, last_error TEXT, count INTEGER
         );
+        CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
         """)
+        cols = {r[1] for r in c.execute("PRAGMA table_info(feed_state)")}
+        if 'last_item' not in cols:
+            c.execute("ALTER TABLE feed_state ADD COLUMN last_item REAL")
 
 # ───────────────────────────── Haber birleştirme (aynı haber, farklı kaynak) ─────────────────────────────
 
@@ -741,6 +759,8 @@ async def fetch_feed(feed: Feed, sem: asyncio.Semaphore) -> int:
         feed.etag = r.headers.get('etag')
         feed.modified = r.headers.get('last-modified')
         entries = [p for p in (parse_entry(feed, e) for e in parsed.entries[:100]) if p]
+        newest = max((p['published'] for p in entries if p['published']), default=0)
+        feed.last_item = max(feed.last_item, newest or (now() if entries else 0))
         entries.sort(key=lambda p: p['published'] or 0)   # eskiden yeniye: ilk gelen haberin başlığı korunur
         seeding = not feed.seeded
         try:
@@ -759,9 +779,9 @@ def _feed_ok(feed: Feed):
 
 def save_feed_states():
     with db() as c:
-        c.executemany("INSERT OR REPLACE INTO feed_state (fid, etag, modified, last_ok, errors, last_error, count) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                      [(f.fid, f.etag, f.modified, f.last_ok, f.errors, f.last_error, f.count)
+        c.executemany("INSERT OR REPLACE INTO feed_state (fid, etag, modified, last_ok, errors, last_error, count, last_item) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                      [(f.fid, f.etag, f.modified, f.last_ok, f.errors, f.last_error, f.count, f.last_item)
                        for f in FEEDS])
 
 def load_feed_states(feeds: list[Feed]):
@@ -773,6 +793,7 @@ def load_feed_states(feeds: list[Feed]):
             f.seeded = True            # daha önce çekilmiş: yeni gelenler gerçekten yeni
             f.count = r['count'] or 0
             f.last_ok = r['last_ok']
+            f.last_item = r['last_item'] or 0.0
 
 def setup_feeds():
     global FEEDS
@@ -1782,7 +1803,9 @@ HELP_PRIVATE = """🗞 <b>ULUS Haber</b> — Türkiye'nin haber sitelerinden can
 /kanallarim — Kanalına veya grubuna otomatik haber gönder
 
 <b>Her yerde paylaş</b>
-Herhangi bir sohbette <code>@{bot} dolar</code> yaz, çıkan haberi seçip gönder."""
+Herhangi bir sohbette <code>@{bot} dolar</code> yaz, çıkan haberi seçip gönder.
+
+/gizlilik — Hangi verilerin tutulduğu, verilerini silme"""
 
 HELP_GROUP = """🗞 <b>ULUS Haber</b>
 /son — Son haberler · /onecikan — Öne çıkanlar
@@ -1791,7 +1814,7 @@ HELP_GROUP = """🗞 <b>ULUS Haber</b>
 /haberkur — (yönetici) Bu gruba otomatik haber ayarları"""
 
 HELP_BLOCK = """<b>Yönetici</b>
-/istatistik · /kaynaklar · /duyuru <i>metin</i>"""
+/istatistik · /kaynaklar · /duyuru <i>metin</i> · /yedek · /premiumemoji"""
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat, user = update.effective_chat, update.effective_user
@@ -2004,6 +2027,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
         elif kind == 'p':
             await panel_callback(update, context, rest)
+        elif kind == 'priv':
+            await privacy_callback(q, rest)
         else:
             await q.answer()
     except (ValueError, IndexError):
@@ -2155,6 +2180,304 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[ibtn("📖 Haberi oku", url=st['link'])]])))
     await iq.answer(results, cache_time=60, is_personal=False)
 
+# ───────────────────────────── Bakım: akış sağlığı, veritabanı, yedek ─────────────────────────────
+
+STALE_AFTER = 48 * 3600   # bu kadar süredir yeni haber gelmeyen akış "durgun" sayılır
+
+def meta_get(k: str, default: str | None = None) -> str | None:
+    with db() as c:
+        r = c.execute("SELECT v FROM meta WHERE k = ?", (k,)).fetchone()
+    return r['v'] if r else default
+
+def meta_set(k: str, v: str | None):
+    with db() as c:
+        if v is None:
+            c.execute("DELETE FROM meta WHERE k = ?", (k,))
+        else:
+            c.execute("INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)", (k, v))
+
+def feed_problems(t: float | None = None) -> list[tuple[Feed, str]]:
+    """Bozuk (sürekli hata) ya da durgun (48 saattir yeni haber yok) akışlar ve sebebi."""
+    t = t or now()
+    out = []
+    for f in FEEDS:
+        if f.errors >= 3:
+            out.append((f, f"hata: {f.last_error[:70]}"))
+        elif f.last_item and t - f.last_item > STALE_AFTER:
+            out.append((f, f"{int((t - f.last_item) // 3600)} saattir yeni haber yok"))
+        elif not f.last_item and f.last_ok == 0 and f.errors:
+            out.append((f, "hiç çekilemedi"))
+    return out
+
+def feed_problems_text(probs) -> str:
+    return "\n".join(f"• {esc(f.source)} ({esc(cat_label(f.cat, False))}): {esc(why)}" for f, why in probs[:25])
+
+async def feed_watch_job(context: ContextTypes.DEFAULT_TYPE):
+    """Her sabah: sorunlu akış listesi değiştiyse kurucuya tek mesaj."""
+    probs = feed_problems()
+    key = ",".join(sorted(f.fid for f, _ in probs))
+    if not FOUNDER_ID or key == (meta_get('feed_alert') or ''):
+        return
+    meta_set('feed_alert', key)
+    if not probs:
+        text = "✅ Tüm haber akışları yeniden çalışıyor."
+    else:
+        text = (f"⚠️ <b>{len(probs)} haber akışında sorun var</b>\n{feed_problems_text(probs)}\n\n"
+                "<i>Site adresini değiştirmiş ya da akışı kapatmış olabilir. Ayrıntı: /kaynaklar</i>")
+    try:
+        await context.bot.send_message(FOUNDER_ID, text, parse_mode=ParseMode.HTML,
+                                       link_preview_options=LinkPreviewOptions(is_disabled=True))
+    except (Forbidden, BadRequest, TimedOut, NetworkError) as e:
+        logger.warning("Akış uyarısı gönderilemedi: %s", e)
+
+BACKUP_DIR = _env("BACKUP_DIR", os.path.join(BASE_DIR, "yedekler"))
+BACKUP_KEEP = max(1, _env_int("BACKUP_KEEP", 7))
+REPAIR_NOTE: str | None = None
+
+def db_healthy(path: str) -> bool:
+    try:
+        conn = sqlite3.connect(path, timeout=30)
+        try:
+            return conn.execute("PRAGMA quick_check").fetchone()[0] == 'ok'
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError:
+        return False
+
+def make_backup() -> str | None:
+    """Veritabanının tutarlı kopyası (SQLite yedekleme) → yedekler/haber-YYYYAAGG-SSDD.db; son BACKUP_KEEP tutulur."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    path = os.path.join(BACKUP_DIR, f"haber-{datetime.now(TR).strftime('%Y%m%d-%H%M')}.db")
+    try:
+        src, dst = sqlite3.connect(DB_FILE, timeout=30), sqlite3.connect(path)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+            src.close()
+    except sqlite3.Error as e:
+        logger.error("Yedek alınamadı: %s", e)
+        return None
+    olds = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith("haber-") and f.endswith(".db"))
+    for f in olds[:-BACKUP_KEEP]:
+        try:
+            os.remove(os.path.join(BACKUP_DIR, f))
+        except OSError:
+            pass
+    return path
+
+def repair_db_if_needed():
+    """Açılışta bütünlük kontrolü. Bozuksa dosya kenara alınır, en son sağlam yedek geri yüklenir (yoksa boş başlar)."""
+    global REPAIR_NOTE
+    if not os.path.exists(DB_FILE) or db_healthy(DB_FILE):
+        return
+    bad = f"{DB_FILE}.bozuk-{int(now())}"
+    os.replace(DB_FILE, bad)
+    for ext in ("-wal", "-shm", "-journal"):
+        if os.path.exists(DB_FILE + ext):
+            os.replace(DB_FILE + ext, bad + ext)
+    backups = sorted((f for f in os.listdir(BACKUP_DIR) if f.endswith(".db")), reverse=True) if os.path.isdir(BACKUP_DIR) else []
+    for f in backups:
+        path = os.path.join(BACKUP_DIR, f)
+        if db_healthy(path):
+            shutil.copyfile(path, DB_FILE)
+            REPAIR_NOTE = f"🛠 Veritabanı bozuk bulundu; {f} yedeğinden geri yüklendi. Bozuk dosya: {os.path.basename(bad)}"
+            break
+    else:
+        REPAIR_NOTE = f"🛠 Veritabanı bozuk bulundu, sağlam yedek yoktu; yeni veritabanı açıldı. Bozuk dosya: {os.path.basename(bad)}"
+    logger.error(REPAIR_NOTE)
+
+async def backup_job(context: ContextTypes.DEFAULT_TYPE):
+    await asyncio.to_thread(make_backup)
+
+async def cmd_backup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/yedek — kurucu: anında yedek alır ve dosyayı özelden gönderir."""
+    if not is_founder(update.effective_user.id) or update.effective_chat.type != 'private':
+        return
+    path = await asyncio.to_thread(make_backup)
+    if not path:
+        await reply(update, "❌ Yedek alınamadı (ayrıntı günlükte).")
+        return
+    with open(path, 'rb') as fh:
+        await update.effective_message.reply_document(fh, filename=os.path.basename(path),
+                                                      caption=f"🗄 Veritabanı yedeği · {tr_date(now())} {tr_time(now())}")
+
+# ───────────────────────────── Premium emoji teması ─────────────────────────────
+# Kurucu /premiumemoji ile premium emojili bir mesaj gönderir; botun mesajlarındaki aynı emojiler premium
+# karşılıklarıyla gösterilir. Telegram reddederse (bot sahibinin Premium'u yoksa) düz hali gönderilir.
+
+_PE_TAG = re.compile(r'(<[^>]*>)')
+_PE_SKIP = {'code', 'pre', 'tg-emoji', 'a'}
+_pe_cache: dict = {}
+_pe_bad: set = set()
+
+def _pe_norm(e: str) -> str:
+    return (e or '').replace('️', '')
+
+def pe_state():
+    """(açık mı, emoji→id sözlüğü, regex); 10 dk önbellek."""
+    hit = _pe_cache.get('s')
+    if hit and now() - hit[0] < 600:
+        return hit[1:]
+    try:
+        m = json.loads(meta_get('premium_map') or '{}')
+        on = bool(m) and meta_get('premium_off') != '1'
+    except (ValueError, TypeError, sqlite3.Error):
+        m, on = {}, False
+    rx = None
+    if on:
+        alts = '|'.join(''.join(re.escape(ch) + '️?' for ch in k) for k in sorted(m, key=len, reverse=True) if k)
+        rx = re.compile(f'(?<!‍)(?:{alts})(?![‍⃣\U0001F3FB-\U0001F3FF])') if alts else None
+    _pe_cache['s'] = (now(), on and rx is not None, m, rx)
+    return _pe_cache['s'][1:]
+
+def pe_html(text: str, m: dict, rx) -> str:
+    out, skip = [], 0
+    for i, part in enumerate(_PE_TAG.split(text)):
+        if i % 2:
+            g = re.match(r'<\s*(/?)\s*([\w-]+)', part)
+            if g and g.group(2).lower() in _PE_SKIP:
+                skip = max(0, skip + (-1 if g.group(1) else 1))
+            out.append(part)
+        elif skip or not part:
+            out.append(part)
+        else:
+            out.append(rx.sub(lambda g: f'<tg-emoji emoji-id="{m[_pe_norm(g.group(0))]}">{g.group(0)}</tg-emoji>', part))
+    return ''.join(out)
+
+def premium_request(endpoint: str, data: dict) -> dict:
+    """Giden HTML metne/açıklamaya premium emoji uygular (değişmezse aynı sözlük döner)."""
+    if not endpoint.startswith(('send', 'edit')) or str(data.get('chat_id')) in _pe_bad:
+        return data
+    on, m, rx = pe_state()
+    if not on:
+        return data
+    new = dict(data)
+    for key, limit in (('text', 4096), ('caption', 1024)):
+        t = data.get(key)
+        if isinstance(t, str) and str(data.get('parse_mode') or '').upper() == 'HTML' and rx.search(t):
+            t2 = pe_html(t, m, rx)
+            if t2 != t and len(t2) <= limit * 3:
+                new[key] = t2
+    return new if any(new.get(k) is not data.get(k) for k in ('text', 'caption')) else data
+
+_ORIG_DO_POST = ExtBot._do_post
+
+async def _premium_do_post(self, endpoint, data, *args, **kwargs):
+    prem = premium_request(endpoint, data)
+    if prem is not data:
+        try:
+            return await _ORIG_DO_POST(self, endpoint, prem, *args, **kwargs)
+        except BadRequest as e:
+            if 'not modified' in str(e).lower():
+                raise
+            if len(_pe_bad) > 5000:
+                _pe_bad.clear()
+            _pe_bad.add(str(data.get('chat_id')))
+            logger.info("Premium emoji reddedildi, düz gönderiliyor (%s): %s", data.get('chat_id'), e)
+    return await _ORIG_DO_POST(self, endpoint, data, *args, **kwargs)
+
+ExtBot._do_post = _premium_do_post
+
+PE_HELP = ("💎 <b>Premium emoji teması</b>\n\nBotun mesajlarındaki emojiler premium karşılıklarıyla gösterilir "
+           "(bot sahibinin Telegram Premium'u olmalı).\n\n"
+           "Eklemek için: bana premium emojili bir mesaj gönder; içindeki her premium emoji, normal karşılığının yerine "
+           "kullanılır.\n<code>/premiumemoji sil</code> · <code>/premiumemoji kapat</code> · <code>/premiumemoji ac</code>")
+
+async def cmd_premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/premiumemoji [sil|kapat|ac] — kurucu, özelden."""
+    if not is_founder(update.effective_user.id) or update.effective_chat.type != 'private':
+        return
+    arg = (context.args[0].lower() if context.args else '')
+    if arg == 'sil':
+        meta_set('premium_map', None)
+        note = "🗑 Premium emoji eşleşmeleri silindi."
+    elif arg in ('kapat', 'ac', 'aç'):
+        meta_set('premium_off', '1' if arg == 'kapat' else None)
+        note = "⏸ Premium emoji kapatıldı." if arg == 'kapat' else "▶️ Premium emoji açıldı."
+    else:
+        context.user_data['await_pe'] = now()
+        note = "👇 Şimdi premium emojili mesajını gönder."
+    _pe_cache.clear()
+    m = json.loads(meta_get('premium_map') or '{}')
+    state = "kapalı" if meta_get('premium_off') == '1' else "açık"
+    sample = " ".join(f'<tg-emoji emoji-id="{v}">{k}</tg-emoji>' for k, v in list(m.items())[:30])
+    await reply(update, f"{PE_HELP}\n\nDurum: <b>{state}</b> · {len(m)} emoji\n{sample}\n\n{note}")
+
+async def premium_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/premiumemoji'den sonra gelen mesajdaki premium emojileri kaydeder."""
+    msg = update.effective_message
+    if not msg or not context.user_data.get('await_pe') or not is_founder(update.effective_user.id):
+        return
+    ents = [e for e in (msg.entities or ()) if e.type == 'custom_emoji' and e.custom_emoji_id]
+    if not ents:
+        return
+    m = json.loads(meta_get('premium_map') or '{}')
+    for e in ents:
+        alt = _pe_norm(msg.parse_entity(e))
+        if alt:
+            m[alt] = e.custom_emoji_id
+    meta_set('premium_map', json.dumps(m, ensure_ascii=False))
+    _pe_cache.clear()
+    context.user_data.pop('await_pe', None)
+    await reply(update, f"✅ {len(ents)} premium emoji kaydedildi (toplam {len(m)}). Botun mesajlarında artık kullanılıyor.")
+    raise ApplicationHandlerStop
+
+# ───────────────────────────── Gizlilik ─────────────────────────────
+
+PRIVACY_TEXT = """🔒 <b>ULUS Haber — Gizlilik</b>
+
+<b>Tuttuğumuz veriler</b>
+• Sohbet kimliğin (ID), adın ve ayarların: kategoriler, kaynaklar, takip kelimeleri, bülten saati, il seçimi, fiyat alarmları
+• Sana gönderilen haberlerin listesi (aynı haber tekrar gitmesin diye, 4 gün)
+• Kanal/grup eklediysen o sohbetin adı ve ayarları
+• Mesaj içeriklerini okumayız ve saklamayız (sadece komutlar ve ayar girişleri işlenir)
+
+<b>Ne için</b>
+Sadece sana haber ve bildirim göndermek için. Veriler satılmaz, reklam için kullanılmaz, üçüncü kişilerle paylaşılmaz.
+
+<b>Hakların</b>
+Aşağıdaki butonla verilerini istediğin an silebilirsin; bot sana bir daha haber göndermez.
+{contact}"""
+
+async def cmd_privacy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    contact = ""
+    if FOUNDER_ID:
+        try:
+            u = (await context.bot.get_chat(FOUNDER_ID)).username
+            contact = f"\n<b>İletişim</b>\n@{esc(u)}" if u else ""
+        except (BadRequest, Forbidden, TimedOut, NetworkError):
+            pass
+    markup = InlineKeyboardMarkup([[ibtn("🗑 Verilerimi sil", "priv|del")]]) if update.effective_chat.type == 'private' else None
+    await reply(update, PRIVACY_TEXT.replace("{contact}", contact), markup)
+
+def delete_user_data(uid: int) -> int:
+    """Özel sohbet aboneliği, gönderim geçmişi ve alarmlar silinir (kanal/grup kayıtlarına dokunulmaz)."""
+    with db() as c:
+        n = c.execute("DELETE FROM subs WHERE chat_id = ?", (uid,)).rowcount
+        n += c.execute("DELETE FROM sent WHERE chat_id = ?", (uid,)).rowcount
+        for tbl in ('price_alerts',):
+            try:
+                n += c.execute(f"DELETE FROM {tbl} WHERE chat_id = ?", (uid,)).rowcount
+            except sqlite3.OperationalError:
+                pass
+    return n
+
+async def privacy_callback(q, rest: str):
+    uid = q.from_user.id
+    if rest == 'del':
+        await q.answer()
+        await safe_edit(q, "🗑 <b>Verilerin silinsin mi?</b>\nAyarların, takip kelimelerin ve alarmların silinir; "
+                           "bot sana haber göndermeyi bırakır. Kanal/grup ayarları için /kanallarim.",
+                        InlineKeyboardMarkup([[ibtn("✅ Evet, sil", "priv|yes"), ibtn("↩️ Vazgeç", "priv|no")]]))
+    elif rest == 'yes':
+        n = delete_user_data(uid)
+        await q.answer("Silindi.")
+        await safe_edit(q, f"✅ Verilerin silindi ({n} kayıt). Tekrar başlamak için /start.")
+    else:
+        await q.answer()
+        await safe_edit(q, "Vazgeçildi; verilerine dokunulmadı.")
+
 # ───────────────────────────── Kurucu komutları ─────────────────────────────
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2183,10 +2506,9 @@ async def cmd_sources_health(update: Update, context: ContextTypes.DEFAULT_TYPE)
                          (now() - 86400,)).fetchall()
     text = f"🔌 <b>Kaynaklar</b> ({len(FEEDS)} akış)\n\n<b>Son 24 saatte gelen haber (ilk 25)</b>\n"
     text += "\n".join(f"• {esc(r['source'])}: {r['n']}" for r in rows) or "<i>veri yok</i>"
-    bad = [f for f in FEEDS if f.errors]
-    if bad:
-        text += "\n\n<b>Hatalı akışlar</b>\n" + "\n".join(
-            f"• {esc(f.source)} ({esc(cat_label(f.cat, False))}): {esc(f.last_error[:80])}" for f in bad[:15])
+    probs = feed_problems()
+    if probs:
+        text += f"\n\n⚠️ <b>Sorunlu akışlar ({len(probs)})</b>\n" + feed_problems_text(probs)
     await reply(update, text[:4000])
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2250,6 +2572,7 @@ async def post_init(app: Application):
                                        BotCommand("sondakika", "Son dakika"), BotCommand("gundem", "Gündemdeki konular"),
                                        BotCommand("ara", "Haber ara"), BotCommand("bulten", "Şimdi bülten gönder"),
                                        BotCommand("ayarlar", "Bildirim ayarları"), BotCommand("kanallarim", "Kanal/grup ekle"),
+                                       BotCommand("gizlilik", "Gizlilik ve verilerim"),
                                        BotCommand("yardim", "Yardım")], scope=BotCommandScopeAllPrivateChats())
         await app.bot.set_my_commands([BotCommand("son", "Son haberler"), BotCommand("onecikan", "Öne çıkanlar"),
                                        BotCommand("sondakika", "Son dakika"), BotCommand("gundem", "Gündem konuları"),
@@ -2258,7 +2581,8 @@ async def post_init(app: Application):
         if FOUNDER_ID:
             await app.bot.set_my_commands([BotCommand("son", "Son haberler"), BotCommand("ayarlar", "Bildirim ayarları"),
                                            BotCommand("istatistik", "İstatistik"), BotCommand("kaynaklar", "Kaynak durumu"),
-                                           BotCommand("duyuru", "Duyuru gönder"),
+                                           BotCommand("duyuru", "Duyuru gönder"), BotCommand("yedek", "Veritabanı yedeği"),
+                                           BotCommand("premiumemoji", "Premium emoji teması"),
                                            BotCommand("yardim", "Yardım")], scope=BotCommandScopeChat(FOUNDER_ID))
         await app.bot.set_my_short_description("Türkiye'nin haber sitelerinden canlı haber, son dakika ve gündem.")
         await app.bot.set_my_description(
@@ -2267,6 +2591,11 @@ async def post_init(app: Application):
             "Kanalına veya grubuna ekleyip otomatik haber paylaşabilirsin.")
     except (BadRequest, TimedOut, NetworkError) as e:
         logger.warning("Komut menüsü ayarlanamadı: %s", e)
+    if REPAIR_NOTE and FOUNDER_ID:
+        try:
+            await app.bot.send_message(FOUNDER_ID, REPAIR_NOTE)
+        except (Forbidden, BadRequest, TimedOut, NetworkError):
+            pass
     logger.info("ULUS Haber başladı: @%s", BOT_USERNAME)
 
 async def post_shutdown(app: Application):
@@ -2292,6 +2621,10 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("istatistik", cmd_stats))
     app.add_handler(CommandHandler("kaynaklar", cmd_sources_health))
     app.add_handler(CommandHandler("duyuru", cmd_broadcast))
+    app.add_handler(CommandHandler("yedek", cmd_backup))
+    app.add_handler(CommandHandler("premiumemoji", cmd_premium))
+    app.add_handler(CommandHandler(["gizlilik", "privacy"], cmd_privacy))
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, premium_input), group=-2)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Text(list(MENU_TEXTS)), menu_router))
     app.add_handler(CallbackQueryHandler(callback_router))
     app.add_handler(InlineQueryHandler(inline_query))
@@ -2302,11 +2635,14 @@ def build_app() -> Application:
     jq.run_repeating(digest_job, interval=60, first=60 - datetime.now().second + 2, name="digest")
     jq.run_repeating(trends_job, interval=600, first=90, name="trends")
     jq.run_daily(cleanup_job, time=datetime.strptime("04:30", "%H:%M").time().replace(tzinfo=TR), name="cleanup")
+    jq.run_daily(backup_job, time=datetime.strptime("04:00", "%H:%M").time().replace(tzinfo=TR), name="backup")
+    jq.run_daily(feed_watch_job, time=datetime.strptime("09:05", "%H:%M").time().replace(tzinfo=TR), name="feedwatch")
     return app
 
 def main():
     if not BOT_TOKEN:
         raise SystemExit("BOT_TOKEN .env dosyasında tanımlı değil.")
+    repair_db_if_needed()
     init_db()
     app = build_app()
     app.run_polling(allowed_updates=["message", "callback_query", "inline_query", "my_chat_member"],
