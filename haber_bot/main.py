@@ -436,6 +436,17 @@ def init_db():
             fid TEXT PRIMARY KEY, etag TEXT, modified TEXT, last_ok REAL, errors INTEGER, last_error TEXT, count INTEGER
         );
         CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT);
+        CREATE TABLE IF NOT EXISTS quakes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, t REAL NOT NULL, lat REAL, lon REAL, depth REAL, mag REAL,
+            place TEXT, src TEXT, first_seen REAL, notified INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_quakes_t ON quakes(t);
+        CREATE TABLE IF NOT EXISTS quake_src (ext TEXT PRIMARY KEY, qid INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS quake_sent (chat_id INTEGER NOT NULL, qid INTEGER NOT NULL, PRIMARY KEY (chat_id, qid));
+        CREATE TABLE IF NOT EXISTS price_alerts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL, sym TEXT NOT NULL, op TEXT NOT NULL,
+            value REAL NOT NULL, created REAL
+        );
         """)
         cols = {r[1] for r in c.execute("PRAGMA table_info(feed_state)")}
         if 'last_item' not in cols:
@@ -938,11 +949,12 @@ BREAKING_DAILY_CAP = 10
 def default_settings(kind: str) -> dict:
     base = {'cats': ['gundem', 'ekonomi', 'dunya', 'spor'], 'src_off': [], 'kw': [], 'instant': False,
             'digest': ['09:00', '19:00'], 'breaking': 'all', 'quiet': None, 'per_hour': 6, 'fmt': 'card',
-            'min_src': 1, 'buttons': True, 'sign': '', 'onboarded': False}
+            'min_src': 1, 'buttons': True, 'sign': '', 'onboarded': False,
+            'eq_min': 5.0, 'eq_near': False, 'il': 0, 'wx': True, 'namaz': False, 'city': False, 'rg': False}
     if kind == 'channel':
-        base.update(cats=['gundem', 'dunya', 'ekonomi'], instant=True, digest=[], breaking='cats', onboarded=True)
+        base.update(cats=['gundem', 'dunya', 'ekonomi'], instant=True, digest=[], breaking='cats', onboarded=True, eq_min=0)
     elif kind == 'group':
-        base.update(instant=False, breaking='off', per_hour=4, onboarded=True)
+        base.update(instant=False, breaking='off', per_hour=4, onboarded=True, eq_min=0)
     return base
 
 def _sub_from_row(r) -> dict:
@@ -1020,6 +1032,8 @@ def match_reason(st, s: dict) -> str | None:
     for kw in s.get('kw') or []:
         if kw_match(fold(kw), text):
             return f"kw:{kw}"
+    if s.get('city') and s.get('il') and s['il'] in story_provinces(st):
+        return f"il:{il_name(s['il'])}"
     if st['source_count'] < s.get('min_src', 1):
         return None
     if set(story_cats(st)) & set(s.get('cats') or []):
@@ -1046,6 +1060,8 @@ def reason_header(reason: str | None) -> str:
         return "🔴 <b>SON DAKİKA</b>\n"
     if reason and reason.startswith('kw:'):
         return f"🔔 <b>Takip:</b> {esc(reason[3:])}\n"
+    if reason and reason.startswith('il:'):
+        return f"📍 <b>{esc(reason[3:])}</b>\n"
     return ""
 
 def story_text(st, reason: str | None = None, sign: str = "", compact: bool = False, limit: int = 4096) -> str:
@@ -1257,7 +1273,7 @@ async def _deliver_to(bot, sub: dict, fresh: list, breaking: list, t: float) -> 
         if st['updated'] <= sub['cursor'] or st['id'] in already:
             continue
         r = match_reason(st, s)
-        if r and (s.get('instant') or r.startswith('kw:')) and not is_dup(st):
+        if r and (s.get('instant') or r.startswith(('kw:', 'il:'))) and not is_dup(st):
             if any(index.same_story(st['title'], st['summary'], p['title'], p['summary']) for p, _ in picks):
                 mark_sent(cid, [st['id']], 'dup')
                 continue
@@ -1268,7 +1284,7 @@ async def _deliver_to(bot, sub: dict, fresh: list, breaking: list, t: float) -> 
     budget = s.get('per_hour', 6) - sent_count(cid, 3600, ('card', 'bulk1'))
     if budget <= 0:
         return count   # imleç ilerlemez; kota açılınca (hâlâ tazeyse) toplu liste olarak gelir
-    picks.sort(key=lambda p: (not p[1].startswith('kw:'), -p[0]['source_count'], -(p[0]['published'] or p[0]['first_seen'])))
+    picks.sort(key=lambda p: (not p[1].startswith(('kw:', 'il:')), -p[0]['source_count'], -(p[0]['published'] or p[0]['first_seen'])))
     if len(picks) <= min(budget, 3):
         for st, r in picks:
             await send_story(bot, sub, st, r if r != 'cat' else None)
@@ -1344,6 +1360,10 @@ async def send_digest(bot, sub: dict) -> bool:
     if not built:
         return False
     text, ids = built
+    head = await digest_header(sub)
+    if head and len(head) + len(text) < 4090:
+        first, _, rest = text.partition("\n")
+        text = f"{first}\n{head}{rest}"
     markup = (InlineKeyboardMarkup([[ibtn("🔥 Öne çıkanlar", "l|top|0"), ibtn("📰 Son haberler", "l|all|0")]])
               if sub['kind'] == 'private' else None)
     await send_text(bot, sub, text, markup)
@@ -1369,11 +1389,561 @@ async def digest_job(context: ContextTypes.DEFAULT_TYPE):
         except (TimedOut, NetworkError, RetryAfter, BadRequest) as e:
             logger.warning("Bülten gönderilemedi %s: %s", sub['chat_id'], e)
 
+# ───────────────────────────── Canlı bilgiler: il, deprem, piyasa, hava, namaz, Resmi Gazete ─────────────────────────────
+
+def il_name(plate) -> str:
+    return IL_BY_PLATE.get(int(plate or 0), ("", 0, 0))[0]
+
+def find_il(text: str) -> int | None:
+    """Serbest yazıdan il: 'istanbul', 'İzmir', 'urfa', '34' → plaka."""
+    t = fold(text or "").strip()
+    if t.isdigit() and int(t) in IL_BY_PLATE:
+        return int(t)
+    for p, n, *_ in ILLER:
+        if fold(n) == t:
+            return p
+    for a, p in IL_ALIASES.items():
+        if fold(a) == t:
+            return p
+    return il_stems().get(t[:5]) if len(t) >= 4 else None
+
+def km(lat1, lon1, lat2, lon2) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(a))
+
+async def get_json(url: str, **kw):
+    r = await http().get(url, timeout=15, follow_redirects=True, **kw)
+    r.raise_for_status()
+    return r.json()
+
+# ── Deprem (AFAD + Kandilli; aynı deprem tek bildirim) ──
+EQ_NEAR_KM = 150
+EQ_ALWAYS = 6.0           # bu büyüklük ve üstü: bölge ve sessiz saat fark etmeksizin herkese
+EQ_STEPS = [0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0]
+_KANDILLI_LINE = re.compile(r"^(\d{4}\.\d\d\.\d\d) (\d\d:\d\d:\d\d)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([-.\d]+)\s+([-.\d]+)\s+([-.\d]+)\s+(.+?)\s{2,}")
+
+def parse_kandilli(text: str) -> list[dict]:
+    out = []
+    for line in text.splitlines():
+        m = _KANDILLI_LINE.match(line.strip())
+        if not m:
+            continue
+        mags = [float(x) for x in m.group(6, 7, 8) if x not in ('-.-', '')]
+        if not mags:
+            continue
+        t = datetime.strptime(f"{m.group(1)} {m.group(2)}", "%Y.%m.%d %H:%M:%S").replace(tzinfo=TR).timestamp()
+        place = m.group(9).strip().title()
+        out.append({'ext': f"kan:{m.group(1)} {m.group(2)}", 't': t, 'lat': float(m.group(3)), 'lon': float(m.group(4)),
+                    'depth': float(m.group(5)), 'mag': max(mags), 'place': place, 'src': "Kandilli"})
+    return out
+
+def parse_afad(items) -> list[dict]:
+    out = []
+    for e in items or []:
+        try:
+            t = datetime.fromisoformat(e['date'].replace('Z', '')).replace(tzinfo=timezone.utc).timestamp()
+            out.append({'ext': f"afad:{e['eventID']}", 't': t, 'lat': float(e['latitude']), 'lon': float(e['longitude']),
+                        'depth': float(e.get('depth') or 0), 'mag': float(e['magnitude']),
+                        'place': e.get('location') or e.get('province') or "?", 'src': "AFAD"})
+        except (KeyError, ValueError, TypeError):
+            continue
+    return out
+
+def ingest_quakes(events: list[dict], seeding: bool = False) -> list[int]:
+    """Yeni depremleri kaydeder; aynı deprem başka kaynaktan geldiyse (±120 sn, 60 km) eşlenir. Dönüş: yeni kayıt id'leri."""
+    new = []
+    with db() as c:
+        for ev in sorted(events, key=lambda e: e['t']):
+            if c.execute("SELECT 1 FROM quake_src WHERE ext = ?", (ev['ext'],)).fetchone():
+                continue
+            same = None
+            for r in c.execute("SELECT * FROM quakes WHERE t BETWEEN ? AND ?", (ev['t'] - 120, ev['t'] + 120)).fetchall():
+                if km(r['lat'], r['lon'], ev['lat'], ev['lon']) <= 60 and abs(r['mag'] - ev['mag']) <= 1.0:
+                    same = r
+                    break
+            if same:
+                c.execute("INSERT OR IGNORE INTO quake_src (ext, qid) VALUES (?, ?)", (ev['ext'], same['id']))
+                if ev['src'] == "AFAD" and same['src'] != "AFAD":   # AFAD resmi kaynak: yeri/büyüklüğü güncelle
+                    c.execute("UPDATE quakes SET place = ?, src = ?, mag = ?, depth = ? WHERE id = ?",
+                              (ev['place'], "AFAD", ev['mag'], ev['depth'], same['id']))
+                continue
+            qid = c.execute("INSERT INTO quakes (t, lat, lon, depth, mag, place, src, first_seen, notified) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            (ev['t'], ev['lat'], ev['lon'], ev['depth'], ev['mag'], ev['place'], ev['src'], now(),
+                             1 if seeding else 0)).lastrowid
+            c.execute("INSERT INTO quake_src (ext, qid) VALUES (?, ?)", (ev['ext'], qid))
+            new.append(qid)
+    return new
+
+async def fetch_quakes() -> list[dict]:
+    t = datetime.now(timezone.utc)
+    events = []
+    try:
+        data = await get_json("https://servisnet.afad.gov.tr/apigateway/deprem/apiv2/event/filter",
+                              params={'start': (t - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S"),
+                                      'end': (t + timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S"),
+                                      'format': 'json', 'minmag': '2.5'})
+        events += parse_afad(data)
+    except (httpx.HTTPError, ValueError) as e:
+        logger.debug("AFAD alınamadı: %s", e)
+    try:
+        r = await http().get("http://www.koeri.boun.edu.tr/scripts/lst0.asp", timeout=15)
+        r.raise_for_status()
+        events += [e for e in parse_kandilli(r.content.decode('windows-1254', 'replace'))
+                   if e['mag'] >= 2.5 and now() - e['t'] < 3 * 3600]
+    except httpx.HTTPError as e:
+        logger.debug("Kandilli alınamadı: %s", e)
+    return events
+
+def quake_icon(mag: float) -> str:
+    return "🔴" if mag >= 5 else "🟠" if mag >= 4 else "🟡"
+
+def quake_text(q, s: dict | None = None) -> str:
+    lines = [f"{quake_icon(q['mag'])} <b>DEPREM · {q['mag']:.1f}</b>",
+             f"📍 {esc(q['place'])}",
+             f"🕒 {tr_time(q['t'], '%H:%M:%S')} · derinlik {q['depth']:.1f} km"]
+    il = (s or {}).get('il')
+    if il and il in IL_BY_PLATE:
+        _, la, lo = IL_BY_PLATE[il]
+        lines.append(f"📏 {esc(il_name(il))} merkezine {km(la, lo, q['lat'], q['lon']):.0f} km")
+    lines.append(f"<i>Kaynak: {esc(q['src'])}</i>")
+    return "\n".join(lines)
+
+def quake_markup(q) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[ibtn("🗺 Haritada gör", url=f"https://www.google.com/maps?q={q['lat']},{q['lon']}"),
+                                  ibtn("🌍 Son depremler", "eq|l")]])
+
+def quake_wanted(q, s: dict) -> bool:
+    mn = float(s.get('eq_min') or 0)
+    if not mn or q['mag'] < mn:
+        return False
+    if q['mag'] >= EQ_ALWAYS or not s.get('eq_near'):
+        return True
+    il = s.get('il')
+    if not il or il not in IL_BY_PLATE:
+        return True
+    _, la, lo = IL_BY_PLATE[il]
+    return km(la, lo, q['lat'], q['lon']) <= EQ_NEAR_KM
+
+async def quake_job(context: ContextTypes.DEFAULT_TYPE):
+    events = await fetch_quakes()
+    seeding = meta_get('eq_seeded') is None
+    ingest_quakes(events, seeding)
+    if seeding:
+        meta_set('eq_seeded', '1')
+        return
+    with db() as c:
+        fresh = c.execute("SELECT * FROM quakes WHERE notified = 0 AND t > ? ORDER BY t", (now() - 30 * 60,)).fetchall()
+        c.execute("UPDATE quakes SET notified = 1 WHERE notified = 0")
+    if not fresh:
+        return
+    for sub in all_subs():
+        if sub['paused']:
+            continue
+        s = sub['settings']
+        for q in fresh:
+            if not quake_wanted(q, s) or (in_quiet(s) and q['mag'] < EQ_ALWAYS):
+                continue
+            with db() as c:
+                if not c.execute("INSERT OR IGNORE INTO quake_sent (chat_id, qid) VALUES (?, ?)",
+                                 (sub['chat_id'], q['id'])).rowcount:
+                    continue
+            try:
+                await _safe_send(lambda: context.bot.send_message(
+                    sub['chat_id'], quake_text(q, s), parse_mode=ParseMode.HTML,
+                    reply_markup=quake_markup(q) if sub['kind'] == 'private' else None,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True), **_thread_kw(sub)))
+            except ChatGone as e:
+                await deactivate(context.bot, sub, str(e))
+                break
+            except (TimedOut, NetworkError, RetryAfter, BadRequest) as e:
+                logger.warning("Deprem bildirimi gönderilemedi %s: %s", sub['chat_id'], e)
+
+def render_quakes(limit: int = 12) -> str:
+    with db() as c:
+        rows = c.execute("SELECT * FROM quakes WHERE t > ? ORDER BY t DESC LIMIT ?", (now() - 86400, limit)).fetchall()
+        big = c.execute("SELECT * FROM quakes WHERE t > ? AND mag >= 4 ORDER BY mag DESC LIMIT 3", (now() - 7 * 86400,)).fetchall()
+    if not rows:
+        return "🌍 <b>Son depremler</b>\n\n<i>Henüz veri yok; birkaç dakika içinde gelir.</i>"
+    lines = ["🌍 <b>Son depremler</b> (24 saat, 2.5+)", ""]
+    lines += [f"{quake_icon(r['mag'])} <b>{r['mag']:.1f}</b> · {tr_time(r['t'])} · {esc(r['place'])}" for r in rows]
+    if big:
+        lines += ["", "<b>Son 7 günün en büyükleri</b>"]
+        lines += [f"{quake_icon(r['mag'])} <b>{r['mag']:.1f}</b> · {tr_date(r['t'])} · {esc(r['place'])}" for r in big]
+    lines.append("\n<i>Kaynak: AFAD ve Kandilli · bildirim ayarı: /ayarlar → 🌍 Deprem</i>")
+    return "\n".join(lines)
+
+async def cmd_quakes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await reply(update, render_quakes())
+
+# ── Piyasa ve fiyat alarmı ──
+BROWSER_HEADERS = {'User-Agent': "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
+                                 "Chrome/124.0 Safari/537.36", 'Accept': "text/html,application/xhtml+xml,application/json,*/*"}
+MARKET = [  # (anahtar, ad, Yahoo sembolü, birim)
+    ('usd', "Dolar", "USDTRY=X", "₺"), ('eur', "Euro", "EURTRY=X", "₺"), ('gbp', "Sterlin", "GBPTRY=X", "₺"),
+    ('gram', "Gram altın", None, "₺"), ('ons', "Ons altın", "GC=F", "$"), ('bist', "BIST 100", "XU100.IS", ""),
+    ('btc', "Bitcoin", "BTC-USD", "$"), ('eth', "Ethereum", "ETH-USD", "$"),
+]
+MARKET_NAMES = {k: n for k, n, *_ in MARKET}
+MARKET_ALIASES = {'dolar': 'usd', 'usd': 'usd', 'euro': 'eur', 'eur': 'eur', 'avro': 'eur', 'sterlin': 'gbp', 'gbp': 'gbp',
+                  'altin': 'gram', 'gram': 'gram', 'gramaltin': 'gram', 'ons': 'ons', 'bist': 'bist', 'borsa': 'bist',
+                  'bist100': 'bist', 'bitcoin': 'btc', 'btc': 'btc', 'ethereum': 'eth', 'eth': 'eth'}
+MAX_ALERTS = 10
+_market = {'at': 0.0, 'data': {}}
+
+def _meta_price(meta: dict) -> tuple[float, float]:
+    return float(meta['regularMarketPrice']), float(meta.get('chartPreviousClose') or meta.get('previousClose') or 0)
+
+async def _yahoo_batch(syms: list[str]) -> dict:
+    """Tek istekte tüm semboller (Yahoo eşzamanlı istekleri sınırlıyor); olmazsa sırayla tek tek."""
+    out = {}
+    try:
+        d = await get_json("https://query1.finance.yahoo.com/v7/finance/spark", headers=BROWSER_HEADERS,
+                           params={'symbols': ",".join(syms), 'range': '1d', 'interval': '1d'})
+        for r in d['spark']['result']:
+            try:
+                out[r['symbol']] = _meta_price(r['response'][0]['meta'])
+            except (KeyError, IndexError, TypeError, ValueError):
+                continue
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+        logger.debug("Toplu piyasa verisi alınamadı: %s", e)
+    for sym in [x for x in syms if x not in out]:
+        try:
+            d = await get_json(f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}", headers=BROWSER_HEADERS,
+                               params={'range': '1d', 'interval': '1d'})
+            out[sym] = _meta_price(d['chart']['result'][0]['meta'])
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
+            logger.debug("Piyasa verisi alınamadı %s: %s", sym, e)
+    return out
+
+async def market_data(max_age: float = 60) -> dict:
+    """{anahtar: (fiyat, önceki kapanış)}; 1 dk önbellek."""
+    if now() - _market['at'] < max_age and _market['data']:
+        return _market['data']
+    got = await _yahoo_batch([y for _, _, y, _ in MARKET if y])
+    data = {k: got[y] for k, _, y, _ in MARKET if y and y in got}
+    if 'ons' in data and 'usd' in data:   # gram altın = ons × dolar / 31,1035
+        (o, op), (u, up) = data['ons'], data['usd']
+        data['gram'] = (o * u / 31.1035, (op * up / 31.1035) if op and up else 0)
+    if data:
+        _market.update(at=now(), data=data)
+    return data
+
+def fmt_num(v: float) -> str:
+    s = f"{v:,.2f}" if v < 100000 else f"{v:,.0f}"
+    return s.replace(",", "X").replace(".", ",").replace("X", ".")
+
+def market_text(data: dict) -> str:
+    if not data:
+        return "💰 <b>Piyasalar</b>\n\n<i>Veri şu an alınamadı, biraz sonra tekrar dene.</i>"
+    lines = [f"💰 <b>Piyasalar</b> · {tr_time(now())}", ""]
+    for k, name, _, unit in MARKET:
+        if k not in data:
+            continue
+        p, prev = data[k]
+        ch = (p / prev - 1) * 100 if prev else 0
+        arrow = "🟢 ▲" if ch > 0.05 else "🔴 ▼" if ch < -0.05 else "⚪️ ="
+        lines.append(f"{arrow} <b>{name}</b>: {fmt_num(p)}{(' ' + unit) if unit else ''} <i>(%{fmt_num(ch)})</i>")
+    lines.append("\n<i>Fiyat alarmı: /alarm dolar 45</i>")
+    return "\n".join(lines)
+
+async def cmd_market(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await reply(update, market_text(await market_data()),
+                InlineKeyboardMarkup([[ibtn("🔄 Yenile", "mk|r"), ibtn("⏰ Alarmlarım", "al|l")]])
+                if update.effective_chat.type == 'private' else None)
+
+def parse_alert(text: str, data: dict) -> tuple[str, str, float] | str:
+    """'dolar 45', 'altın > 3500', 'bitcoin < 60000' → (anahtar, yön, değer) ya da hata metni."""
+    m = re.fullmatch(r"\s*([^\d<>=]+?)\s*([<>])?\s*=?\s*([\d.,]+)\s*", text or "")
+    if not m:
+        return "Biçim: <code>/alarm dolar 45</code> ya da <code>/alarm altın &gt; 3500</code>"
+    key = MARKET_ALIASES.get(fold(m.group(1)).replace(" ", ""))
+    if not key:
+        return "Bilinmeyen varlık. Kullanılabilir: dolar, euro, sterlin, altın, ons, bist, bitcoin, ethereum"
+    raw = m.group(3)
+    raw = raw.replace(".", "").replace(",", ".") if "," in raw else raw
+    try:
+        val = float(raw)
+    except ValueError:
+        return "Geçerli bir sayı yaz."
+    op = m.group(2)
+    if not op:
+        cur = data.get(key, (0, 0))[0]
+        if not cur:
+            return "Şu an fiyat alınamadı; yönü belirt: <code>/alarm dolar &gt; 45</code>"
+        op = '>' if val > cur else '<'
+    return key, op, val
+
+async def cmd_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/alarm dolar 45 — fiyat alarmı; /alarm → liste."""
+    cid = update.effective_chat.id
+    if not context.args:
+        text, markup = render_alerts(cid)
+        await reply(update, text, markup)
+        return
+    data = await market_data()
+    res = parse_alert(" ".join(context.args), data)
+    if isinstance(res, str):
+        await reply(update, f"⚠️ {res}")
+        return
+    if update.effective_chat.type != 'private' and not await is_chat_admin(context.bot, cid, update.effective_user.id):
+        await reply(update, "Grupta alarmı sadece yöneticiler kurabilir.")
+        return
+    key, op, val = res
+    with db() as c:
+        if c.execute("SELECT COUNT(*) FROM price_alerts WHERE chat_id = ?", (cid,)).fetchone()[0] >= MAX_ALERTS:
+            await reply(update, f"⚠️ En fazla {MAX_ALERTS} alarm kurulabilir. /alarm ile listeyi gör, eskileri sil.")
+            return
+        c.execute("INSERT INTO price_alerts (chat_id, sym, op, value, created) VALUES (?, ?, ?, ?, ?)", (cid, key, op, val, now()))
+    cur = data.get(key, (0, 0))[0]
+    await reply(update, f"⏰ Alarm kuruldu: <b>{MARKET_NAMES[key]}</b> {'≥' if op == '>' else '≤'} {fmt_num(val)}"
+                        + (f"\n<i>Şu an: {fmt_num(cur)}</i>" if cur else ""))
+
+def render_alerts(cid: int) -> tuple[str, InlineKeyboardMarkup | None]:
+    with db() as c:
+        rows = c.execute("SELECT * FROM price_alerts WHERE chat_id = ? ORDER BY id", (cid,)).fetchall()
+    if not rows:
+        return ("⏰ <b>Fiyat alarmların</b>\n\n<i>Alarm yok.</i>\nKurmak için: <code>/alarm dolar 45</code>, "
+                "<code>/alarm altın 3500</code>, <code>/alarm bitcoin &lt; 60000</code>"), None
+    text = "⏰ <b>Fiyat alarmların</b>\n\n" + "\n".join(
+        f"• {MARKET_NAMES.get(r['sym'], r['sym'])} {'≥' if r['op'] == '>' else '≤'} {fmt_num(r['value'])}" for r in rows)
+    btns = [ibtn(f"❌ {MARKET_NAMES.get(r['sym'], r['sym'])} {fmt_num(r['value'])}", f"al|d|{r['id']}", RED) for r in rows]
+    return text, InlineKeyboardMarkup([btns[i:i + 2] for i in range(0, len(btns), 2)])
+
+async def alert_job(context: ContextTypes.DEFAULT_TYPE):
+    with db() as c:
+        alerts = c.execute("SELECT * FROM price_alerts").fetchall()
+    if not alerts:
+        return
+    data = await market_data(max_age=90)
+    for a in alerts:
+        cur = data.get(a['sym'], (0, 0))[0]
+        if not cur or not ((a['op'] == '>' and cur >= a['value']) or (a['op'] == '<' and cur <= a['value'])):
+            continue
+        with db() as c:
+            if not c.execute("DELETE FROM price_alerts WHERE id = ?", (a['id'],)).rowcount:
+                continue
+        try:
+            await context.bot.send_message(a['chat_id'], f"⏰ <b>Fiyat alarmı!</b>\n{MARKET_NAMES[a['sym']]} "
+                                                         f"{'yükseldi' if a['op'] == '>' else 'düştü'}: <b>{fmt_num(cur)}</b> "
+                                                         f"(hedef {fmt_num(a['value'])})", parse_mode=ParseMode.HTML)
+        except (Forbidden, BadRequest, TimedOut, NetworkError) as e:
+            logger.info("Alarm gönderilemedi %s: %s", a['chat_id'], e)
+
+# ── Hava durumu ve namaz vakitleri ──
+WMO = {0: ("☀️", "Açık"), 1: ("🌤", "Az bulutlu"), 2: ("⛅️", "Parçalı bulutlu"), 3: ("☁️", "Kapalı"),
+       45: ("🌫", "Sisli"), 48: ("🌫", "Kırağılı sis"), 51: ("🌦", "Hafif çisenti"), 53: ("🌦", "Çisenti"),
+       55: ("🌧", "Yoğun çisenti"), 61: ("🌧", "Hafif yağmurlu"), 63: ("🌧", "Yağmurlu"), 65: ("🌧", "Kuvvetli yağmur"),
+       66: ("🌨", "Dondurucu yağmur"), 67: ("🌨", "Dondurucu yağmur"), 71: ("🌨", "Hafif kar"), 73: ("❄️", "Karlı"),
+       75: ("❄️", "Yoğun kar"), 77: ("🌨", "Kar taneleri"), 80: ("🌦", "Sağanak"), 81: ("🌧", "Kuvvetli sağanak"),
+       82: ("⛈", "Şiddetli sağanak"), 85: ("🌨", "Kar sağanağı"), 86: ("❄️", "Yoğun kar sağanağı"),
+       95: ("⛈", "Gök gürültülü fırtına"), 96: ("⛈", "Dolu ihtimalli fırtına"), 99: ("⛈", "Dolu ihtimalli fırtına")}
+_wx_cache: dict = {}
+_pray_cache: dict = {}
+
+async def weather(plate: int) -> dict | None:
+    hit = _wx_cache.get(plate)
+    if hit and now() - hit[0] < 1800:
+        return hit[1]
+    _, la, lo = IL_BY_PLATE[plate]
+    try:
+        d = await get_json("https://api.open-meteo.com/v1/forecast", params={
+            'latitude': la, 'longitude': lo, 'current': 'temperature_2m,weather_code',
+            'daily': 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+            'timezone': 'Europe/Istanbul', 'forecast_days': 1})
+        w = {'now': d['current']['temperature_2m'], 'code': d['daily']['weather_code'][0],
+             'max': d['daily']['temperature_2m_max'][0], 'min': d['daily']['temperature_2m_min'][0],
+             'rain': d['daily']['precipitation_probability_max'][0]}
+    except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError) as e:
+        logger.debug("Hava alınamadı %s: %s", plate, e)
+        return None
+    _wx_cache[plate] = (now(), w)
+    return w
+
+def weather_line(plate: int, w: dict) -> str:
+    em, desc = WMO.get(int(w['code']), ("🌡", ""))
+    rain = f" · yağış %{w['rain']}" if w.get('rain') else ""
+    return f"{em} <b>{esc(il_name(plate))}</b>: {desc}, {w['min']:.0f}° / {w['max']:.0f}° (şu an {w['now']:.0f}°){rain}"
+
+async def prayer_times(plate: int) -> dict | None:
+    day = datetime.now(TR).strftime("%d-%m-%Y")
+    hit = _pray_cache.get(plate)
+    if hit and hit[0] == day:
+        return hit[1]
+    _, la, lo = IL_BY_PLATE[plate]
+    try:
+        d = await get_json(f"https://api.aladhan.com/v1/timings/{day}",
+                           params={'latitude': la, 'longitude': lo, 'method': 13})  # 13 = Diyanet
+        t = d['data']['timings']
+        times = {'İmsak': t['Fajr'], 'Güneş': t['Sunrise'], 'Öğle': t['Dhuhr'], 'İkindi': t['Asr'],
+                 'Akşam': t['Maghrib'], 'Yatsı': t['Isha']}
+        times = {k: v[:5] for k, v in times.items()}
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+        logger.debug("Namaz vakitleri alınamadı %s: %s", plate, e)
+        return None
+    _pray_cache[plate] = (day, times)
+    return times
+
+def prayer_line(times: dict) -> str:
+    return "🕌 " + " · ".join(f"{k} {v}" for k, v in times.items())
+
+async def il_info(plate: int, wx: bool = True, pray: bool = True) -> str:
+    parts = []
+    if wx:
+        w = await weather(plate)
+        if w:
+            parts.append(weather_line(plate, w))
+    if pray:
+        p = await prayer_times(plate)
+        if p:
+            parts.append(prayer_line(p))
+    return "\n".join(parts)
+
+def _il_arg(update, context) -> int | None:
+    if context.args:
+        return find_il(" ".join(context.args))
+    sub = get_sub(update.effective_chat.id)
+    return (sub or {}).get('settings', {}).get('il') or None
+
+async def cmd_weather(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/hava [il] — hava durumu ve namaz vakitleri."""
+    plate = _il_arg(update, context)
+    if not plate:
+        await reply(update, "📍 Hangi il? Örnek: <code>/hava izmir</code>\nİlini kaydetmek için: /ayarlar → 📍 İlim")
+        return
+    info = await il_info(plate, True, True)
+    await reply(update, f"📍 <b>{esc(il_name(plate))}</b> · {tr_date(now())}\n\n{info or '<i>Veri şu an alınamadı.</i>'}")
+
+async def cmd_prayer(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    plate = _il_arg(update, context)
+    if not plate:
+        await reply(update, "📍 Hangi il? Örnek: <code>/namaz ankara</code>")
+        return
+    p = await prayer_times(plate)
+    await reply(update, f"🕌 <b>{esc(il_name(plate))} namaz vakitleri</b> · {tr_date(now())}\n\n"
+                        + ("\n".join(f"• {k}: <b>{v}</b>" for k, v in p.items()) if p else "<i>Veri şu an alınamadı.</i>")
+                        + "\n\n<i>Diyanet hesaplama yöntemi</i>")
+
+async def digest_header(sub: dict) -> str:
+    s = sub['settings']
+    plate = s.get('il')
+    if not plate or plate not in IL_BY_PLATE or not (s.get('wx', True) or s.get('namaz')):
+        return ""
+    info = await il_info(plate, s.get('wx', True), bool(s.get('namaz')))
+    return f"{info}\n" if info else ""
+
+# ── Resmi Gazete ──
+RG_URL = "https://www.resmigazete.gov.tr/"
+
+def parse_resmi_gazete(page: str) -> list[tuple[str, list[tuple[str, str]]]]:
+    """[(bölüm, [(başlık, link)…])…]; İlan bölümü sadece sayı olarak."""
+    i = page.find('html-content')
+    if i < 0:
+        return []
+    seg = page[i:]
+    sections, cur = [], None
+    for m in re.finditer(r'class="(card-title html-title|html-subtitle)"[^>]*>(.*?)</div>|class="fihrist-item[^"]*"><a href="([^"]+)"[^>]*>(.*?)</a>', seg, re.S):
+        if m.group(1):
+            title = strip_html(m.group(2)).strip()
+            if 'html-title' in m.group(1) and 'İLAN' in title.upper():
+                sections.append(("İlan Bölümü", []))
+                cur = sections[-1]
+                continue
+            if 'html-subtitle' in m.group(1) or cur is None:
+                cur = (title, [])
+                sections.append(cur)
+        elif cur is not None:
+            cur[1].append((strip_html(m.group(4)).lstrip("–- ").strip(), m.group(3)))
+    return [s for s in sections if s[1]]
+
+def rg_text(sections, day: str) -> str:
+    lines = [f"📜 <b>Resmi Gazete</b> · {day}", ""]
+    for name, items in sections:
+        if name == "İlan Bölümü":
+            lines.append(f"📢 <b>İlanlar</b>: {len(items)} ilan")
+            continue
+        block = "\n".join(f"• <a href=\"{esc(u)}\">{esc(shorten(t, 140))}</a>" for t, u in items[:8])
+        more = f"\n<i>+{len(items) - 8} daha</i>" if len(items) > 8 else ""
+        lines.append(f"<b>{esc(name)}</b> ({len(items)})\n<blockquote expandable>{block}{more}</blockquote>")
+    text = "\n".join(lines)
+    while len(text) > 4000 and len(lines) > 3:
+        lines.pop(-1)
+        text = "\n".join(lines) + "\n<i>…devamı resmigazete.gov.tr'de</i>"
+    return text
+
+async def resmi_gazete_today() -> str | None:
+    day = tr_date(now())
+    cached = meta_get(f"rg:{day}")
+    if cached:
+        return cached
+    try:
+        r = await http().get(RG_URL, timeout=25, follow_redirects=True, headers=BROWSER_HEADERS)
+        r.raise_for_status()
+        sections = parse_resmi_gazete(r.text)
+    except httpx.HTTPError as e:
+        logger.warning("Resmi Gazete alınamadı: %s", e)
+        return None
+    if not sections:
+        return None
+    text = rg_text(sections, day)
+    meta_set(f"rg:{day}", text)
+    return text
+
+async def cmd_resmigazete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = await resmi_gazete_today()
+    await reply(update, text or "📜 Bugünkü Resmi Gazete şu an alınamadı.",
+                InlineKeyboardMarkup([[ibtn("🌐 resmigazete.gov.tr", url=RG_URL)]]))
+
+async def rg_job(context: ContextTypes.DEFAULT_TYPE):
+    subs = [s for s in all_subs() if s['settings'].get('rg') and not s['paused']]
+    if not subs:
+        return
+    text = await resmi_gazete_today()
+    if not text:
+        return
+    for sub in subs:
+        try:
+            await send_text(context.bot, sub, text)
+        except ChatGone as e:
+            await deactivate(context.bot, sub, str(e))
+        except (TimedOut, NetworkError, RetryAfter, BadRequest) as e:
+            logger.warning("Resmi Gazete gönderilemedi %s: %s", sub['chat_id'], e)
+
+# ── Şehir haberleri ──
+def story_provinces(st) -> set:
+    return provinces_in(cap_tokens(st['title']))
+
+async def live_callback(q, kind: str, rest: str):
+    """eq|l (son depremler), mk|r (piyasa yenile), al|l / al|d|id (alarmlar)."""
+    if kind == 'eq':
+        await q.answer()
+        await q.message.reply_text(render_quakes(), parse_mode=ParseMode.HTML,
+                                   link_preview_options=LinkPreviewOptions(is_disabled=True))
+    elif kind == 'mk':
+        await q.answer("Güncellendi")
+        await safe_edit(q, market_text(await market_data(max_age=20)),
+                        InlineKeyboardMarkup([[ibtn("🔄 Yenile", "mk|r"), ibtn("⏰ Alarmlarım", "al|l")]]))
+    elif kind == 'al':
+        cid = q.message.chat.id
+        if rest.startswith('d|'):
+            if q.message.chat.type != 'private' and not await is_chat_admin(q.get_bot(), cid, q.from_user.id):
+                await q.answer("Sadece yöneticiler.", show_alert=True)
+                return
+            with db() as c:
+                c.execute("DELETE FROM price_alerts WHERE id = ? AND chat_id = ?", (int(rest[2:]), cid))
+            await q.answer("Silindi")
+        else:
+            await q.answer()
+        text, markup = render_alerts(cid)
+        await safe_edit(q, text, markup)
+
 # ───────────────────────────── Arayüz yardımcıları ─────────────────────────────
 
 MENU_ROWS = [["📰 Son Haberler", "🔥 Öne Çıkanlar"],
              ["🔴 Son Dakika", "📈 Gündem"],
              ["🗂 Kategoriler", "🔎 Ara"],
+             ["🌍 Depremler", "💰 Piyasa", "🌤 Hava"],
              ["⚙️ Ayarlarım", "📡 Kanallarım"]]
 MENU_TEXTS = {t for row in MENU_ROWS for t in row} | {"ℹ️ Yardım"}
 
@@ -1635,12 +2205,55 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
             rows.append([toggle_btn("Haber altı butonlar", s['buttons'], P('bt'))])
         rows.append(back)
         return text, InlineKeyboardMarkup(rows)
+    if page == 'eq':
+        mn = float(s.get('eq_min') or 0)
+        il = s.get('il')
+        text = ("🌍 <b>Deprem bildirimi</b> (AFAD + Kandilli)\n\n"
+                f"• En küçük büyüklük: <b>{'Kapalı' if not mn else f'{mn:.1f} ve üstü'}</b>\n"
+                f"• Bölge: <b>{'İlime yakın (' + str(EQ_NEAR_KM) + ' km)' if s.get('eq_near') else 'Tüm Türkiye'}</b>"
+                + (f" · İl: {esc(il_name(il))}" if il else "") + "\n\n"
+                f"<i>{EQ_ALWAYS:.0f} ve üstü depremler bölge ve sessiz saat fark etmeksizin her zaman gönderilir. "
+                "Aynı deprem AFAD ve Kandilli'den gelse de tek bildirim gider.</i>")
+        rows = [[ibtn(f"📏 {'Kapalı' if not mn else f'{mn:.1f}+'} (değiştir)", P('eq'), GREEN if mn else RED)],
+                [toggle_btn(f"Sadece ilime yakın ({EQ_NEAR_KM} km)", s.get('eq_near'), P('en'))]]
+        if s.get('eq_near') and not il:
+            rows.append([ibtn("📍 İlini seç", P('pg', 'il.0'), BLUE)])
+        rows.append([ibtn("🌍 Son depremler", "eq|l"), *back])
+        return text, InlineKeyboardMarkup(rows)
+    if page == 'il':
+        pg = int(arg or 0)
+        per = 21
+        chunk = ILLER[pg * per:(pg + 1) * per]
+        text = ("📍 <b>İlini seç</b>\nHava durumu, namaz vakitleri, yerel haberler ve yakındaki depremler için.\n\n"
+                f"Seçili: <b>{esc(il_name(s.get('il'))) or 'yok'}</b>")
+        btns = [toggle_btn(n, s.get('il') == pl, P('il', str(pl))) for pl, n, *_ in chunk]
+        rows = [btns[i:i + 3] for i in range(0, len(btns), 3)]
+        nav = []
+        if pg:
+            nav.append(ibtn("◀️", P('pg', f"il.{pg - 1}")))
+        if (pg + 1) * per < len(ILLER):
+            nav.append(ibtn("▶️", P('pg', f"il.{pg + 1}")))
+        rows.append(nav + [ibtn("⬅️ Geri", P('pg', 'li'))])
+        return text, InlineKeyboardMarkup(rows)
+    if page == 'li':
+        il = s.get('il')
+        text = (f"📍 <b>İlim: {esc(il_name(il)) or 'seçilmedi'}</b>\n\n"
+                "• 🌤 Hava durumu ve 🕌 namaz vakitleri bültenin başında gösterilir\n"
+                "• 🏙 Yerel haberler: ilinin adı geçen haberler takip kelimesi gibi hemen gönderilir\n"
+                "• 📜 Resmi Gazete: her sabah 07:30'da günün özeti")
+        rows = [[ibtn(f"📍 İl: {il_name(il) or 'seç'}", P('pg', f"il.{(il - 1) // 21 if il else 0}"), BLUE)],
+                [toggle_btn("Hava durumu (bültende)", s.get('wx', True), P('wx')),
+                 toggle_btn("Namaz vakitleri", s.get('namaz'), P('nm'))],
+                [toggle_btn("Yerel haberler", s.get('city'), P('ct')), toggle_btn("Resmi Gazete", s.get('rg'), P('rg'))],
+                back]
+        return text, InlineKeyboardMarkup(rows)
     if page == 'rm':
         return (f"🗑 <b>{esc(_sub_title(sub))}</b> için haber gönderimi tamamen kaldırılsın mı?",
                 InlineKeyboardMarkup([[ibtn("Evet, kaldır", P('rm!'), RED), *back]]))
     # ana sayfa
     cats = ", ".join(cat_label(c, False) for c in CAT_ORDER if c in s['cats']) or "—"
     src_state = "Tümü açık" if not s['src_off'] else f"{len(s['src_off'])} kapalı"
+    eq_label = f"{float(s['eq_min']):.1f}+" if s.get('eq_min') else "Kapalı"
     lines = [f"⚙️ <b>{esc(_sub_title(sub))}</b>", "",
              f"🗂 Kategoriler: <b>{esc(cats)}</b>",
              f"📰 Kaynaklar: <b>{src_state}</b>",
@@ -1648,7 +2261,9 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
              f"⚡ Anlık haber: <b>{'Açık' if s['instant'] else 'Kapalı'}</b>" + (f" (saatte en fazla {s['per_hour']})" if s['instant'] else ""),
              f"🕘 Bülten: <b>{', '.join(sorted(s['digest'])) if s['digest'] else 'Kapalı'}</b>",
              f"🔴 Son dakika: <b>{_breaking_label(s['breaking'])}</b>",
-             f"🌙 Sessiz saatler: <b>{_quiet_label(s['quiet'])}</b>"]
+             f"🌙 Sessiz saatler: <b>{_quiet_label(s['quiet'])}</b>",
+             f"🌍 Deprem: <b>{eq_label}</b>"
+             + (f" · 📍 {esc(il_name(s.get('il')))}" if s.get('il') else "")]
     if sub['kind'] != 'private':
         lines.append(f"✍️ İmza: <b>{esc(s['sign']) if s['sign'] else 'yok'}</b>")
         if sub.get('thread_id'):
@@ -1659,7 +2274,10 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
             [ibtn("🔔 Takip kelimeleri", P('pg', 'k'), BLUE), ibtn("🕘 Bülten saatleri", P('pg', 'd'), BLUE)],
             [toggle_btn("Anlık haber", s['instant'], P('i')),
              ibtn(f"🔴 Son dakika: {_breaking_label(s['breaking'])}", P('b'), GREEN if s['breaking'] != 'off' else RED)],
+            [ibtn("🌍 Deprem", P('pg', 'eq'), BLUE), ibtn("📍 İlim · hava · RG", P('pg', 'li'), BLUE)],
             [ibtn("🎨 Görünüm ve sınırlar", P('pg', 'o'), BLUE)]]
+    if sub['kind'] == 'private':
+        rows[-1].append(ibtn("⏰ Fiyat alarmları", "al|l"))
     if sub['kind'] != 'private':
         rows.append([ibtn("✍️ İmza", P('sg')), ibtn("🧪 Deneme gönder", P('t'))])
     rows.append([ibtn("▶️ Sürdür" if sub['paused'] else "⏸ Duraklat", P('ps'), GREEN if sub['paused'] else None)]
@@ -1728,6 +2346,27 @@ def apply_panel_op(sub: dict, op: str, arg: str) -> tuple[str | None, str]:
     elif op == 'bt':
         s['buttons'] = not s['buttons']
         page = 'o'
+    elif op == 'eq':
+        cur = float(s.get('eq_min') or 0)
+        nxt = [x for x in EQ_STEPS if x > cur]
+        s['eq_min'] = nxt[0] if nxt else 0
+        page = 'eq'
+    elif op == 'en':
+        s['eq_near'] = not s.get('eq_near')
+        page = 'eq'
+    elif op == 'il':
+        if arg.isdigit() and int(arg) in IL_BY_PLATE:
+            s['il'] = int(arg)
+            note = f"📍 {il_name(s['il'])} seçildi"
+        page = 'li'
+    elif op in ('wx', 'nm', 'ct', 'rg'):
+        key = {'wx': 'wx', 'nm': 'namaz', 'ct': 'city', 'rg': 'rg'}[op]
+        s[key] = not s.get(key, key == 'wx')
+        if key in ('namaz', 'city', 'wx') and s[key] and not s.get('il'):
+            note = "Önce ilini seç"
+            save_settings(sub['chat_id'], s)
+            return 'il.0', note
+        page = 'li'
     elif op == 'w':
         preset = {'a': dict(instant=True, digest=[], breaking='all'),
                   'b': dict(instant=False, digest=['09:00', '19:00'], breaking='all'),
@@ -1798,6 +2437,12 @@ HELP_PRIVATE = """🗞 <b>ULUS Haber</b> — Türkiye'nin haber sitelerinden can
 /ara <i>kelime</i> — Haber ara
 /bulten — Şimdi bir bülten gönder
 
+<b>Canlı bilgiler</b>
+/deprem — Son depremler (AFAD + Kandilli) · bildirim: /ayarlar → 🌍 Deprem
+/piyasa — Dolar, euro, altın, borsa, kripto · /alarm <i>dolar 45</i> — fiyat alarmı
+/hava <i>il</i> · /namaz <i>il</i> — Hava durumu ve namaz vakitleri
+/resmigazete — Bugünkü Resmi Gazete
+
 <b>Ayarlar</b>
 /ayarlar — Kategori, kaynak, takip kelimesi, bülten saati, anlık/son dakika bildirimleri
 /kanallarim — Kanalına veya grubuna otomatik haber gönder
@@ -1811,6 +2456,7 @@ HELP_GROUP = """🗞 <b>ULUS Haber</b>
 /son — Son haberler · /onecikan — Öne çıkanlar
 /sondakika — Son dakika · /gundem — Gündem konuları
 /ara <i>kelime</i> — Haber ara
+/deprem · /piyasa · /hava <i>il</i> · /namaz <i>il</i> · /resmigazete
 /haberkur — (yönetici) Bu gruba otomatik haber ayarları"""
 
 HELP_BLOCK = """<b>Yönetici</b>
@@ -1947,7 +2593,8 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop('await', None)
     handlers = {"📰 Son Haberler": cmd_latest, "🔥 Öne Çıkanlar": cmd_top, "🔴 Son Dakika": cmd_breaking,
                 "📈 Gündem": cmd_trends, "🗂 Kategoriler": cmd_categories, "🔎 Ara": cmd_search,
-                "⚙️ Ayarlarım": cmd_settings, "📡 Kanallarım": cmd_channels, "ℹ️ Yardım": cmd_help}
+                "⚙️ Ayarlarım": cmd_settings, "📡 Kanallarım": cmd_channels, "ℹ️ Yardım": cmd_help,
+                "🌍 Depremler": cmd_quakes, "💰 Piyasa": cmd_market, "🌤 Hava": cmd_weather}
     context.args = []
     await handlers[t](update, context)
 
@@ -2029,6 +2676,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await panel_callback(update, context, rest)
         elif kind == 'priv':
             await privacy_callback(q, rest)
+        elif kind in ('eq', 'mk', 'al'):
+            await live_callback(q, kind, rest)
         else:
             await q.answer()
     except (ValueError, IndexError):
@@ -2067,6 +2716,7 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, res
         with db() as c:
             c.execute("DELETE FROM subs WHERE chat_id = ?", (sub['chat_id'],))
             c.execute("DELETE FROM sent WHERE chat_id = ?", (sub['chat_id'],))
+            c.execute("DELETE FROM price_alerts WHERE chat_id = ?", (sub['chat_id'],))
         await q.answer("Kaldırıldı")
         await safe_edit(q, f"🗑 {esc(_sub_title(sub))} kaldırıldı. Botu sohbetten de çıkarabilirsin.")
         return
@@ -2456,7 +3106,7 @@ def delete_user_data(uid: int) -> int:
     with db() as c:
         n = c.execute("DELETE FROM subs WHERE chat_id = ?", (uid,)).rowcount
         n += c.execute("DELETE FROM sent WHERE chat_id = ?", (uid,)).rowcount
-        for tbl in ('price_alerts',):
+        for tbl in ('price_alerts', 'quake_sent'):
             try:
                 n += c.execute(f"DELETE FROM {tbl} WHERE chat_id = ?", (uid,)).rowcount
             except sqlite3.OperationalError:
@@ -2552,6 +3202,10 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE):
         c.execute("DELETE FROM items WHERE story_id IN (SELECT id FROM stories WHERE updated < ?)", (limit,))
         c.execute("DELETE FROM stories WHERE updated < ?", (limit,))
         c.execute("DELETE FROM sent WHERE at < ?", (now() - 4 * 86400,))
+        old = now() - 7 * 86400
+        c.execute("DELETE FROM quake_sent WHERE qid IN (SELECT id FROM quakes WHERE t < ?)", (old,))
+        c.execute("DELETE FROM quake_src WHERE qid IN (SELECT id FROM quakes WHERE t < ?)", (old,))
+        c.execute("DELETE FROM quakes WHERE t < ?", (old,))
     logger.info("Eski haberler temizlendi")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -2571,12 +3225,17 @@ async def post_init(app: Application):
         await app.bot.set_my_commands([BotCommand("son", "Son haberler"), BotCommand("onecikan", "Öne çıkan haberler"),
                                        BotCommand("sondakika", "Son dakika"), BotCommand("gundem", "Gündemdeki konular"),
                                        BotCommand("ara", "Haber ara"), BotCommand("bulten", "Şimdi bülten gönder"),
+                                       BotCommand("deprem", "Son depremler"), BotCommand("piyasa", "Döviz, altın, borsa"),
+                                       BotCommand("alarm", "Fiyat alarmı"), BotCommand("hava", "Hava ve namaz vakitleri"),
+                                       BotCommand("resmigazete", "Bugünkü Resmi Gazete"),
                                        BotCommand("ayarlar", "Bildirim ayarları"), BotCommand("kanallarim", "Kanal/grup ekle"),
                                        BotCommand("gizlilik", "Gizlilik ve verilerim"),
                                        BotCommand("yardim", "Yardım")], scope=BotCommandScopeAllPrivateChats())
         await app.bot.set_my_commands([BotCommand("son", "Son haberler"), BotCommand("onecikan", "Öne çıkanlar"),
                                        BotCommand("sondakika", "Son dakika"), BotCommand("gundem", "Gündem konuları"),
-                                       BotCommand("ara", "Haber ara"), BotCommand("haberkur", "Otomatik haber ayarları (yönetici)")],
+                                       BotCommand("ara", "Haber ara"), BotCommand("deprem", "Son depremler"),
+                                       BotCommand("piyasa", "Döviz, altın, borsa"), BotCommand("hava", "Hava durumu"),
+                                       BotCommand("haberkur", "Otomatik haber ayarları (yönetici)")],
                                       scope=BotCommandScopeAllGroupChats())
         if FOUNDER_ID:
             await app.bot.set_my_commands([BotCommand("son", "Son haberler"), BotCommand("ayarlar", "Bildirim ayarları"),
@@ -2624,6 +3283,12 @@ def build_app() -> Application:
     app.add_handler(CommandHandler("yedek", cmd_backup))
     app.add_handler(CommandHandler("premiumemoji", cmd_premium))
     app.add_handler(CommandHandler(["gizlilik", "privacy"], cmd_privacy))
+    app.add_handler(CommandHandler(["deprem", "depremler"], cmd_quakes))
+    app.add_handler(CommandHandler(["piyasa", "doviz", "borsa"], cmd_market))
+    app.add_handler(CommandHandler(["alarm", "alarmlar"], cmd_alert))
+    app.add_handler(CommandHandler("hava", cmd_weather))
+    app.add_handler(CommandHandler("namaz", cmd_prayer))
+    app.add_handler(CommandHandler(["resmigazete", "rg"], cmd_resmigazete))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, premium_input), group=-2)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & filters.Text(list(MENU_TEXTS)), menu_router))
     app.add_handler(CallbackQueryHandler(callback_router))
@@ -2636,6 +3301,9 @@ def build_app() -> Application:
     jq.run_repeating(trends_job, interval=600, first=90, name="trends")
     jq.run_daily(cleanup_job, time=datetime.strptime("04:30", "%H:%M").time().replace(tzinfo=TR), name="cleanup")
     jq.run_daily(backup_job, time=datetime.strptime("04:00", "%H:%M").time().replace(tzinfo=TR), name="backup")
+    jq.run_repeating(quake_job, interval=60, first=20, name="quakes")
+    jq.run_repeating(alert_job, interval=120, first=40, name="alerts")
+    jq.run_daily(rg_job, time=datetime.strptime("07:30", "%H:%M").time().replace(tzinfo=TR), name="resmigazete")
     jq.run_daily(feed_watch_job, time=datetime.strptime("09:05", "%H:%M").time().replace(tzinfo=TR), name="feedwatch")
     return app
 
