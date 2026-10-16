@@ -28,8 +28,8 @@ from telegram import (Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyK
                       CopyTextButton, InlineQueryResultArticle, InputTextMessageContent, BotCommand,
                       BotCommandScopeAllPrivateChats, BotCommandScopeAllGroupChats, BotCommandScopeChat)
 from telegram.constants import ParseMode, KeyboardButtonStyle, ChatMemberStatus
-from telegram.error import Forbidden, BadRequest, TimedOut, NetworkError, RetryAfter
-from telegram.ext import (ExtBot, Application, ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
+from telegram.error import TelegramError, Forbidden, BadRequest, TimedOut, NetworkError, RetryAfter
+from telegram.ext import (ExtBot, MessageReactionHandler, Application, ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
                           InlineQueryHandler, ChatMemberHandler, ContextTypes, AIORateLimiter, ApplicationHandlerStop, filters)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -443,6 +443,11 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_quakes_t ON quakes(t);
         CREATE TABLE IF NOT EXISTS quake_src (ext TEXT PRIMARY KEY, qid INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS quake_sent (chat_id INTEGER NOT NULL, qid INTEGER NOT NULL, PRIMARY KEY (chat_id, qid));
+        CREATE TABLE IF NOT EXISTS posts (
+            chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL, story_id INTEGER, title TEXT, cats TEXT,
+            at REAL NOT NULL, reactions INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (chat_id, message_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_posts_at ON posts(chat_id, at);
         CREATE TABLE IF NOT EXISTS price_alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL, sym TEXT NOT NULL, op TEXT NOT NULL,
             value REAL NOT NULL, created REAL
@@ -950,7 +955,8 @@ def default_settings(kind: str) -> dict:
     base = {'cats': ['gundem', 'ekonomi', 'dunya', 'spor'], 'src_off': [], 'kw': [], 'instant': False,
             'digest': ['09:00', '19:00'], 'breaking': 'all', 'quiet': None, 'per_hour': 6, 'fmt': 'card',
             'min_src': 1, 'buttons': True, 'sign': '', 'onboarded': False,
-            'eq_min': 5.0, 'eq_near': False, 'il': 0, 'wx': True, 'namaz': False, 'city': False, 'rg': False}
+            'eq_min': 5.0, 'eq_near': False, 'il': 0, 'wx': True, 'namaz': False, 'city': False, 'rg': False,
+            'card': False, 'tags': False, 'cbtn': None, 'logo': None}
     if kind == 'channel':
         base.update(cats=['gundem', 'dunya', 'ekonomi'], instant=True, digest=[], breaking='cats', onboarded=True, eq_min=0)
     elif kind == 'group':
@@ -1064,10 +1070,11 @@ def reason_header(reason: str | None) -> str:
         return f"📍 <b>{esc(reason[3:])}</b>\n"
     return ""
 
-def story_text(st, reason: str | None = None, sign: str = "", compact: bool = False, limit: int = 4096) -> str:
+def story_text(st, reason: str | None = None, sign: str = "", compact: bool = False, limit: int = 4096,
+               tags: bool = False) -> str:
     em = cat_emoji(story_cats(st))
     head = reason_header(reason)
-    tail = f"\n{esc(sign)}" if sign else ""
+    tail = (f"\n{story_tags(st, reason)}" if tags else "") + (f"\n{esc(sign)}" if sign else "")
     if compact:
         n = st['source_count']
         return (f"{head}{em} <a href=\"{esc(st['link'])}\">{esc(st['title'])}</a>\n"
@@ -1085,8 +1092,10 @@ def story_text(st, reason: str | None = None, sign: str = "", compact: bool = Fa
     return base + (f"\n\n{body}" if body else "") + meta
 
 def story_markup(st, kind: str, s: dict, reason: str | None = None, back: str | None = None) -> InlineKeyboardMarkup | None:
+    custom = s.get('cbtn') if kind != 'private' else None
+    custom_row = [ibtn(custom[0], url=custom[1], style=GREEN)] if custom else None
     if kind != 'private' and not s.get('buttons', True):
-        return None
+        return InlineKeyboardMarkup([custom_row]) if custom_row else None
     row = [ibtn("📖 Haberi oku", url=st['link'], style=BLUE)]
     if st['source_count'] > 1:
         row.append(ibtn(f"📚 {st['source_count']} kaynak", f"k|{st['id']}"))
@@ -1098,6 +1107,8 @@ def story_markup(st, kind: str, s: dict, reason: str | None = None, back: str | 
         if back:
             extra.append(ibtn("⬅️ Listeye dön", back))
         rows.append(extra)
+    if custom_row:
+        rows.append(custom_row)
     return InlineKeyboardMarkup(rows)
 
 def preview_opts(st, compact: bool) -> LinkPreviewOptions:
@@ -1115,6 +1126,218 @@ def bulk_text(stories: list, title: str = "Yeni haberler", limit: int = 4000) ->
             break
         out += line
     return out
+
+# ───────────────────────────── Haber kartı görseli (kanal/grup) ─────────────────────────────
+# Başlık, kategori, kaynak sayısı ve kanal logosu/adıyla 1280×720 görsel. Haberin kendi fotoğrafı varsa arka plan olur.
+
+CARD_W, CARD_H = 1280, 720
+CAT_COLORS = {'gundem': (220, 38, 38), 'ekonomi': (22, 163, 74), 'dunya': (37, 99, 235), 'spor': (234, 88, 12),
+              'teknoloji': (124, 58, 237), 'saglik': (13, 148, 136), 'bilim': (8, 145, 178), 'magazin': (219, 39, 119),
+              'kultur': (161, 98, 7)}
+FONT_DIRS = [_env("FONT_DIR", ""), "/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/dejavu",
+             "/usr/share/fonts/TTF", os.path.join(BASE_DIR, "fonts")]
+_font_cache: dict = {}
+_card_cache: dict = {}
+_logo_cache: dict = {}
+
+def card_font(size: int, bold: bool = False):
+    from PIL import ImageFont
+    key = (size, bold)
+    if key not in _font_cache:
+        name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+        for d in FONT_DIRS:
+            path = os.path.join(d, name) if d else ""
+            if path and os.path.exists(path):
+                _font_cache[key] = ImageFont.truetype(path, size)
+                break
+        else:
+            _font_cache[key] = ImageFont.load_default(size)
+    return _font_cache[key]
+
+def _wrap(draw, text: str, font, width: int, max_lines: int) -> list[str]:
+    words, lines, cur = text.split(), [], ""
+    for w in words:
+        trial = f"{cur} {w}".strip()
+        if draw.textlength(trial, font=font) <= width:
+            cur = trial
+            continue
+        if cur:
+            lines.append(cur)
+        cur = w
+        if len(lines) == max_lines:
+            break
+    if cur and len(lines) < max_lines:
+        lines.append(cur)
+    used = " ".join(lines)
+    if len(used) < len(" ".join(words)):   # sığmadı: son satırı … ile bitir
+        last = lines[-1]
+        while last and draw.textlength(last + "…", font=font) > width:
+            last = last[:-1].rstrip()
+        lines[-1] = last + "…"
+    return lines
+
+def render_card(title: str, cat: str, source: str, n_src: int, ts: float, brand: str,
+                bg: bytes | None = None, logo: bytes | None = None, breaking: bool = False) -> bytes:
+    from PIL import Image, ImageDraw, ImageOps
+    import io
+    color = (220, 38, 38) if breaking else CAT_COLORS.get(cat, (30, 41, 59))
+    img = None
+    if bg:
+        try:
+            img = ImageOps.fit(Image.open(io.BytesIO(bg)).convert("RGB"), (CARD_W, CARD_H), Image.LANCZOS)
+        except Exception:   # bozuk/desteklenmeyen görsel → düz arka plan
+            img = None
+    if img is None:
+        img = Image.new("RGB", (CARD_W, CARD_H), (15, 23, 42))
+        glow = Image.new("RGB", (CARD_W, CARD_H), color)
+        mask = Image.linear_gradient("L").rotate(-90).resize((CARD_W, CARD_H)).point(lambda v: int(v * 0.35))
+        img.paste(glow, (0, 0), mask)
+    shade = Image.linear_gradient("L").resize((CARD_W, CARD_H)).point(lambda v: int(min(255, v * 1.15)))
+    dark = Image.new("RGB", (CARD_W, CARD_H), (8, 10, 18))
+    img.paste(dark, (0, 0), shade)          # aşağı doğru koyulaşan perde: yazı her fotoğrafta okunur
+    d = ImageDraw.Draw(img)
+    pad = 64
+    tag = "SON DAKİKA" if breaking else tr_upper(cat_label(cat, False) if cat else "Haber")
+    f_tag = card_font(30, True)
+    tw = d.textlength(tag, font=f_tag)
+    d.rounded_rectangle((pad, pad, pad + tw + 44, pad + 56), radius=14, fill=color)
+    d.text((pad + 22, pad + 11), tag, font=f_tag, fill="white")
+    if logo:
+        try:
+            lg = ImageOps.fit(Image.open(io.BytesIO(logo)).convert("RGBA"), (96, 96), Image.LANCZOS)
+            m = Image.new("L", (96, 96), 0)
+            ImageDraw.Draw(m).ellipse((0, 0, 95, 95), fill=255)
+            img.paste(lg, (CARD_W - pad - 96, pad - 20), m)
+        except Exception:
+            logo = None
+    if not logo and brand:
+        f_b = card_font(30, True)
+        d.text((CARD_W - pad - d.textlength(brand, font=f_b), pad + 11), brand, font=f_b, fill=(255, 255, 255),
+               stroke_width=2, stroke_fill=(15, 23, 42))
+    f_title = card_font(58, True)
+    lines = _wrap(d, title, f_title, CARD_W - 2 * pad, 4)
+    if len(lines) == 4:
+        f_title = card_font(50, True)
+        lines = _wrap(d, title, f_title, CARD_W - 2 * pad, 4)
+    lh = int(f_title.size * 1.22)
+    y = CARD_H - pad - 52 - lh * len(lines)
+    d.rectangle((pad, y - 26, pad + 110, y - 18), fill=color)
+    for i, line in enumerate(lines):
+        d.text((pad, y + i * lh), line, font=f_title, fill="white")
+    f_meta = card_font(28)
+    meta = f"{source}" + (f"  ·  +{n_src - 1} kaynak" if n_src > 1 else "") + f"  ·  {tr_time(ts)}"
+    d.text((pad, CARD_H - pad - 28), meta, font=f_meta, fill=(203, 213, 225))
+    if logo and brand:
+        d.text((CARD_W - pad - d.textlength(brand, font=f_meta), CARD_H - pad - 28), brand, font=f_meta, fill=(203, 213, 225))
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=88, optimize=True)
+    return out.getvalue()
+
+def tr_upper(s: str) -> str:
+    return (s or "").replace("i", "İ").replace("ı", "I").upper()
+
+def card_brand(sub: dict) -> str:
+    s = sub['settings']
+    b = s.get('sign') or (sub.get('title') if sub['kind'] != 'private' else '') or "ULUS Haber"
+    return shorten(strip_html(b), 34)
+
+async def _download(url: str, limit: int = 6 * 1024 * 1024) -> bytes | None:
+    try:
+        r = await http().get(url, timeout=12, follow_redirects=True, headers=BROWSER_HEADERS)
+        r.raise_for_status()
+        return r.content if len(r.content) <= limit else None
+    except httpx.HTTPError:
+        return None
+
+async def _logo_bytes(bot, file_id: str | None) -> bytes | None:
+    if not file_id:
+        return None
+    if file_id not in _logo_cache:
+        try:
+            _logo_cache[file_id] = bytes(await (await bot.get_file(file_id)).download_as_bytearray())
+        except (TelegramError, OSError) as e:
+            logger.debug("Logo indirilemedi: %s", e)
+            return None
+    return _logo_cache[file_id]
+
+async def story_card(bot, sub: dict, st, reason: str | None) -> bytes | None:
+    """Haber kartı (önbellekli: aynı haber birden çok kanala gidince bir kez çizilir)."""
+    s = sub['settings']
+    brand, breaking = card_brand(sub), reason == 'breaking'
+    key = (st['id'], brand, s.get('logo'), breaking)
+    if key in _card_cache:
+        return _card_cache[key]
+    cats = story_cats(st)
+    bg = await _download(st['image']) if st['image'] else None
+    logo = await _logo_bytes(bot, s.get('logo'))
+    try:
+        data = await asyncio.to_thread(render_card, st['title'], cats[0] if cats else '', st['source'],
+                                       st['source_count'], st['published'] or st['first_seen'], brand, bg, logo, breaking)
+    except Exception as e:   # Pillow/font sorunu kartı engellesin, haberi değil
+        logger.warning("Haber kartı çizilemedi: %s", e)
+        return None
+    if len(_card_cache) > 64:
+        _card_cache.clear()
+    _card_cache[key] = data
+    return data
+
+def story_tags(st, reason: str | None) -> str:
+    tags = ["#" + re.sub(r"[^\w]", "", tr_lower(cat_label(c, False))) for c in story_cats(st)[:2]]
+    if reason == 'breaking':
+        tags.insert(0, "#sondakika")
+    return " ".join(tags)
+
+# ───────────────────────────── Kanal istatistiği (tepkiler) ─────────────────────────────
+
+def record_post(sub: dict, msg, st):
+    if sub['kind'] == 'private' or not getattr(msg, 'message_id', None):
+        return
+    with db() as c:
+        c.execute("INSERT OR REPLACE INTO posts (chat_id, message_id, story_id, title, cats, at, reactions) "
+                  "VALUES (?, ?, ?, ?, ?, ?, 0)", (sub['chat_id'], msg.message_id, st['id'], st['title'][:200],
+                                                    ",".join(story_cats(st)), now()))
+
+async def reaction_count_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kanal/grup gönderisine gelen tepki sayısı (Telegram anonim toplamı bildirir)."""
+    rc = update.message_reaction_count
+    if not rc:
+        return
+    total = sum(r.total_count for r in rc.reactions or ())
+    with db() as c:
+        c.execute("UPDATE posts SET reactions = ? WHERE chat_id = ? AND message_id = ?", (total, rc.chat.id, rc.message_id))
+
+def channel_stats(cid: int, days: int = 7) -> str:
+    since = now() - days * 86400
+    with db() as c:
+        rows = c.execute("SELECT * FROM posts WHERE chat_id = ? AND at > ?", (cid, since)).fetchall()
+        uname = c.execute("SELECT title FROM subs WHERE chat_id = ?", (cid,)).fetchone()
+    if not rows:
+        return f"📊 <b>İstatistik</b> (son {days} gün)\n\n<i>Henüz gönderi yok.</i>"
+    total = sum(r['reactions'] for r in rows)
+    by_cat: dict = {}
+    for r in rows:
+        for c_ in (r['cats'] or 'diger').split(",")[:1]:
+            n, t = by_cat.get(c_, (0, 0))
+            by_cat[c_] = (n + 1, t + r['reactions'])
+    by_hour: dict = {}
+    for r in rows:
+        h = datetime.fromtimestamp(r['at'], TR).hour
+        n, t = by_hour.get(h, (0, 0))
+        by_hour[h] = (n + 1, t + r['reactions'])
+    lines = [f"📊 <b>İstatistik</b> · son {days} gün", "",
+             f"📨 Gönderi: <b>{len(rows)}</b> · ❤️ Tepki: <b>{total}</b> · ortalama <b>{total / len(rows):.1f}</b>", "",
+             "<b>Kategoriler</b> (gönderi · tepki ort.)"]
+    for c_, (n, t) in sorted(by_cat.items(), key=lambda x: -x[1][1] / x[1][0]):
+        lines.append(f"• {esc(cat_label(c_) if c_ in CATEGORIES else 'Diğer')}: {n} · {t / n:.1f}")
+    best = [h for h, (n, t) in sorted(by_hour.items(), key=lambda x: -x[1][1] / x[1][0]) if n >= 2][:3]
+    if best and total:
+        lines += ["", "⏰ En çok tepki alan saatler: " + ", ".join(f"{h:02d}:00" for h in best)]
+    top = sorted(rows, key=lambda r: -r['reactions'])[:5]
+    if top and top[0]['reactions']:
+        lines += ["", "<b>En çok tepki alanlar</b>"]
+        lines += [f"{i}. {esc(shorten(r['title'], 80))} — ❤️ {r['reactions']}" for i, r in enumerate(top, 1) if r['reactions']]
+    lines.append("\n<i>Tepkiler için kanalda tepkiler açık olmalı; Telegram botlara görüntülenme sayısı vermez.</i>")
+    return "\n".join(lines)
 
 # ───────────────────────────── Gönderim ─────────────────────────────
 
@@ -1139,19 +1362,34 @@ async def _safe_send(coro_factory):
         raise
 
 async def send_story(bot, sub: dict, st, reason: str | None = None):
+    msg = await _send_story(bot, sub, st, reason)
+    record_post(sub, msg, st)
+    return msg
+
+async def _send_story(bot, sub: dict, st, reason: str | None = None):
     s = sub['settings']
     compact = s.get('fmt') == 'compact'
     sign = s.get('sign', '') if sub['kind'] != 'private' else ''
+    tags = bool(s.get('tags')) and sub['kind'] != 'private'
     markup = story_markup(st, sub['kind'], s, reason)
     chat_id, tk = sub['chat_id'], _thread_kw(sub)
+    if s.get('card') and not compact:
+        card = await story_card(bot, sub, st, reason)
+        if card:
+            caption = story_text(st, reason, sign, limit=1024, tags=tags)
+            try:
+                return await _safe_send(lambda: bot.send_photo(chat_id, card, caption=caption, parse_mode=ParseMode.HTML,
+                                                              reply_markup=markup, **tk))
+            except BadRequest as e:
+                logger.debug("Haber kartı gönderilemedi: %s", e)
     if not compact and st['image']:
-        caption = story_text(st, reason, sign, limit=1024)
+        caption = story_text(st, reason, sign, limit=1024, tags=tags)
         try:
             return await _safe_send(lambda: bot.send_photo(chat_id, st['image'], caption=caption, parse_mode=ParseMode.HTML,
                                                           reply_markup=markup, **tk))
         except BadRequest as e:   # görsel indirilemedi / biçim hatası → yazılı gönder
             logger.debug("Görsel gönderilemedi (%s): %s", st['image'], e)
-    text = story_text(st, reason, sign, compact=compact)
+    text = story_text(st, reason, sign, compact=compact, tags=tags)
     return await _safe_send(lambda: bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=markup,
                                                      link_preview_options=preview_opts(st, compact), **tk))
 
@@ -2195,14 +2433,22 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
                 f"• Biçim: <b>{'Kartlı (görsel + özet)' if s['fmt'] == 'card' else 'Kompakt (tek satır)'}</b>\n"
                 f"• Saatte en fazla: <b>{s['per_hour']}</b> anlık haber (fazlası tek mesajda listelenir)\n"
                 f"• Önem filtresi: <b>{_min_src_label(s['min_src'])}</b>\n"
-                f"• Sessiz saatler: <b>{_quiet_label(s['quiet'])}</b>"
-                + (f"\n• Haber altı butonlar: <b>{'Açık' if s['buttons'] else 'Kapalı'}</b>" if sub['kind'] != 'private' else ""))
+                f"• Sessiz saatler: <b>{_quiet_label(s['quiet'])}</b>\n"
+                f"• Haber kartı: <b>{'Açık' if s.get('card') else 'Kapalı'}</b> <i>(başlık, kategori, kaynak sayısı ve "
+                f"{'kanal logosu/adı' if sub['kind'] != 'private' else 'bot adı'} ile hazır görsel)</i>"
+                + (f"\n• Haber altı butonlar: <b>{'Açık' if s['buttons'] else 'Kapalı'}</b>"
+                   f"\n• Etiketler: <b>{'Açık' if s.get('tags') else 'Kapalı'}</b> <i>(#gündem #sondakika)</i>"
+                   if sub['kind'] != 'private' else ""))
         rows = [[ibtn("🖼 Kartlı" if s['fmt'] != 'card' else "📝 Kompakt", P('f'), BLUE)],
                 [ibtn("➖", P('ph', '-')), ibtn(f"Saatte {s['per_hour']}", P('pg', 'o')), ibtn("➕", P('ph', '+'))],
                 [ibtn(f"⭐ {_min_src_label(s['min_src'])}", P('ms'))],
                 [ibtn(f"🌙 Sessiz: {_quiet_label(s['quiet'])}", P('q'))]]
+        rows.append([toggle_btn("🖼 Haber kartı (görsel)", s.get('card'), P('cd'))])
         if sub['kind'] != 'private':
-            rows.append([toggle_btn("Haber altı butonlar", s['buttons'], P('bt'))])
+            rows.append([toggle_btn("Haber altı butonlar", s['buttons'], P('bt')), toggle_btn("#️⃣ Etiketler", s.get('tags'), P('tg'))])
+            cb = s.get('cbtn')
+            rows.append([ibtn(f"🔘 Özel buton: {shorten(cb[0], 16) if cb else 'yok'}", P('cb')),
+                         ibtn("🏷 Logo: " + ("var" if s.get('logo') else "yok"), P('lg'))])
         rows.append(back)
         return text, InlineKeyboardMarkup(rows)
     if page == 'eq':
@@ -2247,6 +2493,10 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
                 [toggle_btn("Yerel haberler", s.get('city'), P('ct')), toggle_btn("Resmi Gazete", s.get('rg'), P('rg'))],
                 back]
         return text, InlineKeyboardMarkup(rows)
+    if page == 'st':
+        days = int(arg or 7)
+        rows = [[toggle_btn(f"{d} gün", d == days, P('pg', f"st.{d}")) for d in (1, 7, 30)], back]
+        return channel_stats(cid, days), InlineKeyboardMarkup(rows)
     if page == 'rm':
         return (f"🗑 <b>{esc(_sub_title(sub))}</b> için haber gönderimi tamamen kaldırılsın mı?",
                 InlineKeyboardMarkup([[ibtn("Evet, kaldır", P('rm!'), RED), *back]]))
@@ -2279,7 +2529,7 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
     if sub['kind'] == 'private':
         rows[-1].append(ibtn("⏰ Fiyat alarmları", "al|l"))
     if sub['kind'] != 'private':
-        rows.append([ibtn("✍️ İmza", P('sg')), ibtn("🧪 Deneme gönder", P('t'))])
+        rows.append([ibtn("✍️ İmza", P('sg')), ibtn("🧪 Deneme gönder", P('t')), ibtn("📊 İstatistik", P('pg', 'st'))])
     rows.append([ibtn("▶️ Sürdür" if sub['paused'] else "⏸ Duraklat", P('ps'), GREEN if sub['paused'] else None)]
                 + ([ibtn("🗑 Kaldır", P('pg', 'rm'), RED)] if sub['kind'] != 'private' else [])
                 + [ibtn("✖️ Kapat", P('x'))])
@@ -2346,6 +2596,10 @@ def apply_panel_op(sub: dict, op: str, arg: str) -> tuple[str | None, str]:
     elif op == 'bt':
         s['buttons'] = not s['buttons']
         page = 'o'
+    elif op in ('cd', 'tg'):
+        key = {'cd': 'card', 'tg': 'tags'}[op]
+        s[key] = not s.get(key)
+        page = 'o'
     elif op == 'eq':
         cur = float(s.get('eq_min') or 0)
         nxt = [x for x in EQ_STEPS if x > cur]
@@ -2385,6 +2639,10 @@ INPUT_PROMPTS = {
     'sign': "✍️ Kanal gönderilerinin altına eklenecek imzayı yaz (en fazla 100 karakter). Örnek: <code>📢 @kanalim</code>\n"
             "Kaldırmak için <code>-</code> yaz.",
     'search': "🔎 Ne aramak istersin? Örnek: <code>asgari ücret</code>",
+    'cbtn': "🔘 Her haberin altına eklenecek butonu <b>Yazı - link</b> biçiminde yaz.\n"
+            "Örnek: <code>📢 Kanala katıl - https://t.me/kanalim</code>\nKaldırmak için <code>-</code> yaz.",
+    'logo': "🏷 Haber kartının köşesinde görünecek logoyu <b>fotoğraf olarak</b> gönder (kare olması iyi olur).\n"
+            "Kaldırmak için <code>-</code> yaz.",
 }
 
 async def ask_input(context, chat_id: int, user_id: int, kind: str, target: int | None = None, thread_kw: dict | None = None):
@@ -2423,6 +2681,26 @@ def apply_input(sub: dict, kind: str, text: str) -> str:
         s['sign'] = "" if text == "-" else text[:100]
         save_settings(sub['chat_id'], s)
         return "✅ İmza kaldırıldı." if not s['sign'] else f"✅ İmza: {esc(s['sign'])}"
+    if kind == 'cbtn':
+        if text == "-":
+            s['cbtn'] = None
+            save_settings(sub['chat_id'], s)
+            return "✅ Özel buton kaldırıldı."
+        m = re.fullmatch(r"(.{1,40}?)\s+[-–]\s+(\S+)", text)
+        url = m.group(2) if m else ""
+        if url.startswith("@"):
+            url = f"https://t.me/{url[1:]}"
+        if not m or not re.match(r"https?://\S+\.\S+|tg://", url):
+            return "⚠️ Biçim: <code>Yazı - https://link</code>"
+        s['cbtn'] = [m.group(1).strip(), url]
+        save_settings(sub['chat_id'], s)
+        return f"✅ Özel buton: {esc(m.group(1).strip())}"
+    if kind == 'logo':
+        if text == "-":
+            s['logo'] = None
+            save_settings(sub['chat_id'], s)
+            return "✅ Logo kaldırıldı."
+        return "⚠️ Logoyu fotoğraf olarak gönder."
     return ""
 
 # ───────────────────────────── Komutlar ─────────────────────────────
@@ -2619,9 +2897,28 @@ async def input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not sub or not await can_manage(context.bot, update.effective_user.id, sub):
         raise ApplicationHandlerStop
     result = apply_input(sub, pending['kind'], msg.text)
-    page = {'kw': 'k', 'time': 'd', 'sign': 'm'}[pending['kind']]
+    page = {'kw': 'k', 'time': 'd', 'sign': 'm', 'cbtn': 'o', 'logo': 'o'}[pending['kind']]
     text, markup = render_panel(get_sub(sub['chat_id']), page)
     await reply(update, f"{result}\n\n{text}", markup)
+    raise ApplicationHandlerStop
+
+async def logo_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Haber kartı logosu: istenen fotoğraf gelince kaydedilir."""
+    msg = update.effective_message
+    pending = context.user_data.get('await')
+    if not pending or pending.get('kind') != 'logo' or not msg or not msg.photo:
+        return
+    if update.effective_chat.id != pending['chat'] or now() - pending['at'] > 900:
+        return
+    context.user_data.pop('await', None)
+    sub = get_sub(pending['target']) if pending['target'] is not None else None
+    if not sub or not await can_manage(context.bot, update.effective_user.id, sub):
+        raise ApplicationHandlerStop
+    sub['settings']['logo'] = msg.photo[-1].file_id
+    save_settings(sub['chat_id'], sub['settings'])
+    _card_cache.clear()
+    text, markup = render_panel(get_sub(sub['chat_id']), 'o')
+    await reply(update, f"✅ Logo kaydedildi; haber kartının köşesinde görünecek.\n\n{text}", markup)
     raise ApplicationHandlerStop
 
 # ───────────────────────────── Buton yönlendirme ─────────────────────────────
@@ -2720,11 +3017,11 @@ async def panel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE, res
         await q.answer("Kaldırıldı")
         await safe_edit(q, f"🗑 {esc(_sub_title(sub))} kaldırıldı. Botu sohbetten de çıkarabilirsin.")
         return
-    if op in ('k+', 'd+', 'sg'):
+    if op in ('k+', 'd+', 'sg', 'cb', 'lg'):
         await q.answer()
         tk = {'message_thread_id': q.message.message_thread_id} if q.message and q.message.is_topic_message else {}
-        await ask_input(context, q.message.chat_id, q.from_user.id, {'k+': 'kw', 'd+': 'time', 'sg': 'sign'}[op],
-                        sub['chat_id'], tk)
+        await ask_input(context, q.message.chat_id, q.from_user.id,
+                        {'k+': 'kw', 'd+': 'time', 'sg': 'sign', 'cb': 'cbtn', 'lg': 'logo'}[op], sub['chat_id'], tk)
         return
     if op == 't':
         rows = latest_stories('top', limit=1)
@@ -3206,6 +3503,7 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE):
         c.execute("DELETE FROM quake_sent WHERE qid IN (SELECT id FROM quakes WHERE t < ?)", (old,))
         c.execute("DELETE FROM quake_src WHERE qid IN (SELECT id FROM quakes WHERE t < ?)", (old,))
         c.execute("DELETE FROM quakes WHERE t < ?", (old,))
+        c.execute("DELETE FROM posts WHERE at < ?", (now() - 35 * 86400,))
     logger.info("Eski haberler temizlendi")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -3265,6 +3563,9 @@ def build_app() -> Application:
     app = (ApplicationBuilder().token(BOT_TOKEN).rate_limiter(AIORateLimiter(max_retries=3))
            .post_init(post_init).post_shutdown(post_shutdown).build())
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, input_handler), group=-1)
+    app.add_handler(MessageHandler(filters.PHOTO, logo_input_handler), group=-1)
+    app.add_handler(MessageReactionHandler(reaction_count_handler,
+                                           message_reaction_types=MessageReactionHandler.MESSAGE_REACTION_COUNT_UPDATED))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler(["yardim", "help"], cmd_help))
     app.add_handler(CommandHandler(["son", "haberler"], cmd_latest))
@@ -3313,7 +3614,7 @@ def main():
     repair_db_if_needed()
     init_db()
     app = build_app()
-    app.run_polling(allowed_updates=["message", "callback_query", "inline_query", "my_chat_member"],
+    app.run_polling(allowed_updates=["message", "callback_query", "inline_query", "my_chat_member", "message_reaction_count"],
                     drop_pending_updates=True)
 
 if __name__ == '__main__':
