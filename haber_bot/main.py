@@ -448,6 +448,8 @@ def init_db():
             at REAL NOT NULL, reactions INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (chat_id, message_id)
         );
         CREATE INDEX IF NOT EXISTS idx_posts_at ON posts(chat_id, at);
+        CREATE TABLE IF NOT EXISTS match_state (id TEXT PRIMARY KEY, status TEXT, hs INTEGER, aws INTEGER, at REAL);
+        CREATE TABLE IF NOT EXISTS match_sent (chat_id INTEGER NOT NULL, k TEXT NOT NULL, PRIMARY KEY (chat_id, k));
         CREATE TABLE IF NOT EXISTS price_alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id INTEGER NOT NULL, sym TEXT NOT NULL, op TEXT NOT NULL,
             value REAL NOT NULL, created REAL
@@ -956,11 +958,13 @@ def default_settings(kind: str) -> dict:
             'digest': ['09:00', '19:00'], 'breaking': 'all', 'quiet': None, 'per_hour': 6, 'fmt': 'card',
             'min_src': 1, 'buttons': True, 'sign': '', 'onboarded': False,
             'eq_min': 5.0, 'eq_near': False, 'il': 0, 'wx': True, 'namaz': False, 'city': False, 'rg': False,
-            'card': False, 'tags': False, 'cbtn': None, 'logo': None}
+            'card': False, 'tags': False, 'cbtn': None, 'logo': None,
+            'strict': False, 'sc_leagues': [], 'sc_goals': True, 'sc_ft': True, 'sc_ko': False}
     if kind == 'channel':
-        base.update(cats=['gundem', 'dunya', 'ekonomi'], instant=True, digest=[], breaking='cats', onboarded=True, eq_min=0)
+        base.update(cats=['gundem', 'dunya', 'ekonomi'], instant=True, digest=[], breaking='cats', onboarded=True, eq_min=0,
+                    strict=True)
     elif kind == 'group':
-        base.update(instant=False, breaking='off', per_hour=4, onboarded=True, eq_min=0)
+        base.update(instant=False, breaking='off', per_hour=4, onboarded=True, eq_min=0, strict=True)
     return base
 
 def _sub_from_row(r) -> dict:
@@ -1031,8 +1035,13 @@ def source_allowed(st, s: dict) -> bool:
     off = s.get('src_off') or []
     return not off or any(x not in off for x in story_sources(st))
 
+def in_cats(st, s: dict) -> bool:
+    return bool(set(story_cats(st)) & set(s.get('cats') or []))
+
 def match_reason(st, s: dict) -> str | None:
     if not source_allowed(st, s):
+        return None
+    if s.get('strict') and not in_cats(st, s):   # "sadece seçili kategoriler": kelime/il/son dakika da dışarı çıkamaz
         return None
     text = st['ftitle'] or fold(st['title'])
     for kw in s.get('kw') or []:
@@ -1496,7 +1505,7 @@ async def _deliver_to(bot, sub: dict, fresh: list, breaking: list, t: float) -> 
                 break
             if st['id'] in already or not source_allowed(st, s):
                 continue
-            if s['breaking'] == 'cats' and not set(story_cats(st)) & set(s.get('cats') or []):
+            if (s['breaking'] == 'cats' or s.get('strict')) and not in_cats(st, s):
                 continue
             if is_dup(st):
                 continue
@@ -1561,7 +1570,8 @@ def build_digest(sub: dict, t: float | None = None) -> tuple[str, list[int]] | N
     done = sent_ids(sub['chat_id'], [r['id'] for r in rows], kind='dg')   # günün özeti: sadece önceki bültenler hariç
     rows = dedupe_rows([r for r in rows if r['id'] not in done and source_allowed(r, s)][:300])
     used, sections = set(), []
-    kw_rows = [r for r in rows if any(kw_match(fold(k), r['ftitle']) for k in s.get('kw') or [])][:5]
+    kw_rows = [r for r in rows if any(kw_match(fold(k), r['ftitle']) for k in s.get('kw') or [])
+               and (not s.get('strict') or in_cats(r, s))][:5]
     if kw_rows:
         sections.append(("🔔 Takip ettiklerin", kw_rows))
         used |= {r['id'] for r in kw_rows}
@@ -2176,12 +2186,202 @@ async def live_callback(q, kind: str, rest: str):
         text, markup = render_alerts(cid)
         await safe_edit(q, text, markup)
 
+# ───────────────────────────── Maç skorları (ESPN) ─────────────────────────────
+
+LEAGUES = {  # anahtar: (ad, ESPN kodu)
+    'sl': ("Süper Lig", "tur.1"), 'tfl': ("1. Lig", "tur.2"), 'pl': ("Premier Lig", "eng.1"),
+    'll': ("La Liga", "esp.1"), 'bl': ("Bundesliga", "ger.1"), 'sa': ("Serie A", "ita.1"), 'l1': ("Ligue 1", "fra.1"),
+    'ucl': ("Şampiyonlar Ligi", "uefa.champions"), 'uel': ("Avrupa Ligi", "uefa.europa"),
+    'uecl': ("Konferans Ligi", "uefa.europa.conf"),
+}
+LEAGUE_ALIASES = {'superlig': 'sl', 'süperlig': 'sl', 'sl': 'sl', 'tr': 'sl', '1lig': 'tfl', 'birincilig': 'tfl',
+                  'premier': 'pl', 'premierlig': 'pl', 'ingiltere': 'pl', 'pl': 'pl', 'laliga': 'll', 'ispanya': 'll',
+                  'bundesliga': 'bl', 'almanya': 'bl', 'bl': 'bl', 'seriea': 'sa', 'italya': 'sa', 'ligue1': 'l1',
+                  'fransa': 'l1', 'sampiyonlarligi': 'ucl', 'ucl': 'ucl', 'cl': 'ucl', 'avrupaligi': 'uel', 'uel': 'uel',
+                  'konferansligi': 'uecl', 'uecl': 'uecl'}
+TEAM_TR = {
+    "Fenerbahce": "Fenerbahçe", "Besiktas": "Beşiktaş", "Basaksehir": "Başakşehir", "Istanbul Basaksehir": "Başakşehir",
+    "Genclerbirligi": "Gençlerbirliği", "Eyupspor": "Eyüpspor", "Goztepe": "Göztepe", "Kasimpasa": "Kasımpaşa",
+    "Rizespor": "Çaykur Rizespor", "Caykur Rizespor": "Çaykur Rizespor", "Fatih Karagumruk": "Fatih Karagümrük",
+    "Corum FK": "Çorum FK", "Istanbulspor": "İstanbulspor", "Ankaragucu": "Ankaragücü", "MKE Ankaragucu": "Ankaragücü",
+    "Bandirmaspor": "Bandırmaspor", "Igdir FK": "Iğdır FK", "Keciorengucu": "Keçiörengücü", "Erzurum BB": "Erzurumspor",
+    "Sivasspor": "Sivasspor", "Adana Demirspor": "Adana Demirspor", "Gaziantep FK": "Gaziantep FK",
+    "Bodrum FK": "Bodrumspor", "Umraniyespor": "Ümraniyespor", "Esenler Erokspor": "Esenler Erokspor",
+}
+_score_cache: dict = {}
+
+def team(name: str) -> str:
+    return TEAM_TR.get(name, name)
+
+def league_key(text: str) -> str | None:
+    t = fold(text or "").replace(" ", "").replace(".", "")
+    return LEAGUE_ALIASES.get(t) or (t if t in LEAGUES else None)
+
+async def scoreboard(lkey: str, day: str | None = None, max_age: float = 50) -> list[dict]:
+    """[{id, t, status (pre/in/post), clock, home, away, hs, as}] — ESPN; 50 sn önbellek."""
+    ck = (lkey, day)
+    hit = _score_cache.get(ck)
+    if hit and now() - hit[0] < max_age:
+        return hit[1]
+    params = {'dates': day} if day else {}
+    try:
+        d = await get_json(f"https://site.api.espn.com/apis/site/v2/sports/soccer/{LEAGUES[lkey][1]}/scoreboard",
+                           headers=BROWSER_HEADERS, params=params)
+    except (httpx.HTTPError, ValueError) as e:
+        logger.debug("Skor alınamadı %s: %s", lkey, e)
+        return hit[1] if hit else []
+    out = []
+    for e in d.get('events') or []:
+        try:
+            comp = e['competitions'][0]
+            side = {c['homeAway']: c for c in comp['competitors']}
+            st = e['status']['type']
+            out.append({'id': e['id'], 't': datetime.fromisoformat(e['date'].replace('Z', '+00:00')).timestamp(),
+                        'status': st.get('state', 'pre'), 'detail': st.get('shortDetail') or '',
+                        'clock': e['status'].get('displayClock') or '',
+                        'home': team(side['home']['team']['displayName']), 'away': team(side['away']['team']['displayName']),
+                        'hs': int(side['home'].get('score') or 0), 'as': int(side['away'].get('score') or 0)})
+        except (KeyError, ValueError, TypeError):
+            continue
+    out.sort(key=lambda m: m['t'])
+    _score_cache[ck] = (now(), out)
+    return out
+
+def match_line(m: dict) -> str:
+    if m['status'] == 'pre':
+        return f"🕒 {tr_time(m['t'])}  {esc(m['home'])} – {esc(m['away'])}"
+    score = f"<b>{m['hs']} - {m['as']}</b>"
+    tag = "🔴 " + esc(m['clock'] or "CANLI") if m['status'] == 'in' else "MS"
+    return f"{'⚽' if m['status'] == 'in' else '✅'} {esc(m['home'])} {score} {esc(m['away'])} <i>({tag})</i>"
+
+async def scores_text(keys: list[str], day_ts: float | None = None) -> str:
+    day_ts = day_ts or now()
+    day = datetime.fromtimestamp(day_ts, TR)
+    q = day.strftime("%Y%m%d")
+    lines = [f"⚽ <b>Maç skorları</b> · {tr_date(day_ts)}"]
+    res = await asyncio.gather(*(scoreboard(k, q) for k in keys))
+    shown = 0
+    for k, games in zip(keys, res):
+        games = [g for g in games if datetime.fromtimestamp(g['t'], TR).date() == day.date()]
+        if not games:
+            continue
+        shown += 1
+        lines += ["", f"<b>{LEAGUES[k][0]}</b>"] + [match_line(g) for g in games]
+    if not shown:
+        lines.append("\n<i>Bu gün seçili liglerde maç yok.</i>")
+    return "\n".join(lines)
+
+def scores_markup(day_off: int = 0, lk: str = 'all') -> InlineKeyboardMarkup:
+    rows = [[ibtn("◀️ Dün" if day_off == 0 else "◀️", f"sc|{lk}|{day_off - 1}"), ibtn("🔄", f"sc|{lk}|{day_off}"),
+             ibtn("Yarın ▶️" if day_off == 0 else "▶️", f"sc|{lk}|{day_off + 1}")]]
+    btns = [ibtn(LEAGUES[k][0], f"sc|{k}|{day_off}") for k in ('sl', 'pl', 'll', 'bl', 'sa', 'ucl')]
+    rows += [btns[:3], btns[3:], [ibtn("🌍 Tüm ligler", f"sc|all|{day_off}"), ibtn("📊 Puan durumu", "pt|sl")]]
+    return InlineKeyboardMarkup(rows)
+
+async def cmd_scores(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/skor [lig] — bugünün maçları."""
+    k = league_key(" ".join(context.args)) if context.args else None
+    keys = [k] if k else list(LEAGUES)
+    await reply(update, await scores_text(keys), scores_markup(0, k or 'all'))
+
+async def standings_text(lkey: str) -> str:
+    hit = _score_cache.get(('st', lkey))
+    if hit and now() - hit[0] < 600:
+        return hit[1]
+    try:
+        d = await get_json(f"https://site.api.espn.com/apis/v2/sports/soccer/{LEAGUES[lkey][1]}/standings", headers=BROWSER_HEADERS)
+        entries = d['children'][0]['standings']['entries']
+    except (httpx.HTTPError, ValueError, KeyError, IndexError) as e:
+        logger.debug("Puan durumu alınamadı %s: %s", lkey, e)
+        return f"📊 {LEAGUES[lkey][0]} puan durumu şu an alınamadı."
+    rows = []
+    for e in entries:
+        st = {s['name']: s.get('displayValue') for s in e.get('stats', [])}
+        rows.append((int(st.get('rank') or 99), team(e['team']['displayName']), st.get('gamesPlayed', '-'),
+                     st.get('pointDifferential', '-'), st.get('points', '-')))
+    rows.sort()
+    body = "\n".join(f"{r:>2}. {shorten(n, 16):<16} {o:>2} {a:>4} {p:>3}" for r, n, o, a, p in rows[:24])
+    text = (f"📊 <b>{LEAGUES[lkey][0]} puan durumu</b>\n<pre>    Takım             O    AV   P\n{esc(body)}</pre>")
+    _score_cache[('st', lkey)] = (now(), text)
+    return text
+
+async def cmd_standings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    k = league_key(" ".join(context.args)) if context.args else 'sl'
+    if not k or LEAGUES[k][1].startswith('uefa'):
+        await reply(update, "📊 Hangi lig? Örnek: <code>/puan süperlig</code>, <code>/puan bundesliga</code>, "
+                            "<code>/puan premier</code>")
+        return
+    await reply(update, await standings_text(k), standings_markup(k))
+
+def standings_markup(cur: str) -> InlineKeyboardMarkup:
+    btns = [toggle_btn(LEAGUES[k][0], k == cur, f"pt|{k}") for k in ('sl', 'tfl', 'pl', 'll', 'bl', 'sa', 'l1')]
+    return InlineKeyboardMarkup([btns[i:i + 3] for i in range(0, len(btns), 3)])
+
+async def sport_callback(q, kind: str, rest: str):
+    if kind == 'pt':
+        k = rest if rest in LEAGUES else 'sl'
+        await q.answer()
+        await safe_edit(q, await standings_text(k), standings_markup(k))
+        return
+    lk, _, off = rest.partition("|")
+    off = max(-7, min(7, int(off or 0)))
+    keys = [lk] if lk in LEAGUES else list(LEAGUES)
+    await q.answer()
+    await safe_edit(q, await scores_text(keys, now() + off * 86400), scores_markup(off, lk if lk in LEAGUES else 'all'))
+
+async def score_job(context: ContextTypes.DEFAULT_TYPE):
+    """Dakikada bir: takip edilen liglerde gol ve maç sonu bildirimi (her sohbete bir kez)."""
+    subs = [s for s in all_subs() if s['settings'].get('sc_leagues') and not s['paused']]
+    keys = sorted({k for s in subs for k in s['settings']['sc_leagues'] if k in LEAGUES})
+    if not keys:
+        return
+    games = dict(zip(keys, await asyncio.gather(*(scoreboard(k, max_age=40) for k in keys))))
+    events = []   # (lig, olay anahtarı, metin)
+    with db() as c:
+        for k, gs in games.items():
+            for g in gs:
+                prev = c.execute("SELECT * FROM match_state WHERE id = ?", (g['id'],)).fetchone()
+                c.execute("INSERT OR REPLACE INTO match_state (id, status, hs, aws, at) VALUES (?, ?, ?, ?, ?)",
+                          (g['id'], g['status'], g['hs'], g['as'], now()))
+                if prev is None:
+                    continue   # ilk görüş: geçmiş goller bildirilmez
+                if g['status'] == 'in' and (g['hs'], g['as']) != (prev['hs'], prev['aws']) and g['hs'] + g['as'] > prev['hs'] + prev['aws']:
+                    scorer = g['home'] if g['hs'] > prev['hs'] else g['away']
+                    events.append((k, f"g:{g['id']}:{g['hs']}-{g['as']}", 'goal',
+                                   f"⚽ <b>GOL!</b> {esc(scorer)}\n{esc(g['home'])} <b>{g['hs']} - {g['as']}</b> {esc(g['away'])}"
+                                   f" <i>({esc(g['clock'])})</i>\n<i>{LEAGUES[k][0]}</i>"))
+                if g['status'] == 'post' and prev['status'] != 'post':
+                    events.append((k, f"ms:{g['id']}", 'ft', f"🏁 <b>Maç sonucu</b> · {LEAGUES[k][0]}\n"
+                                                         f"{esc(g['home'])} <b>{g['hs']} - {g['as']}</b> {esc(g['away'])}"))
+                if g['status'] == 'in' and prev['status'] == 'pre':
+                    events.append((k, f"ko:{g['id']}", 'ko', f"🟢 <b>Maç başladı</b> · {LEAGUES[k][0]}\n"
+                                                         f"{esc(g['home'])} – {esc(g['away'])}"))
+    if not events:
+        return
+    for sub in subs:
+        s = sub['settings']
+        want = {'goal': s.get('sc_goals', True), 'ft': s.get('sc_ft', True), 'ko': s.get('sc_ko', False)}
+        for k, key, typ, text in events:
+            if k not in s['sc_leagues'] or not want[typ] or (in_quiet(s) and typ != 'ft'):
+                continue
+            with db() as c:
+                if not c.execute("INSERT OR IGNORE INTO match_sent (chat_id, k) VALUES (?, ?)", (sub['chat_id'], key)).rowcount:
+                    continue
+            try:
+                await send_text(context.bot, sub, text)
+            except ChatGone as e:
+                await deactivate(context.bot, sub, str(e))
+                break
+            except (TimedOut, NetworkError, RetryAfter, BadRequest) as e:
+                logger.warning("Skor bildirimi gönderilemedi %s: %s", sub['chat_id'], e)
+
 # ───────────────────────────── Arayüz yardımcıları ─────────────────────────────
 
 MENU_ROWS = [["📰 Son Haberler", "🔥 Öne Çıkanlar"],
              ["🔴 Son Dakika", "📈 Gündem"],
              ["🗂 Kategoriler", "🔎 Ara"],
              ["🌍 Depremler", "💰 Piyasa", "🌤 Hava"],
+             ["⚽ Skorlar", "📊 Puan Durumu"],
              ["⚙️ Ayarlarım", "📡 Kanallarım"]]
 MENU_TEXTS = {t for row in MENU_ROWS for t in row} | {"ℹ️ Yardım"}
 
@@ -2375,6 +2575,10 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
         btns = [toggle_btn(cat_label(c), c in s['cats'], P('c', c)) for c in CAT_ORDER]
         rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
         rows.append([ibtn("✅ Hepsi", P('ca')), ibtn("⬜ Hiçbiri", P('cn'))])
+        if page == 'c':
+            text += ("\n\n🎯 <b>Sadece bu kategoriler:</b> " + ("Açık" if s.get('strict') else "Kapalı") +
+                     "\n<i>Açıkken son dakika, takip kelimesi ve şehir haberleri de sadece seçili kategorilerden gelir.</i>")
+            rows.append([toggle_btn("🎯 Sadece bu kategoriler", s.get('strict'), P('sx'))])
         rows.append([ibtn("Devam ➡️", P('pg', 'w'), GREEN)] if page == 'w0' else back)
         return text, InlineKeyboardMarkup(rows)
     if page == 'w':
@@ -2493,6 +2697,17 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
                 [toggle_btn("Yerel haberler", s.get('city'), P('ct')), toggle_btn("Resmi Gazete", s.get('rg'), P('rg'))],
                 back]
         return text, InlineKeyboardMarkup(rows)
+    if page == 'sp':
+        lg = s.get('sc_leagues') or []
+        text = ("⚽ <b>Maç skorları</b>\nTakip ettiğin liglerde gol, maç başlangıcı ve maç sonu bildirimi.\n\n"
+                f"Takip: <b>{esc(', '.join(LEAGUES[k][0] for k in lg if k in LEAGUES)) or 'yok'}</b>")
+        btns = [toggle_btn(LEAGUES[k][0], k in lg, P('sl', k)) for k in LEAGUES]
+        rows = [btns[i:i + 2] for i in range(0, len(btns), 2)]
+        rows.append([toggle_btn("Gol", s.get('sc_goals', True), P('sg2', 'goals')),
+                     toggle_btn("Maç sonu", s.get('sc_ft', True), P('sg2', 'ft')),
+                     toggle_btn("Başlangıç", s.get('sc_ko'), P('sg2', 'ko'))])
+        rows.append([ibtn("⚽ Bugünün maçları", "sc|all|0"), *back])
+        return text, InlineKeyboardMarkup(rows)
     if page == 'st':
         days = int(arg or 7)
         rows = [[toggle_btn(f"{d} gün", d == days, P('pg', f"st.{d}")) for d in (1, 7, 30)], back]
@@ -2501,7 +2716,7 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
         return (f"🗑 <b>{esc(_sub_title(sub))}</b> için haber gönderimi tamamen kaldırılsın mı?",
                 InlineKeyboardMarkup([[ibtn("Evet, kaldır", P('rm!'), RED), *back]]))
     # ana sayfa
-    cats = ", ".join(cat_label(c, False) for c in CAT_ORDER if c in s['cats']) or "—"
+    cats = (", ".join(cat_label(c, False) for c in CAT_ORDER if c in s['cats']) or "—") + (" 🎯" if s.get('strict') else "")
     src_state = "Tümü açık" if not s['src_off'] else f"{len(s['src_off'])} kapalı"
     eq_label = f"{float(s['eq_min']):.1f}+" if s.get('eq_min') else "Kapalı"
     lines = [f"⚙️ <b>{esc(_sub_title(sub))}</b>", "",
@@ -2513,7 +2728,8 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
              f"🔴 Son dakika: <b>{_breaking_label(s['breaking'])}</b>",
              f"🌙 Sessiz saatler: <b>{_quiet_label(s['quiet'])}</b>",
              f"🌍 Deprem: <b>{eq_label}</b>"
-             + (f" · 📍 {esc(il_name(s.get('il')))}" if s.get('il') else "")]
+             + (f" · 📍 {esc(il_name(s.get('il')))}" if s.get('il') else ""),
+             f"⚽ Skor takibi: <b>{esc(', '.join(LEAGUES[k][0] for k in s.get('sc_leagues') or [] if k in LEAGUES)) or 'yok'}</b>"]
     if sub['kind'] != 'private':
         lines.append(f"✍️ İmza: <b>{esc(s['sign']) if s['sign'] else 'yok'}</b>")
         if sub.get('thread_id'):
@@ -2525,6 +2741,7 @@ def render_panel(sub: dict, page: str = 'm', arg: str = '') -> tuple[str, Inline
             [toggle_btn("Anlık haber", s['instant'], P('i')),
              ibtn(f"🔴 Son dakika: {_breaking_label(s['breaking'])}", P('b'), GREEN if s['breaking'] != 'off' else RED)],
             [ibtn("🌍 Deprem", P('pg', 'eq'), BLUE), ibtn("📍 İlim · hava · RG", P('pg', 'li'), BLUE)],
+            [ibtn("⚽ Maç skorları", P('pg', 'sp'), BLUE)],
             [ibtn("🎨 Görünüm ve sınırlar", P('pg', 'o'), BLUE)]]
     if sub['kind'] == 'private':
         rows[-1].append(ibtn("⏰ Fiyat alarmları", "al|l"))
@@ -2596,6 +2813,19 @@ def apply_panel_op(sub: dict, op: str, arg: str) -> tuple[str | None, str]:
     elif op == 'bt':
         s['buttons'] = not s['buttons']
         page = 'o'
+    elif op == 'sx':
+        s['strict'] = not s.get('strict')
+        page = 'c'
+    elif op == 'sl':
+        if arg in LEAGUES:
+            lg = s.get('sc_leagues') or []
+            s['sc_leagues'] = [x for x in lg if x != arg] if arg in lg else lg + [arg]
+        page = 'sp'
+    elif op == 'sg2':
+        key = {'goals': 'sc_goals', 'ft': 'sc_ft', 'ko': 'sc_ko'}.get(arg)
+        if key:
+            s[key] = not s.get(key, key != 'sc_ko')
+        page = 'sp'
     elif op in ('cd', 'tg'):
         key = {'cd': 'card', 'tg': 'tags'}[op]
         s[key] = not s.get(key)
@@ -2720,6 +2950,8 @@ HELP_PRIVATE = """🗞 <b>ULUS Haber</b> — Türkiye'nin haber sitelerinden can
 /piyasa — Dolar, euro, altın, borsa, kripto · /alarm <i>dolar 45</i> — fiyat alarmı
 /hava <i>il</i> · /namaz <i>il</i> — Hava durumu ve namaz vakitleri
 /resmigazete — Bugünkü Resmi Gazete
+/skor <i>lig</i> — Bugünün maçları (Süper Lig, Premier Lig, La Liga, Bundesliga, Serie A, Ligue 1, Avrupa kupaları)
+/puan <i>lig</i> — Puan durumu · gol bildirimi: /ayarlar → ⚽ Maç skorları
 
 <b>Ayarlar</b>
 /ayarlar — Kategori, kaynak, takip kelimesi, bülten saati, anlık/son dakika bildirimleri
@@ -2734,7 +2966,7 @@ HELP_GROUP = """🗞 <b>ULUS Haber</b>
 /son — Son haberler · /onecikan — Öne çıkanlar
 /sondakika — Son dakika · /gundem — Gündem konuları
 /ara <i>kelime</i> — Haber ara
-/deprem · /piyasa · /hava <i>il</i> · /namaz <i>il</i> · /resmigazete
+/deprem · /piyasa · /hava <i>il</i> · /namaz <i>il</i> · /resmigazete · /skor · /puan
 /haberkur — (yönetici) Bu gruba otomatik haber ayarları"""
 
 HELP_BLOCK = """<b>Yönetici</b>
@@ -2872,7 +3104,8 @@ async def menu_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
     handlers = {"📰 Son Haberler": cmd_latest, "🔥 Öne Çıkanlar": cmd_top, "🔴 Son Dakika": cmd_breaking,
                 "📈 Gündem": cmd_trends, "🗂 Kategoriler": cmd_categories, "🔎 Ara": cmd_search,
                 "⚙️ Ayarlarım": cmd_settings, "📡 Kanallarım": cmd_channels, "ℹ️ Yardım": cmd_help,
-                "🌍 Depremler": cmd_quakes, "💰 Piyasa": cmd_market, "🌤 Hava": cmd_weather}
+                "🌍 Depremler": cmd_quakes, "💰 Piyasa": cmd_market, "🌤 Hava": cmd_weather,
+                "⚽ Skorlar": cmd_scores, "📊 Puan Durumu": cmd_standings}
     context.args = []
     await handlers[t](update, context)
 
@@ -2975,6 +3208,8 @@ async def callback_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await privacy_callback(q, rest)
         elif kind in ('eq', 'mk', 'al'):
             await live_callback(q, kind, rest)
+        elif kind in ('sc', 'pt'):
+            await sport_callback(q, kind, rest)
         else:
             await q.answer()
     except (ValueError, IndexError):
@@ -3504,6 +3739,8 @@ async def cleanup_job(context: ContextTypes.DEFAULT_TYPE):
         c.execute("DELETE FROM quake_src WHERE qid IN (SELECT id FROM quakes WHERE t < ?)", (old,))
         c.execute("DELETE FROM quakes WHERE t < ?", (old,))
         c.execute("DELETE FROM posts WHERE at < ?", (now() - 35 * 86400,))
+        c.execute("DELETE FROM match_state WHERE at < ?", (now() - 3 * 86400,))
+        c.execute("DELETE FROM match_sent WHERE rowid IN (SELECT rowid FROM match_sent ORDER BY rowid DESC LIMIT -1 OFFSET 20000)")
     logger.info("Eski haberler temizlendi")
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
@@ -3526,6 +3763,7 @@ async def post_init(app: Application):
                                        BotCommand("deprem", "Son depremler"), BotCommand("piyasa", "Döviz, altın, borsa"),
                                        BotCommand("alarm", "Fiyat alarmı"), BotCommand("hava", "Hava ve namaz vakitleri"),
                                        BotCommand("resmigazete", "Bugünkü Resmi Gazete"),
+                                       BotCommand("skor", "Maç skorları"), BotCommand("puan", "Puan durumu"),
                                        BotCommand("ayarlar", "Bildirim ayarları"), BotCommand("kanallarim", "Kanal/grup ekle"),
                                        BotCommand("gizlilik", "Gizlilik ve verilerim"),
                                        BotCommand("yardim", "Yardım")], scope=BotCommandScopeAllPrivateChats())
@@ -3533,6 +3771,7 @@ async def post_init(app: Application):
                                        BotCommand("sondakika", "Son dakika"), BotCommand("gundem", "Gündem konuları"),
                                        BotCommand("ara", "Haber ara"), BotCommand("deprem", "Son depremler"),
                                        BotCommand("piyasa", "Döviz, altın, borsa"), BotCommand("hava", "Hava durumu"),
+                                       BotCommand("skor", "Maç skorları"), BotCommand("puan", "Puan durumu"),
                                        BotCommand("haberkur", "Otomatik haber ayarları (yönetici)")],
                                       scope=BotCommandScopeAllGroupChats())
         if FOUNDER_ID:
@@ -3588,6 +3827,8 @@ def build_app() -> Application:
     app.add_handler(CommandHandler(["piyasa", "doviz", "borsa"], cmd_market))
     app.add_handler(CommandHandler(["alarm", "alarmlar"], cmd_alert))
     app.add_handler(CommandHandler("hava", cmd_weather))
+    app.add_handler(CommandHandler(["skor", "skorlar", "maclar"], cmd_scores))
+    app.add_handler(CommandHandler(["puan", "puandurumu"], cmd_standings))
     app.add_handler(CommandHandler("namaz", cmd_prayer))
     app.add_handler(CommandHandler(["resmigazete", "rg"], cmd_resmigazete))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, premium_input), group=-2)
@@ -3604,6 +3845,7 @@ def build_app() -> Application:
     jq.run_daily(backup_job, time=datetime.strptime("04:00", "%H:%M").time().replace(tzinfo=TR), name="backup")
     jq.run_repeating(quake_job, interval=60, first=20, name="quakes")
     jq.run_repeating(alert_job, interval=120, first=40, name="alerts")
+    jq.run_repeating(score_job, interval=60, first=30, name="scores")
     jq.run_daily(rg_job, time=datetime.strptime("07:30", "%H:%M").time().replace(tzinfo=TR), name="resmigazete")
     jq.run_daily(feed_watch_job, time=datetime.strptime("09:05", "%H:%M").time().replace(tzinfo=TR), name="feedwatch")
     return app
