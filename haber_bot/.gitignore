@@ -1,0 +1,4 @@
+haber_bot.zip
+*.db
+*.db-wal
+*.db-shm
